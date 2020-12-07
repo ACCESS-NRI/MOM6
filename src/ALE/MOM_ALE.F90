@@ -519,7 +519,7 @@ end subroutine pre_ALE_adjustments
 
 !> Takes care of building a new grid. The creation of the new grid can be based on z coordinates,
 !! target interface densities, sigma coordinates or any arbitrary coordinate system.
-subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_cell)
+subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_cell, dt)
   type(ocean_grid_type),                      intent(in)    :: G   !< Ocean grid informations
   type(verticalGrid_type),                    intent(in)    :: GV  !< Ocean vertical grid structure
   type(unit_scale_type),                      intent(in)    :: US  !< A dimensional unit scaling type
@@ -534,7 +534,8 @@ subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_
   type(ALE_CS),                               pointer       :: CS  !< Regridding parameters and options
   real, dimension(SZI_(G),SZJ_(G)), optional, intent(in)    :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
   logical, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                    optional, intent(out)   :: PCM_cell !< If true, use PCM remapping in a cell.
+       optional, intent(out)   :: PCM_cell !< If true, use PCM remapping in a cell.
+  real, optional, intent(in) :: dt !< Time step between calls to ALE_regrid [T ~> s]
 
   ! Local variables
   logical :: showCallTree
@@ -547,7 +548,7 @@ subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_
   ! Both are needed for the subsequent remapping of variables.
   dzRegrid(:,:,:) = 0.0
   call regridding_main( CS%remapCS, CS%regridCS, G, GV, US, h, tv, h_new, dzRegrid, &
-                        frac_shelf_h=frac_shelf_h, PCM_cell=PCM_cell)
+                        frac_shelf_h=frac_shelf_h, PCM_cell=PCM_cell, dt=dt)
 
   if (CS%id_dzRegrid>0) then ; if (query_averaging_enabled(CS%diag)) then
     call post_data(CS%id_dzRegrid, dzRegrid, CS%diag, alt_h=h_new)
