@@ -1662,9 +1662,9 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
       call diag_update_remap_grids(CS%diag)
 
       if (use_ice_shelf) then
-        call ALE_regrid(G, GV, US, h, h_new, dzRegrid, tv, CS%ALE_CSp, CS%frac_shelf_h, PCM_cell)
+        call ALE_regrid(G, GV, US, h, h_new, dzRegrid, tv, CS%ALE_CSp, CS%frac_shelf_h, PCM_cell, dt=dtdia)
       else
-        call ALE_regrid(G, GV, US, h, h_new, dzRegrid, tv, CS%ALE_CSp, PCM_cell=PCM_cell)
+        call ALE_regrid(G, GV, US, h, h_new, dzRegrid, tv, CS%ALE_CSp, PCM_cell=PCM_cell, dt=dtdia)
       endif
 
       if (showCallTree) call callTree_waypoint("new grid generated")

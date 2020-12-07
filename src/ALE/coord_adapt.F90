@@ -4,10 +4,13 @@ module coord_adapt
 ! This file is part of MOM6. See LICENSE.md for the license.
 
 use MOM_EOS,           only : calculate_density_derivs
+use MOM_coms,          only : reproducing_sum
 use MOM_error_handler, only : MOM_error, FATAL
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : ocean_grid_type, thermo_var_ptrs
 use MOM_verticalGrid,  only : verticalGrid_type
+use filter_utils,      only : filter_CS, filtered_grid_motion
+use coord_zlike,       only : init_coord_zlike, end_coord_zlike, zlike_CS, set_zlike_params, build_zstar_column
 
 implicit none ; private
 
@@ -20,60 +23,89 @@ type, public :: adapt_CS ; private
   integer :: nk
 
   !> Nominal near-surface resolution [H ~> m or kg m-2]
-  real, allocatable, dimension(:) :: coordinateResolution
+  real, allocatable, dimension(:) :: coordinate_resolution
 
-  !> Ratio of optimisation and diffusion timescales [nondim]
-  real :: adaptTimeRatio
+  !> If positive, a manual coefficient for the density adaptivity term.
+  !! If negative, either density or pressure adaptivity are chosen,
+  !! depending on the local coordinate slope, with a minimum of min_smooth
+  !! going toward the pressure term.
+  real :: alpha_rho
 
-  !> Nondimensional coefficient determining how much optimisation to apply [nondim]
-  real :: adaptAlpha
+  !> The complement of alpha_rho: a positive value is a manually-specified
+  !! coefficient; a negative value is automatically-determined, with a
+  !! value of at least min_smooth.
+  real :: alpha_p
 
-  !> Near-surface zooming depth [H ~> m or kg m-2]
-  real :: adaptZoom
+  !> Minimum weighting of the pressure adaptivity (smoothing) term, used
+  !! when alpha_rho and alpha_p are negative.
+  real :: min_smooth
 
-  !> Near-surface zooming coefficient [nondim]
-  real :: adaptZoomCoeff
+  !> The timescale over which to apply the diffusive adaptivity terms. [s]
+  real :: adaptivity_timescale
 
-  !> Stratification-dependent diffusion coefficient [nondim]
-  real :: adaptBuoyCoeff
+  !> The timescale over which to restore towards the calculated
+  !! or pre-defined target coordinate. [s]
+  real :: restoring_timescale
 
-  !> Reference density difference for stratification-dependent diffusion [R ~> kg m-3]
-  real :: adaptDrho0
+  !> Interface slope cutoff for defining stratified/unstratified regions.
+  real :: slope_cutoff
 
-  !> If true, form a HYCOM1-like mixed layet by preventing interfaces
-  !! from becoming shallower than the depths set by coordinateResolution
-  logical :: adaptDoMin  = .false.
+  !> If true, use the uniform mean of thicknesses where required.
+  !! Otherwise, use the "upstream" thickness in the direction of
+  !! interface movement due to adaptivity.
+  logical :: use_mean_h
+
+  !> If true, the on-interface density gradient is calculated in the layers
+  !! above and below. They must agree on sign to prevent a null mode, and the
+  !! minimum is chosen, to prefer smoothing.
+  !! Otherwise, the gradient is calculated directly on the interface.
+  logical :: use_twin_gradient
+
+  !> If true, calculate the slope in physical space (taking into account the
+  !! vertical distance between adjacent points). Otherwise, the slope is only
+  !! calculated along the interface.
+  logical :: use_physical_slope
+
+  !> If true, restore towards the dynamically-determined mean position of
+  !! a given interface. Otherwise, use the specified coordinate locations.
+  logical :: do_restore_mean
+
+  !> The non-dimensional scale for the adjustment performed for diagonal
+  !! convective instabilities.
+  real :: adjustment_scale
+
+  !> Used if do_restore_mean is .false.: delegate to a zlike coordinate
+  !! for the restoring term target.
+  type(zlike_CS), pointer :: zlike_CS => null()
 end type adapt_CS
 
-public init_coord_adapt, set_adapt_params, build_adapt_column, end_coord_adapt
+public init_coord_adapt, set_adapt_params, build_adapt_grid, end_coord_adapt
 
 contains
 
 !> Initialise an adapt_CS with parameters
-subroutine init_coord_adapt(CS, nk, coordinateResolution, m_to_H, kg_m3_to_R)
+subroutine init_coord_adapt(CS, nk, coordinate_resolution)
   type(adapt_CS),     pointer    :: CS !< Unassociated pointer to hold the control structure
   integer,            intent(in) :: nk !< Number of layers in the grid
-  real, dimension(:), intent(in) :: coordinateResolution !< Nominal near-surface resolution [m] or
+  real, dimension(:), intent(in) :: coordinate_resolution !< Nominal near-surface resolution [m] or
                                        !! other units specified with m_to_H
-  real,               intent(in) :: m_to_H !< A conversion factor from m to the units of thicknesses,
-                                       !! perhaps in units of [H m-1 ~> 1 or kg m-3]
-  real,               intent(in) :: kg_m3_to_R !< A conversion factor from kg m-3 to the units of density,
-                                       !! perhaps in units of [R m3 kg-1 ~> 1]
 
   if (associated(CS)) call MOM_error(FATAL, "init_coord_adapt: CS already associated")
   allocate(CS)
-  allocate(CS%coordinateResolution(nk))
+  allocate(CS%coordinate_resolution(nk))
 
   CS%nk = nk
-  CS%coordinateResolution(:) = coordinateResolution(:)
+  CS%coordinate_resolution(:) = coordinate_resolution(:)
 
-  ! Set real parameter default values
-  CS%adaptTimeRatio = 1e-1 ! Nondim.
-  CS%adaptAlpha     = 1.0  ! Nondim.
-  CS%adaptZoom      = 200.0 * m_to_H    ! [H ~> m or kg m-2]
-  CS%adaptZoomCoeff = 0.0  ! Nondim.
-  CS%adaptBuoyCoeff = 0.0  ! Nondim.
-  CS%adaptDrho0     = 0.5 * kg_m3_to_R  ! [R ~> kg m-3]
+  CS%alpha_rho = -1.0
+  CS%alpha_p   = -1.0
+
+  CS%use_mean_h = .false.
+  CS%use_twin_gradient = .true.
+  CS%use_physical_slope = .true.
+  CS%do_restore_mean = .false.
+
+  call init_coord_zlike(CS%zlike_CS, nk, coordinate_resolution)
 
 end subroutine init_coord_adapt
 
@@ -83,222 +115,637 @@ subroutine end_coord_adapt(CS)
 
   ! nothing to do
   if (.not. associated(CS)) return
-  deallocate(CS%coordinateResolution)
+
+  call end_coord_zlike(CS%zlike_CS)
+
+  deallocate(CS%coordinate_resolution)
   deallocate(CS)
 end subroutine end_coord_adapt
 
 !> This subtroutine can be used to set the parameters for coord_adapt module
-subroutine set_adapt_params(CS, adaptTimeRatio, adaptAlpha, adaptZoom, adaptZoomCoeff, &
-                            adaptBuoyCoeff, adaptDrho0, adaptDoMin)
+subroutine set_adapt_params(CS, alpha_rho, alpha_p, adaptivity_timescale, use_mean_h, &
+     use_twin_gradient, slope_cutoff, min_smooth, use_physical_slope, restoring_timescale, do_restore_mean, &
+     adjustment_scale)
+
   type(adapt_CS),    pointer    :: CS  !< The control structure for this module
-  real,    optional, intent(in) :: adaptTimeRatio !< Ratio of optimisation and diffusion timescales [nondim]
-  real,    optional, intent(in) :: adaptAlpha     !< Nondimensional coefficient determining
-                                                  !! how much optimisation to apply [nondim]
-  real,    optional, intent(in) :: adaptZoom      !< Near-surface zooming depth [H ~> m or kg m-2]
-  real,    optional, intent(in) :: adaptZoomCoeff !< Near-surface zooming coefficient [nondim]
-  real,    optional, intent(in) :: adaptBuoyCoeff !< Stratification-dependent diffusion coefficient [nondim]
-  real,    optional, intent(in) :: adaptDrho0  !< Reference density difference for
-                                               !! stratification-dependent diffusion [R ~> kg m-3]
-  logical, optional, intent(in) :: adaptDoMin  !< If true, form a HYCOM1-like mixed layer by
-                                               !! preventing interfaces from becoming shallower than
-                                               !! the depths set by coordinateResolution
+  real,    optional, intent(in) :: alpha_rho
+  real,    optional, intent(in) :: alpha_p
+  real,    optional, intent(in) :: adaptivity_timescale
+  logical, optional, intent(in) :: use_mean_h
+  logical, optional, intent(in) :: use_twin_gradient
+  real,    optional, intent(in) :: slope_cutoff
+  real,    optional, intent(in) :: min_smooth
+  logical, optional, intent(in) :: use_physical_slope
+  real,    optional, intent(in) :: restoring_timescale
+  logical, optional, intent(in) :: do_restore_mean
+  real,    optional, intent(in) :: adjustment_scale
 
   if (.not. associated(CS)) call MOM_error(FATAL, "set_adapt_params: CS not associated")
 
-  if (present(adaptTimeRatio)) CS%adaptTimeRatio = adaptTimeRatio
-  if (present(adaptAlpha)) CS%adaptAlpha = adaptAlpha
-  if (present(adaptZoom)) CS%adaptZoom = adaptZoom
-  if (present(adaptZoomCoeff)) CS%adaptZoomCoeff = adaptZoomCoeff
-  if (present(adaptBuoyCoeff)) CS%adaptBuoyCoeff = adaptBuoyCoeff
-  if (present(adaptDrho0)) CS%adaptDrho0 = adaptDrho0
-  if (present(adaptDoMin)) CS%adaptDoMin = adaptDoMin
+  if (present(alpha_rho))            CS%alpha_rho = alpha_rho
+  if (present(alpha_p))              CS%alpha_p = alpha_p
+  if (present(adaptivity_timescale)) CS%adaptivity_timescale = adaptivity_timescale
+  if (present(use_mean_h))           CS%use_mean_h = use_mean_h
+  if (present(use_twin_gradient))    CS%use_twin_gradient = use_twin_gradient
+  if (present(slope_cutoff))         CS%slope_cutoff = slope_cutoff
+  if (present(min_smooth))           CS%min_smooth = min_smooth
+  if (present(use_physical_slope))   CS%use_physical_slope = use_physical_slope
+  if (present(restoring_timescale))  CS%restoring_timescale = restoring_timescale
+  if (present(do_restore_mean))      CS%do_restore_mean = do_restore_mean
+  if (present(adjustment_scale))     CS%adjustment_scale = adjustment_scale
 end subroutine set_adapt_params
 
-subroutine build_adapt_column(CS, G, GV, US, tv, i, j, zInt, tInt, sInt, h, nom_depth_H, zNext)
-  type(adapt_CS),                              intent(in)    :: CS   !< The control structure for this module
+subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, dt)
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
-  type(unit_scale_type),                       intent(in)    :: US   !< A dimensional unit scaling type
-  type(thermo_var_ptrs),                       intent(in)    :: tv   !< A structure pointing to various
-                                                                     !! thermodynamic variables
-  integer,                                     intent(in)    :: i    !< The i-index of the column to work on
-  integer,                                     intent(in)    :: j    !< The j-index of the column to work on
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: zInt !< Interface heights [H ~> m or kg m-2].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: tInt !< Interface temperatures [C ~> degC]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: sInt !< Interface salinities [S ~> ppt]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: h    !< Layer thicknesses [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G)),            intent(in)    :: nom_depth_H !< The bathymetric depth of this column
-                                                                     !! relative to mean sea level or another locally
-                                                                     !! valid reference height, converted to thickness
-                                                                     !! units [H ~> m or kg m-2]
-  real, dimension(SZK_(GV)+1),                 intent(inout) :: zNext !< updated interface positions [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: h    !< Layer thicknesses, in H (usually m or kg m-2)
+  type(thermo_var_ptrs),                       intent(in)    :: tv   !< A structure pointing to various thermodynamic variables
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(inout) :: dzInterface !< The changes in interface height due to regridding
+  type(adapt_CS),                              intent(in)    :: CS !< Regridding control structure
+  type(filter_CS),                             intent(in)    :: fCS !< Filtering control structure
+  real, intent(in) :: min_thickness !< ALE layer minimum thickness
+  real, optional, intent(in) :: dt !< The intended timestep over which this regridding operation applies
 
-  ! Local variables
-  integer :: k, nz
-  real :: h_up        ! The upwind source grid thickness based on the direction of the
-                      ! adjustive fluxes [H ~> m or kg m-2]
-  real :: b1          ! The inverse of the tridiagonal denominator [nondim]
-  real :: b_denom_1   ! The leading term in the tridiagonal denominator [nondim]
-  real :: d1          ! A term in the tridiagonal expressions [nondim]
-  real :: depth       ! Depth in thickness units [H ~> m or kg m-2]
-  real :: nominal_z   ! A nominal interface position in thickness units [H ~> m or kg m-2]
-  real :: stretching  ! A stretching factor for the water column [nondim]
-  real :: drdz  ! The vertical density gradient [R H-1 ~> kg m-4 or m-1]
-  real, dimension(SZK_(GV)+1) :: alpha ! drho/dT [R C-1 ~> kg m-3 degC-1]
-  real, dimension(SZK_(GV)+1) :: beta  ! drho/dS [R S-1 ~> kg m-3 ppt-1]
-  real, dimension(SZK_(GV)+1) :: del2sigma ! Laplacian of in situ density times grid spacing [R ~> kg m-3]
-  real, dimension(SZK_(GV)+1) :: dh_d2s ! Thickness change in response to del2sigma [H ~> m or kg m-2]
-  real, dimension(SZK_(GV)) :: kGrid ! grid diffusivity on layers [nondim]
-  real, dimension(SZK_(GV)) :: c1 ! A tridiagonal work array [nondim]
+  ! local variables
+  integer :: i, j, k, k2, kt, nz ! indices and dimension lengths
 
-  nz = CS%nk
+  ! temperature and salinity on interfaces
+  real, dimension(SZI_(G),SZJ_(G)) :: t_int, s_int
+  ! interface heights
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: z_int, z_new, h_int
+  ! drho/dt and drho/ds on interfaces
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: alpha_int
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: beta_int
+  ! density and pressure flux components
+  real, dimension(SZIB_(G),SZJ_(G)) :: dz_i, dz_s_i, dz_p_i
+  real, dimension(SZI_(G),SZJB_(G)) :: dz_j, dz_s_j, dz_p_j
+  ! vertical gradient in sigma
+  real, dimension(SZI_(G),SZJ_(G)) :: dk_sig_int
+  ! final change in interface height
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: dz_a, dz_p, dz_r
 
-  ! set bottom and surface of zNext
-  zNext(1) = 0.
-  zNext(nz+1) = zInt(i,j,nz+1)
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_upd
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: w
 
-  ! local depth for scaling diffusivity
-  depth = nom_depth_H(i,j)
+  ! interface position after adaptivity, mean interface position across basin
+  real, dimension(SZK_(GV)+1) :: z_mean, h_col, z_col, z_upd, dz_col
 
-  ! initialize del2sigma and the thickness change response to it zero
-  del2sigma(:) = 0.0 ; dh_d2s(:) = 0.0
+  ! numerator of density term and upstreamed h
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: hdi_sig, h_on_i, hdi_sig_phys
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: hdj_sig, h_on_j, hdj_sig_phys
+  ! temporary alpha/beta interpolated to velocity points
+  real :: alpha, beta
+  ! some temporary quantities
+  real :: eps, weight, weight2, h_interp, i_denom, j_denom
+  ! numerator (and intermediates) of density term before multiplication by h
+  real :: di_sig, di_sig_up, di_sig_dn
+  real :: dj_sig, dj_sig_up, dj_sig_dn
+  ! difference quantities interpolated to other locations
+  real :: hdi_sig_u, hdj_sig_u, hdi_sig_v, hdj_sig_v, dk_sig_u, dk_sig_v
+  real :: ts_ratio, slope, phys_slope
+  real :: global_z_sum, global_h_sum
+  real :: dz_p_unlim
+  real :: tmp, dir, CFL
+  real :: dsig_horiz, dsig_vert_up, dsig_vert_down
 
-  ! calculate del-squared of neutral density by a
-  ! stencilled finite difference
-  ! TODO: this needs to be adjusted to account for vanished layers near topography
+  character(len=11) :: fname
 
-  ! up (j-1)
-  if (G%mask2dT(i,j-1) > 0.0) then
-    call calculate_density_derivs( &
-         0.5 * (tInt(i,j,2:nz) + tInt(i,j-1,2:nz)), &
-         0.5 * (sInt(i,j,2:nz) + sInt(i,j-1,2:nz)), &
-         0.5 * (zInt(i,j,2:nz) + zInt(i,j-1,2:nz)) * (GV%H_to_RZ * GV%g_Earth), &
-         alpha, beta, tv%eqn_of_state, (/2,nz/) )
+  ! we could probably assume some limit without a specified timestep
+  if (.not. present(dt)) &
+       call MOM_error(FATAL, 'build_grid_adaptive called without a timestep!')
 
-    del2sigma(2:nz) = del2sigma(2:nz) + &
-         (alpha(2:nz) * (tInt(i,j-1,2:nz) - tInt(i,j,2:nz)) + &
-          beta(2:nz)  * (sInt(i,j-1,2:nz) - sInt(i,j,2:nz)))
-  endif
-  ! down (j+1)
-  if (G%mask2dT(i,j+1) > 0.0) then
-    call calculate_density_derivs( &
-         0.5 * (tInt(i,j,2:nz) + tInt(i,j+1,2:nz)), &
-         0.5 * (sInt(i,j,2:nz) + sInt(i,j+1,2:nz)), &
-         0.5 * (zInt(i,j,2:nz) + zInt(i,j+1,2:nz)) * (GV%H_to_RZ * GV%g_Earth), &
-         alpha, beta, tv%eqn_of_state, (/2,nz/) )
+  eps = 1. ; eps = epsilon(eps)
+  nz = GV%ke
 
-    del2sigma(2:nz) = del2sigma(2:nz) + &
-         (alpha(2:nz) * (tInt(i,j+1,2:nz) - tInt(i,j,2:nz)) + &
-          beta(2:nz)  * (sInt(i,j+1,2:nz) - sInt(i,j,2:nz)))
-  endif
-  ! left (i-1)
-  if (G%mask2dT(i-1,j) > 0.0) then
-    call calculate_density_derivs( &
-         0.5 * (tInt(i,j,2:nz) + tInt(i-1,j,2:nz)), &
-         0.5 * (sInt(i,j,2:nz) + sInt(i-1,j,2:nz)), &
-         0.5 * (zInt(i,j,2:nz) + zInt(i-1,j,2:nz)) * (GV%H_to_RZ * GV%g_Earth), &
-         alpha, beta, tv%eqn_of_state, (/2,nz/) )
+  call set_zlike_params(CS%zlike_CS, min_thickness=min_thickness)
 
-    del2sigma(2:nz) = del2sigma(2:nz) + &
-         (alpha(2:nz) * (tInt(i-1,j,2:nz) - tInt(i,j,2:nz)) + &
-          beta(2:nz)  * (sInt(i-1,j,2:nz) - sInt(i,j,2:nz)))
-  endif
-  ! right (i+1)
-  if (G%mask2dT(i+1,j) > 0.0) then
-    call calculate_density_derivs( &
-         0.5 * (tInt(i,j,2:nz) + tInt(i+1,j,2:nz)), &
-         0.5 * (sInt(i,j,2:nz) + sInt(i+1,j,2:nz)), &
-         0.5 * (zInt(i,j,2:nz) + zInt(i+1,j,2:nz)) * (GV%H_to_RZ * GV%g_Earth), &
-         alpha, beta, tv%eqn_of_state, (/2,nz/) )
-
-    del2sigma(2:nz) = del2sigma(2:nz) + &
-         (alpha(2:nz) * (tInt(i+1,j,2:nz) - tInt(i,j,2:nz)) + &
-          beta(2:nz)  * (sInt(i+1,j,2:nz) - sInt(i,j,2:nz)))
-  endif
-
-  ! at this point, del2sigma contains the local neutral density curvature at
-  ! h-points, on interfaces
-  ! we need to divide by drho/dz to give an interfacial displacement
-  !
-  ! a positive curvature means we're too light relative to adjacent columns,
-  ! so del2sigma needs to be positive too (push the interface deeper)
-  call calculate_density_derivs(tInt(i,j,:), sInt(i,j,:), zInt(i,j,:) * (GV%H_to_RZ * GV%g_Earth), &
-       alpha, beta, tv%eqn_of_state, (/1,nz+1/) )
-  do K = 2, nz
-    ! TODO make lower bound here configurable
-    dh_d2s(K) = del2sigma(K) * (0.5 * (h(i,j,k-1) + h(i,j,k))) / &
-         max(alpha(K) * (tv%T(i,j,k) - tv%T(i,j,k-1)) + &
-             beta(K)  * (tv%S(i,j,k) - tv%S(i,j,k-1)), 1e-20*US%kg_m3_to_R)
-
-    ! don't move the interface so far that it would tangle with another
-    ! interface in the direction we're moving (or exceed a Nyquist limit
-    ! that could cause oscillations of the interface)
-    h_up = merge(h(i,j,k), h(i,j,k-1), dh_d2s(K) > 0.)
-    dh_d2s(K) = 0.5 * CS%adaptAlpha * &
-         sign(min(abs(del2sigma(K)), 0.5 * h_up), dh_d2s(K))
-
-    ! update interface positions so we can diffuse them
-    zNext(K) = zInt(i,j,K) + dh_d2s(K)
+  ! sum from free surface downward
+  z_int(:,:,1) = sum(h, 3) - G%bathyT ! free-surface
+  do K = 1,nz
+    z_int(:,:,K+1) = z_int(:,:,K) - h(:,:,k)
   enddo
 
-  ! solve diffusivity equation to smooth grid
-  ! upper diagonal coefficients: -kGrid(2:nz)
-  ! lower diagonal coefficients: -kGrid(1:nz-1)
-  ! diagonal coefficients:       1 + (kGrid(1:nz-1) + kGrid(2:nz))
-  !
-  ! first, calculate the diffusivities within layers
-  do k = 1, nz
-    ! calculate the dr bit of drdz
-    drdz = 0.5 * (alpha(K) + alpha(K+1)) * (tInt(i,j,K+1) - tInt(i,j,K)) + &
-           0.5 * (beta(K)  + beta(K+1))  * (sInt(i,j,K+1) - sInt(i,j,K))
-    ! divide by dz from the new interface positions
-    drdz = drdz / (zNext(K) - zNext(K+1) + GV%H_subroundoff)
-    ! don't do weird stuff in unstably-stratified regions
-    drdz = max(drdz, 0.)
-
-    ! set vertical grid diffusivity
-    kGrid(k) = (CS%adaptTimeRatio * nz**2 * depth) * &
-         ( CS%adaptZoomCoeff / (CS%adaptZoom + 0.5*(zNext(K) + zNext(K+1))) + &
-           (CS%adaptBuoyCoeff * drdz / CS%adaptDrho0) + &
-           max(1.0 - CS%adaptZoomCoeff - CS%adaptBuoyCoeff, 0.0) / depth)
-  enddo
-
-  ! initial denominator (first diagonal element)
-  b1 = 1.0
-  ! initial Q_1 = 1 - q_1 = 1 - 0/1
-  d1 = 1.0
-  ! work on all interior interfaces
-  do K = 2, nz
-    ! calculate numerator of Q_k
-    b_denom_1 = 1. + d1 * kGrid(k-1)
-    ! update denominator for k
-    b1 = 1.0 / (b_denom_1 + kGrid(k))
-
-    ! calculate q_k
-    c1(K) = kGrid(k) * b1
-    ! update Q_k = 1 - q_k
-    d1 = b_denom_1 * b1
-
-    ! update RHS
-    zNext(K) = b1 * (zNext(K) + kGrid(k-1)*zNext(K-1))
-  enddo
-  ! final substitution
-  do K = nz, 2, -1
-    zNext(K) = zNext(K) + c1(K)*zNext(K+1)
-  enddo
-
-  if (CS%adaptDoMin) then
-    nominal_z = 0.
-    stretching = zInt(i,j,nz+1) / depth
-
-    do k = 2, nz+1
-      nominal_z = nominal_z + CS%coordinateResolution(k-1) * stretching
-      ! take the deeper of the calculated and nominal positions
-      zNext(K) = max(zNext(K), nominal_z)
-      ! interface can't go below topography
-      zNext(K) = min(zNext(K), zInt(i,j,nz+1))
+  if (CS%do_restore_mean) then
+    ! calculate geometric mean of thicknesses on interfaces
+    ! we only need to do this in our own domain because this
+    ! is a global sum
+    z_new(:,:,:) = 0. ;  h_int(:,:,:) = 0.
+    do j = G%jsc,G%jec
+      do i = G%isc,G%iec
+        h_int(i,j,2:nz) = (h(i,j,2:nz) * h(i,j,1:nz-1)) / &
+             (h(i,j,2:nz) + h(i,j,1:nz-1) + GV%H_subroundoff)
+        ! we don't really want to volume-weight this, we just want to discount vanished layers
+        ! this way, we won't bias towards thick layers
+        h_int(i,j,2:nz) = max(GV%H_to_m * h_int(i,j,2:nz), 1.0)
+        h_int(i,j,2:nz) = h_int(i,j,2:nz) * (G%areaT(i,j) * G%mask2dT(i,j))
+        ! weight height by thickness
+        z_new(i,j,2:nz) = z_int(i,j,2:nz) * h_int(i,j,2:nz)
+      enddo
     enddo
-  endif
-end subroutine build_adapt_column
+    global_z_sum = reproducing_sum(z_new, G%isc, G%iec, G%jsc, G%jec, sums=z_mean)
+    global_h_sum = reproducing_sum(h_int, G%isc, G%iec, G%jsc, G%jec, sums=h_col)
+    z_mean(2:nz) = z_mean(2:nz) / h_col(2:nz)
+
+    do K = 2,nz-1
+      if (z_mean(K) < z_mean(K+1)) then
+        print *, z_mean
+        call MOM_error(FATAL, 'tangled z_mean')
+      endif
+    enddo
+  else
+    ! we'll restore to the predefined coordinate resolution
+    z_mean(1) = 0.
+    do K = 2,nz
+      z_mean(K) = z_mean(K-1) - CS%coordinate_resolution(k-1)
+    end do
+  end if
+
+  ! the top and bottom interfaces don't move
+  dz_a(:,:,1) = 0. ; dz_a(:,:,nz+1) = 0.
+  dz_p(:,:,1) = 0. ; dz_p(:,:,nz+1) = 0.
+  dz_r(:,:,1) = 0. ; dz_r(:,:,nz+1) = 0.
+  w(:,:,1) = 0. ; w(:,:,nz+1) = 0.
+
+  h_upd(:,:,:) = 0.
+
+  ! nondimensionalise the adaptivity timescale wrt. the ALE timescale
+  ! to get a scaling for diffusive adaptivity
+  ts_ratio = dt / CS%adaptivity_timescale
+  ts_ratio = min(ts_ratio, 1.0)
+
+  do K = 2,nz
+    do j = G%jsc-2,G%jec+2
+      do i = G%isc-2,G%iec+2
+        t_int(i,j) = ( &
+             tv%t(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
+             tv%t(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
+             (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
+        s_int(i,j) = ( &
+             tv%s(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
+             tv%s(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
+             (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
+      enddo
+
+      call calculate_density_derivs(t_int(:,j), s_int(:,j), -z_int(:,j,K) * GV%H_to_Pa, &
+           alpha_int(:,j,K), beta_int(:,j,K), G%isc-2, G%iec+2 - (G%isc-2) + 1, tv%eqn_of_state)
+
+      do i = G%isc-2,G%iec+2
+        dk_sig_int(i,j) = alpha_int(i,j,K) * (tv%t(i,j,k) - tv%t(i,j,k-1)) + &
+             beta_int(i,j,K) * (tv%s(i,j,k) - tv%s(i,j,k-1))
+     enddo
+    enddo
+
+    ! calculate horizontal derivatives on i-points
+    do j = G%jsc-2,G%jec+2
+      do I = G%isc-2,G%iec+1
+        alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
+        beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
+
+        if (CS%use_twin_gradient) then
+          ! with the twin gradient method, we only use the gradient
+          ! if the sign is agreed upon above and below the interface
+          di_sig_up = alpha * (tv%t(i+1,j,k-1) - tv%t(i,j,k-1)) &
+               + beta * (tv%s(i+1,j,k-1) - tv%s(i,j,k-1))
+          di_sig_dn = alpha * (tv%t(i+1,j,k) - tv%t(i,j,k)) &
+               + beta * (tv%s(i+1,j,k) - tv%s(i,j,k))
+
+          if (di_sig_up * di_sig_dn <= 0.) then
+            di_sig = 0.
+          else
+            ! same sign, choose minimum
+            di_sig = sign(min(abs(di_sig_up), abs(di_sig_dn)), di_sig_up)
+          end if
+        else
+          ! otherwise, just calculate the gradient directly on the interface
+          di_sig = alpha * (t_int(i+1,j) - t_int(i,j)) &
+               + beta * (s_int(i+1,j) - s_int(i,j))
+        end if
+
+        dk_sig_u = 0.5 * (dk_sig_int(i,j) + dk_sig_int(i+1,j))
+
+        ! calculate hdi_sig by upstreamed h
+        if (di_sig * dk_sig_u < 0.) then
+          ! left is denser than right, left moves up, right moves down (toward denser)
+          h_interp = 0.5 * (h(i,j,k-1) + h(i+1,j,k))
+        else
+          h_interp = 0.5 * (h(i,j,k) + h(i+1,j,k-1))
+        end if
+
+        ! alternatively, we can just take a simple mean of thicknesses onto the
+        ! interface and velocity point
+        if (CS%use_mean_h) &
+             h_interp = 0.25 * ((h(i,j,k-1) + h(i+1,j,k)) + (h(i,j,k) + h(i+1,j,k-1)))
+
+        h_on_i(I,j,K) = h_interp
+        ! this is the full numerator of the density term
+        hdi_sig(I,j,K) = h_interp * di_sig * G%IdxCu(I,j)
+        ! calculate physical slope
+        ! XXX take the square root of the average of the squares here???
+        hdi_sig_phys(I,j,K) = hdi_sig(I,j,K) - &
+             G%IdxCu(I,j) * dk_sig_u * (z_int(i+1,j,K) - z_int(i,j,K))
+      enddo
+    enddo
+
+    ! calculate horizontal derivatives on j-points
+    do J = G%jsc-2,G%jec+1
+      do i = G%isc-2,G%iec+2
+        alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
+        beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
+
+        if (CS%use_twin_gradient) then
+          dj_sig_up = alpha * (tv%t(i,j+1,k-1) - tv%t(i,j,k-1)) &
+               + beta * (tv%s(i,j+1,k-1) - tv%s(i,j,k-1))
+          dj_sig_dn = alpha * (tv%t(i,j+1,k) - tv%t(i,j,k)) &
+               + beta * (tv%s(i,j+1,k) - tv%s(i,j,k))
+
+          if (dj_sig_up * dj_sig_dn <= 0.) then
+            dj_sig = 0.
+          else
+            dj_sig = sign(min(abs(dj_sig_up), abs(dj_sig_dn)), dj_sig_up)
+          end if
+        else
+          dj_sig = alpha * (t_int(i,j+1) - t_int(i,j)) &
+               + beta * (s_int(i,j+1) - s_int(i,j))
+        end if
+
+        dk_sig_v = 0.5 * (dk_sig_int(i,j) + dk_sig_int(i,j+1))
+
+        if (dj_sig * dk_sig_v < 0.) then
+          h_interp = 0.5 * (h(i,j,k-1) + h(i,j+1,k))
+        else
+          h_interp = 0.5 * (h(i,j,k) + h(i,j+1,k-1))
+        end if
+
+        if (CS%use_mean_h) &
+             h_interp = 0.25 * ((h(i,j,k-1) + h(i+1,j,k)) + (h(i,j,k) + h(i+1,j,k-1)))
+
+        h_on_j(i,J,K) = h_interp
+        hdj_sig(i,J,K) = h_interp * dj_sig * G%IdyCv(i,J)
+        hdj_sig_phys(i,J,K) = hdj_sig(i,J,K) - &
+             G%IdyCv(i,J) * dk_sig_v * (z_int(i,j+1,K) - z_int(i,j,K))
+      enddo
+    enddo
+
+    ! u-points
+    do j = G%jsc-1,G%jec+1
+      do I = G%isc-2,G%iec+1
+        if (G%mask2dCu(I,j) < 0.5) then
+          dz_i(I,j) = 0.
+          cycle
+        endif
+
+        ! interpolate terms in the denominator onto the u-point
+        hdi_sig_u = hdi_sig(I,j,K)**2
+        hdj_sig_u = 0.25 * ((hdj_sig(i,J,K)**2 + hdj_sig(i+1,J-1,K)**2) + &
+             (hdj_sig(i+1,J,K)**2 + hdj_sig(i,J-1,K)**2))
+        dk_sig_u = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i+1,j)**2)
+
+        i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
+        if (i_denom == 0.) then
+          ! if gradients in all directions are exactly zero, we don't want any flux
+          dz_s_i(I,j) = 0.
+        else
+          dz_s_i(I,j) = hdi_sig(I,j,K) / sign(sqrt(i_denom), dk_sig_u)
+        end if
+
+        ! to convert from the density gradient to the flux, flip the sign and multiply by
+        ! kappa*dt
+        dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio
+
+        dz_p_unlim = dz_s_i(I,j)
+
+        ! limit slope based on adjacent layers
+        ! dz_s_i has opposite sign to hdi_sig
+        if (dz_s_i(I,j) < 0.) then
+          ! hdi_sig positive -- left down, right up
+          dz_s_i(I,j) = max(dz_s_i(I,j), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        else
+          ! hdi_sig negative -- left up, right down
+          dz_s_i(I,j) = min(dz_s_i(I,j), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        end if
+
+        ! we also calculate the difference in pressure (interface position)
+        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio
+        dz_p_unlim = dz_p_i(I,j)
+        ! dz_p_i positive => left is further down than right
+        ! => move left up, right down
+
+        if (dz_p_i(I,j) < 0.) then
+          ! dz_p_i negative -- right up, left down
+          dz_p_i(I,j) = max(dz_p_i(I,j), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        else
+          ! dz_p_i positive -- left up, right down
+          dz_p_i(I,j) = min(dz_p_i(I,j), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        end if
+
+        ! calculate and diagnose along-coordinate slope
+        if (i_denom == 0.) then
+          slope = 1.0
+        else
+          slope = (hdi_sig_u + hdj_sig_u) / i_denom
+        endif
+
+        ! calculate physical slope
+        hdi_sig_u = hdi_sig_phys(I,j,K)**2
+        hdj_sig_u = 0.25 * ((hdj_sig_phys(i,J,K)**2 + hdj_sig_phys(i+1,J-1,K)**2) + &
+             (hdj_sig_phys(i+1,J,K)**2 + hdj_sig_phys(i,J-1,K)**2))
+        i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
+
+        if (i_denom == 0.) then
+          ! unstratified limit
+          phys_slope = 1.0
+        else
+          phys_slope = (hdi_sig_u + hdj_sig_u) / i_denom
+        endif
+
+        ! use physical slope or not?
+        if (CS%use_physical_slope) slope = phys_slope
+
+        ! calculate weighting between density and pressure terms
+        ! by a cutoff value on the local normalised stratification
+        if (slope <= CS%slope_cutoff**2 .and. k > 2) then
+          weight = 1.0 - CS%min_smooth; weight2 = 0.
+        else
+          weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
+        endif
+
+        ! override weights if required
+        if (CS%alpha_rho >= 0.) then
+          weight = CS%alpha_rho
+
+          if (CS%alpha_p < 0.) then
+            weight2 = 1.0 - CS%alpha_rho
+          else
+            weight2 = CS%alpha_p
+          endif
+        else if (CS%alpha_p >= 0.) then
+          weight2 = CS%alpha_p
+          weight = 1.0 - CS%alpha_p
+        endif
+
+        dz_s_i(I,j) = dz_s_i(I,j) * weight
+        dz_p_i(I,j) = dz_p_i(I,j) * weight2
+
+        ! combining density and pressure fluxes
+        ! and re-apply limiter -- with a full cut-off this isn't necessary
+        dz_i(I,j) = dz_s_i(I,j) + dz_p_i(I,j)
+        if (dz_i(I,j) < 0.) then
+          ! hdi_sig positive -- left down, right up
+          dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        else
+          ! hdi_sig negative -- left up, right down
+          dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        end if
+      end do
+    end do
+
+    ! v-points
+    do J = G%jsc-2,G%jec+1
+      do i = G%isc-1,G%iec+1
+        if (G%mask2dCv(i,J)< 0.5) then
+          dz_j(i,J) = 0.
+          cycle
+        endif
+
+        hdj_sig_v = hdj_sig(i,J,K)**2
+        hdi_sig_v = 0.25 * ((hdi_sig(I,j,K)**2 + hdi_sig(I-1,j+1,K)**2) + &
+             (hdi_sig(I,j+1,K)**2 + hdi_sig(I-1,j,K)**2))
+        dk_sig_v = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i,j+1)**2)
+
+        j_denom = hdj_sig_v + hdi_sig_v + dk_sig_v
+        if (j_denom == 0.) then
+          dz_s_j(i,J) = 0.
+        else
+          dz_s_j(i,J) = hdj_sig(i,J,K) / sign(sqrt(j_denom), dk_sig_v)
+        end if
+
+        ! dz_s_j beforehand is unitless (ratio of densities)
+        dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio
+        ! dz_s_j is now [m2]
+
+        dz_p_unlim = dz_s_j(i,J)
+
+        ! density limiter
+        ! dz_s_j [m2]
+        if (dz_s_j(i,J) < 0.) then
+          ! hdj_sig positive -- left down, right up
+          dz_s_j(i,J) = max(dz_s_j(i,J), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        else
+          ! hdj_sig negative -- left up, right down
+          dz_s_j(i,J) = min(dz_s_j(i,J), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        end if
+
+        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio
+        dz_p_unlim = dz_p_j(i,J)
+
+        if (dz_p_j(i,J) < 0.) then
+          dz_p_j(i,J) = max(dz_p_j(i,J), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        else
+          dz_p_j(i,J) = min(dz_p_j(i,J), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        end if
+
+        ! diagnose along-coordinate slope
+        if (j_denom == 0.) then
+          slope = 1.0
+        else
+          slope = (hdi_sig_v + hdj_sig_v) / j_denom
+        endif
+
+        hdj_sig_v = hdj_sig_phys(i,J,K)**2
+        hdi_sig_v = 0.25 * ((hdi_sig_phys(I,j,K)**2 + hdi_sig_phys(I-1,j+1,K)**2) + &
+             (hdi_sig_phys(I,j+1,K)**2 + hdi_sig_phys(I-1,j,K)**2))
+        j_denom = hdi_sig_v + hdj_sig_v + dk_sig_v
+
+        if (j_denom == 0.) then
+          phys_slope = 1.0
+        else
+          phys_slope = (hdi_sig_v + hdj_sig_v) / j_denom
+        endif
+
+        if (CS%use_physical_slope) slope = phys_slope
+
+        if (slope <= CS%slope_cutoff**2 .and. k > 2) then
+          weight = 1.0 - CS%min_smooth ; weight2 = 0.
+        else
+          weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
+        endif
+
+        ! override weights if required
+        if (CS%alpha_rho >= 0.) then
+          weight = CS%alpha_rho
+
+          if (CS%alpha_p < 0.) then
+            weight2 = 1.0 - CS%alpha_rho
+          else
+            weight2 = CS%alpha_p
+          endif
+        else if (CS%alpha_p >= 0.) then
+          weight2 = CS%alpha_p
+          weight = 1.0 - CS%alpha_p
+        endif
+
+        dz_s_j(i,J) = dz_s_j(i,J) * weight
+        dz_p_j(i,J) = dz_p_j(i,J) * weight2
+
+        dz_j(i,J) = dz_s_j(i,J) + dz_p_j(i,J)
+        if (dz_j(i,J) < 0.) then
+          ! hdj_sig positive -- left down, right up
+          dz_j(i,J) = max(dz_j(i,J), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        else
+          ! hdj_sig negative -- left up, right down
+          dz_j(i,J) = min(dz_j(i,J), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        end if
+      end do
+    end do
+
+    do j = G%jsc-1,G%jec+1
+      do i = G%isc-1,G%iec+1
+        ! prior to this point, dz_a and dz_p should be limited such that they
+        ! can't cause any tangling. however, they may still lead to some grid-scale
+        ! checkerboarding, so we reduce by another factor of 2
+        dz_a(i,j,K) = 0.25 * G%IareaT(i,j) &
+             * ((G%dyCu(I,j) * dz_i(I,j) - G%dyCu(I-1,j) * dz_i(I-1,j)) &
+             + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
+
+        ! apply the change in interface position due to this flux immediately
+        z_int(i,j,K) = z_int(i,j,K) + dz_a(i,j,K)
+      end do
+    end do
+
+    ! calculate the z-smoothing fluxes and apply in a second step
+    ! this lets us use a "barotropic" limiter, which should be much less
+    ! restrictive than the layer-based one
+    do j = G%jsc-1,G%jec+1
+      do I = G%isc-2,G%iec+1
+        if (G%mask2dCu(I,j) < 0.5) then
+          dz_p_i(I,j) = 0.
+          cycle
+        endif
+
+        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio
+        ! dz_p_i positive => left is further down than right
+        ! => move left up, right down
+
+        ! XXX this becomes a barotropic limiter
+        if (dz_p_i(I,j) < 0.) then
+          ! dz_p_i negative -- right up, left down
+          dz_p_i(I,j) = max(dz_p_i(I,j), -min( &
+               (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
+               (z_int(i+1,j,1) - z_int(i+1,j,K)) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        else
+          ! dz_p_i positive -- left up, right down
+          dz_p_i(I,j) = min(dz_p_i(I,j), min( &
+               (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
+               (z_int(i+1,j,K) - z_int(i+1,j,nz+1)) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        end if
+        dz_p_i(I,j) = dz_p_i(I,j) * CS%min_smooth
+      end do
+    end do
+
+    do J = G%jsc-2,G%jec+1
+      do i = G%isc-1,G%iec+1
+        if (G%mask2dCv(i,J) < 0.5) then
+          dz_p_j(i,J) = 0.
+          cycle
+        endif
+
+        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio
+
+        if (dz_p_j(i,J) < 0.) then
+          dz_p_j(i,J) = max(dz_p_j(i,J), -min( &
+               (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
+               (z_int(i,j+1,1) - z_int(i,j+1,K)) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        else
+          dz_p_j(i,J) = min(dz_p_j(i,J), min( &
+               (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
+               (z_int(i,j+1,K) - z_int(i,j+1,nz+1)) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        end if
+        dz_p_j(i,J) = dz_p_j(i,J) * CS%min_smooth
+      end do
+    end do
+
+    ! calculate flux due to barotropically-limited smoothing term
+    do j = G%jsc-1,G%jec+1
+      do i = G%isc-1,G%iec+1
+        dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) &
+             * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
+             + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
+      end do
+    end do
+  end do
+
+  ts_ratio = dt / CS%restoring_timescale
+  do j = G%jsc-1,G%jec+1
+    do i = G%isc-1,G%iec+1
+      dzInterface(i,j,:) = 0.
+      ! for land points, leave interfaecs undisturbed (possibly doesn't matter)
+      if (G%mask2dT(i,j) < 0.5) cycle
+
+      ! calculate change in interface position due to restoring term
+      ! z_int has already been updated by layer-limited fluxes
+      ! add the barotropically limited flux too
+      z_upd(:) = z_int(i,j,:) + dz_p(i,j,:)
+
+      if (fCS%depth_of_time_filter_shallow > 0.) then
+        ! build a z-star column
+        call build_zstar_column(CS%zlike_CS, G%bathyT(i,j), sum(h(i,j,:)), z_mean)
+
+        ! filtered_grid_motion will fail if z_upd and z_mean are tangled with each other
+        ! this basically means that every pair (z_upd(K),z_mean(K)) should be adjacent in a sorted list
+        ! we can't (shouldn't?) change z_upd, so we can only tweak z_mean to ensure this condition is met
+        ! restore with depth-dependent profile
+        z_col(:) = z_mean(:)
+
+        call filtered_grid_motion(fCS, CS%nk, nz, z_upd, z_col, dz_col)
+        ! dz_col is the additional displacement on top of the interface displacement we already had
+        dzInterface(i,j,2:nz) = dz_a(i,j,2:nz) + dz_p(i,j,2:nz) + dz_col(2:nz)
+      else
+        do K = 2,nz
+          dz_r(i,j,K) = ts_ratio * (max(min(z_mean(K), z_upd(1)), z_upd(nz+1)) - z_upd(K)) &
+               / (1.0 + ts_ratio)
+
+          ! using filtered_grid_motion to obtain our dzInterface leads to a loss of precision:
+          ! we effectively add the depth of the ocean and immediately subtract it out, losing
+          ! about 4-5 orders of magnitude!
+          ! instead, we just apply the calculated value directly
+          ! combine both the layer-limited and barotropically-limited fluxes
+          dzInterface(i,j,K) = dz_a(i,j,K) + dz_p(i,j,K)
+
+          if (CS%restoring_timescale > 0.) &
+               dzInterface(i,j,K) = dzInterface(i,j,K) + dz_r(i,j,K)
+        enddo
+      endif
+
+      ! update h from previous steps in preparation for adjustment
+      do k = 1,nz
+        h_upd(i,j,k) = h(i,j,k) + (dzInterface(i,j,K) - dzInterface(i,j,K+1))
+      enddo
+    enddo
+  enddo
+end subroutine build_adapt_grid
 
 end module coord_adapt
