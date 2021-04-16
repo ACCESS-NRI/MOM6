@@ -5,8 +5,8 @@
 !> Regrid columns for the adaptive coordinate
 module coord_adapt
 
-use MOM_EOS,           only : calculate_density_derivs
 use MOM_coms,          only : reproducing_sum
+use MOM_EOS,           only : calculate_density_derivs
 use MOM_error_handler, only : MOM_error, FATAL
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : ocean_grid_type, thermo_var_ptrs
@@ -17,6 +17,41 @@ use coord_zlike,       only : init_coord_zlike, end_coord_zlike, zlike_CS, set_z
 implicit none ; private
 
 #include <MOM_memory.h>
+
+type, public :: adapt_diag_CS
+  !> Along-coordinate gradient of density (used for density term)
+  real, dimension(:,:,:), allocatable :: slope_u
+  real, dimension(:,:,:), allocatable :: slope_v
+  integer :: id_slope_u, id_slope_v
+
+  !> Denominator used for calculating density displacement
+  real, dimension(:,:,:), allocatable :: denom_u
+  real, dimension(:,:,:), allocatable :: denom_v
+  integer :: id_denom_u, id_denom_v
+
+  !> Physical-space slope of interface (used for density weighting)
+  real, dimension(:,:,:), allocatable :: phys_u
+  real, dimension(:,:,:), allocatable :: phys_v
+  integer :: id_phys_u, id_phys_v
+
+  !> Coordinate-space slope of interface (used for density weighting)
+  real, dimension(:,:,:), allocatable :: coord_u
+  real, dimension(:,:,:), allocatable :: coord_v
+  integer :: id_coord_u, id_coord_v
+
+  !> Amount of limiting applied to smoothing and density (before weighting)
+  real, dimension(:,:,:), allocatable :: limiting_density
+  real, dimension(:,:,:), allocatable :: limiting_smoothing
+  integer :: id_limiting_density, id_limiting_smoothing
+
+  real, dimension(:,:,:), allocatable :: w_adjust
+  integer :: id_w_adjust
+
+  real, dimension(:,:,:), allocatable :: disp_density
+  real, dimension(:,:,:), allocatable :: disp_smoothing
+  real, dimension(:,:,:), allocatable :: disp_unlimited
+  integer :: id_disp_density, id_disp_smoothing, id_disp_unlimited
+end type adapt_diag_CS
 
 !> Control structure for adaptive coordinates (coord_adapt).
 type, public :: adapt_CS ; private
@@ -79,9 +114,12 @@ type, public :: adapt_CS ; private
   !> Used if do_restore_mean is .false.: delegate to a zlike coordinate
   !! for the restoring term target.
   type(zlike_CS), pointer :: zlike_CS => null()
+
+  type(adapt_diag_CS), pointer :: diag_CS => null()
 end type adapt_CS
 
 public init_coord_adapt, set_adapt_params, build_adapt_grid, end_coord_adapt
+public associate_adapt_diag, get_adapt_diag_CS
 
 contains
 
@@ -120,6 +158,8 @@ subroutine end_coord_adapt(CS)
 
   call end_coord_zlike(CS%zlike_CS)
 
+  if (associated(CS%diag_CS)) deallocate(CS%diag_CS)
+
   deallocate(CS%coordinate_resolution)
   deallocate(CS)
 end subroutine end_coord_adapt
@@ -156,6 +196,21 @@ subroutine set_adapt_params(CS, alpha_rho, alpha_p, adaptivity_timescale, use_me
   if (present(do_restore_mean))      CS%do_restore_mean = do_restore_mean
   if (present(adjustment_scale))     CS%adjustment_scale = adjustment_scale
 end subroutine set_adapt_params
+
+subroutine associate_adapt_diag(CS, diag_CS)
+  type(adapt_CS), pointer :: CS
+  type(adapt_diag_CS), target :: diag_CS
+
+  if (associated(CS%diag_CS)) deallocate(CS%diag_CS)
+  CS%diag_CS => diag_CS
+end subroutine associate_adapt_diag
+
+function get_adapt_diag_CS(CS)
+  type(adapt_CS), intent(in) :: CS
+  type(adapt_diag_CS), pointer :: get_adapt_diag_CS
+
+  get_adapt_diag_CS => CS%diag_CS
+end function get_adapt_diag_CS
 
 subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, dt)
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
@@ -213,13 +268,34 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
   character(len=11) :: fname
 
   ! we could probably assume some limit without a specified timestep
-  if (.not. present(dt)) &
-       call MOM_error(FATAL, 'build_grid_adaptive called without a timestep!')
+  if (.not. present(dt)) then
+    dzInterface(:,:,:) = 0.0
+    return
+  end if
 
   eps = 1. ; eps = epsilon(eps)
   nz = GV%ke
 
   call set_zlike_params(CS%zlike_CS, min_thickness=min_thickness)
+
+  ! zero out diagnostic arrays
+  if (.not. associated(CS%diag_CS)) &
+       call MOM_error(FATAL, 'build_adapt_grid expected diag_CS associated')
+
+  if (allocated(CS%diag_CS%phys_u)) CS%diag_CS%phys_u(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%phys_v)) CS%diag_CS%phys_v(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%slope_u)) CS%diag_CS%slope_u(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%slope_v)) CS%diag_CS%slope_v(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%denom_u)) CS%diag_CS%denom_u(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%denom_v)) CS%diag_CS%denom_v(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%coord_u)) CS%diag_CS%coord_u(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%coord_v)) CS%diag_CS%coord_v(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%limiting_smoothing)) CS%diag_CS%limiting_smoothing(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%limiting_density)) CS%diag_CS%limiting_density(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%w_adjust)) CS%diag_CS%w_adjust(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%disp_density)) CS%diag_CS%disp_density(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%disp_smoothing)) CS%diag_CS%disp_smoothing(:,:,:) = 0.0
+  if (allocated(CS%diag_CS%disp_unlimited)) CS%diag_CS%disp_unlimited(:,:,:) = 0.0
 
   ! sum from free surface downward
   z_int(:,:,1) = sum(h, 3) - G%bathyT ! free-surface
@@ -410,6 +486,11 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
           dz_s_i(I,j) = hdi_sig(I,j,K) / sign(sqrt(i_denom), dk_sig_u)
         end if
 
+        ! DIAG: slope_u
+        if (allocated(CS%diag_CS%slope_u)) CS%diag_CS%slope_u(I,j,K) = dz_s_i(I,j)
+        ! DIAG: denom_u
+        if (allocated(CS%diag_CS%denom_u)) CS%diag_CS%denom_u(I,j,K) = sqrt(i_denom)
+
         ! to convert from the density gradient to the flux, flip the sign and multiply by
         ! kappa*dt
         dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio
@@ -430,6 +511,13 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
                h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
         end if
 
+        ! DIAG: limiting_density
+        ! difference between the unlimited slope flux and the limited, across the participating adjacent cells
+        if (allocated(CS%diag_CS%limiting_density)) then
+          CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + (dz_s_i(I,j) - dz_p_unlim)
+          CS%diag_CS%limiting_density(i+1,j,K) = CS%diag_CS%limiting_density(i+1,j,K) + (dz_s_i(I,j) - dz_p_unlim)
+        end if
+
         ! we also calculate the difference in pressure (interface position)
         dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio
         dz_p_unlim = dz_p_i(I,j)
@@ -446,6 +534,13 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
           dz_p_i(I,j) = min(dz_p_i(I,j), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
                h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+        end if
+
+        ! DIAG: limiting_smoothing
+        ! similar to limiting_density, but applied on the pressure (smoothing) term
+        if (allocated(CS%diag_CS%limiting_smoothing)) then
+          CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + (dz_p_i(I,j) - dz_p_unlim)
+          CS%diag_CS%limiting_smoothing(i+1,j,K) = CS%diag_CS%limiting_smoothing(i+1,j,K) + (dz_p_i(I,j) - dz_p_unlim)
         end if
 
         ! calculate and diagnose along-coordinate slope
@@ -467,6 +562,11 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
         else
           phys_slope = (hdi_sig_u + hdj_sig_u) / i_denom
         endif
+
+        ! DIAG: coord_u
+        if (allocated(CS%diag_CS%coord_u)) CS%diag_CS%coord_u(I,j,K) = slope
+        ! DIAG: phys_u
+        if (allocated(CS%diag_CS%phys_u)) CS%diag_CS%phys_u(I,j,K) = phys_slope
 
         ! use physical slope or not?
         if (CS%use_physical_slope) slope = phys_slope
@@ -533,6 +633,11 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
           dz_s_j(i,J) = hdj_sig(i,J,K) / sign(sqrt(j_denom), dk_sig_v)
         end if
 
+        ! DIAG: slope_v
+        if (allocated(CS%diag_CS%slope_v)) CS%diag_CS%slope_v(i,J,K) = dz_s_j(i,J)
+        ! DIAG: denom_v
+        if (allocated(CS%diag_CS%denom_v)) CS%diag_CS%denom_v(i,J,K) = sqrt(j_denom)
+
         ! dz_s_j beforehand is unitless (ratio of densities)
         dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio
         ! dz_s_j is now [m2]
@@ -553,6 +658,13 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
                h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
         end if
 
+        ! DIAG: limiting_density
+        ! see u-point loop for explanation
+        if (allocated(CS%diag_CS%limiting_density)) then
+          CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + (dz_s_j(i,J) - dz_p_unlim)
+          CS%diag_CS%limiting_density(i,j+1,K) = CS%diag_CS%limiting_density(i,j+1,K) + (dz_s_j(i,J) - dz_p_unlim)
+        end if
+
         dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio
         dz_p_unlim = dz_p_j(i,J)
 
@@ -564,6 +676,12 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
           dz_p_j(i,J) = min(dz_p_j(i,J), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
                h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+        end if
+
+        ! DIAG: limiting_smoothing
+        if (allocated(CS%diag_CS%limiting_smoothing)) then
+          CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + (dz_p_j(i,J) - dz_p_unlim)
+          CS%diag_CS%limiting_smoothing(i,j+1,K) = CS%diag_CS%limiting_smoothing(i,j+1,K) + (dz_p_j(i,J) - dz_p_unlim)
         end if
 
         ! diagnose along-coordinate slope
@@ -583,6 +701,11 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
         else
           phys_slope = (hdi_sig_v + hdj_sig_v) / j_denom
         endif
+
+        ! DIAG: coord_v
+        if (allocated(CS%diag_CS%coord_v)) CS%diag_CS%coord_v(i,J,K) = slope
+        ! DIAG: phys_v
+        if (allocated(CS%diag_CS%phys_v)) CS%diag_CS%phys_v(i,J,K) = phys_slope
 
         if (CS%use_physical_slope) slope = phys_slope
 
@@ -637,6 +760,27 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
         z_int(i,j,K) = z_int(i,j,K) + dz_a(i,j,K)
       end do
     end do
+
+    ! DIAG: disp_density
+    if (allocated(CS%diag_CS%disp_density)) then
+      do j = G%jsc-1,G%jec+1
+        do i = G%isc-1,G%iec+1
+          CS%diag_CS%disp_density(i,j,K) = 0.25 * G%IareaT(i,j) &
+               * ((G%dyCu(I,j) * dz_s_i(I,j) - G%dyCu(I-1,j) * dz_s_i(I-1,j)) &
+               +  (G%dxCv(i,J) * dz_s_j(i,J) - G%dxCv(i,J-1) * dz_s_j(i,J-1)))
+        end do
+      end do
+    end if
+    ! DIAG: disp_smoothing
+    if (allocated(CS%diag_CS%disp_smoothing)) then
+      do j = G%jsc-1,G%jec+1
+        do i = G%isc-1,G%iec+1
+          CS%diag_CS%disp_smoothing(i,j,K) = 0.25 * G%IareaT(i,j) &
+               * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
+               +  (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
+        end do
+      end do
+    end if
 
     ! calculate the z-smoothing fluxes and apply in a second step
     ! this lets us use a "barotropic" limiter, which should be much less
@@ -699,6 +843,10 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
       end do
     end do
   end do
+
+  ! DIAG: disp_unlimited
+  if (allocated(CS%diag_CS%disp_unlimited)) &
+       CS%diag_CS%disp_unlimited(:,:,:) = dz_p(:,:,:)
 
   ts_ratio = dt / CS%restoring_timescale
   do j = G%jsc-1,G%jec+1
