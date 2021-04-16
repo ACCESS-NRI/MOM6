@@ -128,11 +128,11 @@ public set_regrid_params, get_regrid_size, write_regrid_file
 public uniformResolution, setCoordinateResolution
 public set_target_densities_from_GV, set_target_densities
 public set_regrid_max_depths, set_regrid_max_thickness
-public getCoordinateResolution, getCoordinateInterfaces
+public getCoordinateResolution, getCoordinateInterfaces, getCoordinateMode
 public getCoordinateUnits, getCoordinateShortName, getStaticThickness
 public DEFAULT_COORDINATE_MODE
 public set_h_neglect, set_dz_neglect
-public get_zlike_CS, get_sigma_CS, get_rho_CS
+public get_zlike_CS, get_sigma_CS, get_rho_CS, get_adapt_CS
 
 !> Documentation for coordinate options
 character(len=*), parameter, public :: regriddingCoordinateModeDoc = &
@@ -2138,6 +2138,13 @@ function getCoordinateInterfaces( CS, undo_scaling )
 
 end function getCoordinateInterfaces
 
+function getCoordinateMode( CS )
+  type(regridding_CS), intent(in) :: CS
+  integer :: getCoordinateMode
+
+  getCoordinateMode = CS%regridding_scheme
+end function getCoordinateMode
+
 !------------------------------------------------------------------------------
 !> Query the target coordinate units
 function getCoordinateUnits( CS )
@@ -2324,6 +2331,13 @@ function get_rho_CS(CS)
 
   get_rho_CS = CS%rho_CS
 end function get_rho_CS
+
+function get_adapt_CS(CS)
+  type(regridding_CS), intent(in) :: CS
+  type(adapt_CS), pointer :: get_adapt_CS
+
+  get_adapt_CS => CS%adapt_CS
+end function get_adapt_CS
 
 !------------------------------------------------------------------------------
 !> Return coordinate-derived thicknesses for fixed coordinate systems

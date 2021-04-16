@@ -57,6 +57,7 @@ use MOM_ALE,                   only : ALE_remap_tracers, ALE_remap_velocities
 use MOM_ALE,                   only : ALE_remap_set_h_vel, ALE_remap_set_h_vel_via_dz
 use MOM_ALE,                   only : ALE_update_regrid_weights, pre_ALE_diagnostics, ALE_register_diags
 use MOM_ALE,                   only : ALE_set_extrap_boundaries
+use MOM_ALE,                   only : ALE_register_coord_diags
 use MOM_ALE_sponge,            only : rotate_ALE_sponge, update_ALE_sponge_field
 use MOM_barotropic,            only : Barotropic_CS
 use MOM_boundary_update,       only : call_OBC_register, OBC_register_end, update_OBC_CS
@@ -3364,6 +3365,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                                    CS%use_ALE_algorithm, use_KPP)
   if (CS%use_ALE_algorithm) then
     call ALE_register_diags(Time, G, GV, US, diag, CS%ALE_CSp)
+    call ALE_register_coord_diags(Time, G, GV, US, diag, CS%ALE_CSp)
   endif
 
   ! Do any necessary halo updates on any auxiliary variables that have been initialized.
