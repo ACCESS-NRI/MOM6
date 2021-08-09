@@ -1788,10 +1788,10 @@ subroutine ALE_regridding_and_remapping(CS, G, GV, US, u, v, h, tv, dtdia, Time_
 
   call cpu_clock_begin(id_clock_pass)
   if (associated(tv%T)) &
-    call create_group_pass(pass_T_S_h, tv%T, G%Domain, To_All+Omit_Corners, halo=1)
+    call create_group_pass(pass_T_S_h, tv%T, G%Domain, To_All+Omit_Corners, halo=2)
   if (associated(tv%S)) &
-    call create_group_pass(pass_T_S_h, tv%S, G%Domain, To_All+Omit_Corners, halo=1)
-  call create_group_pass(pass_T_S_h, h, G%Domain, To_All+Omit_Corners, halo=1)
+    call create_group_pass(pass_T_S_h, tv%S, G%Domain, To_All+Omit_Corners, halo=2)
+  call create_group_pass(pass_T_S_h, h, G%Domain, To_All+Omit_Corners, halo=2)
   call do_group_pass(pass_T_S_h, G%Domain)
   call cpu_clock_end(id_clock_pass)
 
