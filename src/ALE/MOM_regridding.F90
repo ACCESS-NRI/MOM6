@@ -1002,7 +1002,7 @@ subroutine initialize_regridding(CS, G, GV, US, max_depth, param_file, mdl, &
          units="nondim", default=-1.0)
     call get_param(param_file, mdl, "ADAPT_TIMESCALE", adapt_timescale, &
          "Timescale for adaptivity diffusivity (defaults to a day)", &
-         units="s", default=86400.0)
+         units="s", default=86400.0, scale=US%s_to_T)
     call get_param(param_file, mdl, "ADAPT_MEAN_H", tmpLogical, &
          "Use mean rather than 'upstream' h in calculations", default=.false.)
     call get_param(param_file, mdl, "ADAPT_SLOPE_CUTOFF", adapt_cutoff, &
@@ -1022,7 +1022,7 @@ subroutine initialize_regridding(CS, G, GV, US, max_depth, param_file, mdl, &
 
     call get_param(param_file, mdl, "ADAPT_RESTORING_TIMESCALE", adapt_timescale, &
          "Timescale for adaptivity restoring (default 10 days)", &
-         units="s", default=864000.0)
+         units="s", default=864000.0, scale=US%s_to_T)
     call set_regrid_params(CS, adapt_restoring_timescale=adapt_timescale)
 
     call get_param(param_file, mdl, "ADAPT_TWIN_GRADIENT", tmpLogical, &

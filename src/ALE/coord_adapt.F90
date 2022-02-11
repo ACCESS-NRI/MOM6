@@ -77,11 +77,11 @@ type, public :: adapt_CS ; private
   !! when alpha_rho and alpha_p are negative.
   real :: min_smooth
 
-  !> The timescale over which to apply the diffusive adaptivity terms. [s]
+  !> The timescale over which to apply the diffusive adaptivity terms. [T ~> s]
   real :: adaptivity_timescale
 
   !> The timescale over which to restore towards the calculated
-  !! or pre-defined target coordinate. [s]
+  !! or pre-defined target coordinate. [T ~> s]
   real :: restoring_timescale
 
   !> Interface slope cutoff for defining stratified/unstratified regions.
