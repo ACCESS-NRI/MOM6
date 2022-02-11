@@ -373,7 +373,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
 
     ! calculate horizontal derivatives on i-points
     do j = G%jsc-2,G%jec+2
-      do I = G%isc-2,G%iec+1
+      do I = G%IscB-1,G%IecB+1
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
@@ -423,7 +423,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
     enddo
 
     ! calculate horizontal derivatives on j-points
-    do J = G%jsc-2,G%jec+1
+    do J = G%JscB-1,G%JecB+1
       do i = G%isc-2,G%iec+2
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
@@ -464,7 +464,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
 
     ! u-points
     do j = G%jsc-1,G%jec+1
-      do I = G%isc-2,G%iec+1
+      do I = G%IscB-1,G%iec+1
         if (G%mask2dCu(I,j) < 0.5) then
           dz_i(I,j) = 0.
           cycle
@@ -612,7 +612,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
     end do
 
     ! v-points
-    do J = G%jsc-2,G%jec+1
+    do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
         if (G%mask2dCv(i,J)< 0.5) then
           dz_j(i,J) = 0.
@@ -784,7 +784,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
     ! this lets us use a "barotropic" limiter, which should be much less
     ! restrictive than the layer-based one
     do j = G%jsc-1,G%jec+1
-      do I = G%isc-2,G%iec+1
+      do I = G%IscB-1,G%IecB+1
         if (G%mask2dCu(I,j) < 0.5) then
           dz_p_i(I,j) = 0.
           cycle
@@ -810,7 +810,7 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
       end do
     end do
 
-    do J = G%jsc-2,G%jec+1
+    do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
         if (G%mask2dCv(i,J) < 0.5) then
           dz_p_j(i,J) = 0.
