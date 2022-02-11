@@ -467,6 +467,8 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
       do I = G%IscB-1,G%iec+1
         if (G%mask2dCu(I,j) < 0.5) then
           dz_i(I,j) = 0.
+          dz_s_i(I,j) = 0.
+          dz_p_i(I,j) = 0.
           cycle
         endif
 
@@ -616,6 +618,8 @@ subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, d
       do i = G%isc-1,G%iec+1
         if (G%mask2dCv(i,J)< 0.5) then
           dz_j(i,J) = 0.
+          dz_s_j(i,J) = 0.
+          dz_p_j(i,J) = 0.
           cycle
         endif
 
