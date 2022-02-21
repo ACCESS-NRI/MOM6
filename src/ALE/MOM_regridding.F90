@@ -1603,7 +1603,7 @@ subroutine build_grid_adaptive(G, GV, US, h, tv, CS, dzInterface, remapCS, dt)
 
   integer :: i, j
 
-  call build_adapt_grid(G, GV, h, tv, dzInterface, CS%adapt_CS, CS%filter_CS, CS%min_thickness, dt)
+  call build_adapt_grid(G, GV, US, h, tv, dzInterface, CS%adapt_CS, CS%filter_CS, CS%min_thickness, dt)
 
   call assert((GV%ke == CS%nk), "build_grid_adaptive is only written to work "//&
                                 "with the same number of input and target layers.")
