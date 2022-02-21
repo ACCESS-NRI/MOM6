@@ -212,9 +212,10 @@ function get_adapt_diag_CS(CS)
   get_adapt_diag_CS => CS%diag_CS
 end function get_adapt_diag_CS
 
-subroutine build_adapt_grid(G, GV, h, tv, dzInterface, CS, fCS, min_thickness, dt)
+subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thickness, dt)
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
+  type(unit_scale_type), intent(in) :: US
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: h    !< Layer thicknesses, in H (usually m or kg m-2)
   type(thermo_var_ptrs),                       intent(in)    :: tv   !< A structure pointing to various thermodynamic variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(inout) :: dzInterface !< The changes in interface height due to regridding
