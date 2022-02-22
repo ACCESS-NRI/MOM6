@@ -212,6 +212,48 @@ function get_adapt_diag_CS(CS)
   get_adapt_diag_CS => CS%diag_CS
 end function get_adapt_diag_CS
 
+subroutine calc_derivs(G, GV, CS, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
+  type(ocean_grid_type), intent(in) :: G
+  type(verticalGrid_type), intent(in) :: GV
+  type(adapt_CS), intent(in) :: CS
+  real, dimension(SZI_(G), SZJ_(G), SZK_(GV)), intent(in) :: h
+  real, dimension(SZI_(G), SZJ_(G), SZK_(GV)+1), intent(in) :: z_int
+  type(thermo_var_ptrs), intent(in) :: tv
+  integer, intent(in) :: i, j, k, di, dj
+  real, dimension(SZI_(G), SZJ_(G)), intent(in) :: dk_sig_int
+  real, intent(in) :: alpha, beta, Idx
+  real, intent(out) :: hd_sig, hd_sig_phys
+
+  real :: d_sig_up, d_sig_dn, d_sig, dk_sig, h_interp
+
+  if (CS%use_twin_gradient) then
+    d_sig_up = alpha * (tv%t(i+di,j+dj,k-1) - tv%t(i,j,k-1)) &
+         + beta * (tv%s(i+di,j+dj,k-1) - tv%s(i,j,k-1))
+    d_sig_dn = alpha * (tv%t(i+di,j+dj,k) - tv%t(i,j,k)) &
+         + beta * (tv%s(i+di,j+dj,k) - tv%s(i,j,k))
+
+    if (d_sig_up * d_sig_dn <= 0.) then
+      d_sig = 0.
+    else
+      d_sig = sign(min(abs(d_sig_up), abs(d_sig_dn)), d_sig_up)
+    end if
+  end if
+
+  dk_sig = 0.5 * (dk_sig_int(i,j) + dk_sig_int(i+di,j+dj))
+
+  if (d_sig * dk_sig < 0.) then
+    h_interp = 0.5 * (h(i,j,k-1) + h(i+di,j+dj,k))
+  else
+    h_interp = 0.5 * (h(i,j,k) + h(i+di,j+dj,k-1))
+  end if
+
+  if (CS%use_mean_h) &
+       h_interp = 0.25 * ((h(i,j,k-1) + h(i+di,j,k)) + (h(i,j,k) + h(i+di,j,k-1)))
+
+  hd_sig = h_interp * d_sig * Idx
+  hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K))
+end subroutine calc_derivs
+
 subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thickness, dt)
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
@@ -249,8 +291,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   real, dimension(SZK_(GV)+1) :: z_mean, h_col, z_col, z_upd, dz_col
 
   ! numerator of density term and upstreamed h
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: hdi_sig, h_on_i, hdi_sig_phys
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: hdj_sig, h_on_j, hdj_sig_phys
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: hdi_sig, hdi_sig_phys
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: hdj_sig, hdj_sig_phys
   ! temporary alpha/beta interpolated to velocity points
   real :: alpha, beta
   ! some temporary quantities
@@ -380,48 +422,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
-        if (CS%use_twin_gradient) then
-          ! with the twin gradient method, we only use the gradient
-          ! if the sign is agreed upon above and below the interface
-          di_sig_up = alpha * (tv%t(i+1,j,k-1) - tv%t(i,j,k-1)) &
-               + beta * (tv%s(i+1,j,k-1) - tv%s(i,j,k-1))
-          di_sig_dn = alpha * (tv%t(i+1,j,k) - tv%t(i,j,k)) &
-               + beta * (tv%s(i+1,j,k) - tv%s(i,j,k))
-
-          if (di_sig_up * di_sig_dn <= 0.) then
-            di_sig = 0.
-          else
-            ! same sign, choose minimum
-            di_sig = sign(min(abs(di_sig_up), abs(di_sig_dn)), di_sig_up)
-          end if
-        else
-          ! otherwise, just calculate the gradient directly on the interface
-          di_sig = alpha * (t_int(i+1,j) - t_int(i,j)) &
-               + beta * (s_int(i+1,j) - s_int(i,j))
-        end if
-
-        dk_sig_u = 0.5 * (dk_sig_int(i,j) + dk_sig_int(i+1,j))
-
-        ! calculate hdi_sig by upstreamed h
-        if (di_sig * dk_sig_u < 0.) then
-          ! left is denser than right, left moves up, right moves down (toward denser)
-          h_interp = 0.5 * (h(i,j,k-1) + h(i+1,j,k))
-        else
-          h_interp = 0.5 * (h(i,j,k) + h(i+1,j,k-1))
-        end if
-
-        ! alternatively, we can just take a simple mean of thicknesses onto the
-        ! interface and velocity point
-        if (CS%use_mean_h) &
-             h_interp = 0.25 * ((h(i,j,k-1) + h(i+1,j,k)) + (h(i,j,k) + h(i+1,j,k-1)))
-
-        h_on_i(I,j,K) = h_interp
-        ! this is the full numerator of the density term
-        hdi_sig(I,j,K) = h_interp * di_sig * G%IdxCu(I,j)
-        ! calculate physical slope
-        ! XXX take the square root of the average of the squares here???
-        hdi_sig_phys(I,j,K) = hdi_sig(I,j,K) - &
-             G%IdxCu(I,j) * dk_sig_u * (z_int(i+1,j,K) - z_int(i,j,K))
+        call calc_derivs(G, GV, CS, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
+             hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
       enddo
     enddo
 
@@ -431,43 +433,14 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
 
-        if (CS%use_twin_gradient) then
-          dj_sig_up = alpha * (tv%t(i,j+1,k-1) - tv%t(i,j,k-1)) &
-               + beta * (tv%s(i,j+1,k-1) - tv%s(i,j,k-1))
-          dj_sig_dn = alpha * (tv%t(i,j+1,k) - tv%t(i,j,k)) &
-               + beta * (tv%s(i,j+1,k) - tv%s(i,j,k))
-
-          if (dj_sig_up * dj_sig_dn <= 0.) then
-            dj_sig = 0.
-          else
-            dj_sig = sign(min(abs(dj_sig_up), abs(dj_sig_dn)), dj_sig_up)
-          end if
-        else
-          dj_sig = alpha * (t_int(i,j+1) - t_int(i,j)) &
-               + beta * (s_int(i,j+1) - s_int(i,j))
-        end if
-
-        dk_sig_v = 0.5 * (dk_sig_int(i,j) + dk_sig_int(i,j+1))
-
-        if (dj_sig * dk_sig_v < 0.) then
-          h_interp = 0.5 * (h(i,j,k-1) + h(i,j+1,k))
-        else
-          h_interp = 0.5 * (h(i,j,k) + h(i,j+1,k-1))
-        end if
-
-        if (CS%use_mean_h) &
-             h_interp = 0.25 * ((h(i,j,k-1) + h(i+1,j,k)) + (h(i,j,k) + h(i+1,j,k-1)))
-
-        h_on_j(i,J,K) = h_interp
-        hdj_sig(i,J,K) = h_interp * dj_sig * G%IdyCv(i,J)
-        hdj_sig_phys(i,J,K) = hdj_sig(i,J,K) - &
-             G%IdyCv(i,J) * dk_sig_v * (z_int(i,j+1,K) - z_int(i,j,K))
+        call calc_derivs(G, GV, CS, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
+             hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
       enddo
     enddo
 
     ! u-points
     do j = G%jsc-1,G%jec+1
-      do I = G%IscB-1,G%iec+1
+      do I = G%IscB-1,G%IecB+1
         if (G%mask2dCu(I,j) < 0.5) then
           dz_i(I,j) = 0.
           dz_s_i(I,j) = 0.
