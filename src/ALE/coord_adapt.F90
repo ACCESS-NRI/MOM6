@@ -16,39 +16,52 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
+!> AG coordinate diagnostic control structure
 type, public :: adapt_diag_CS
-  !> Along-coordinate gradient of density (used for density term)
+  !> Along-coordinate i-gradient of density (used for density term)
   real, dimension(:,:,:), allocatable :: slope_u
+  !> Along-coordinate j-gradient of density (used for density term)
   real, dimension(:,:,:), allocatable :: slope_v
-  integer :: id_slope_u, id_slope_v
 
-  !> Denominator used for calculating density displacement
+  !> Denominator used for calculating density displacement, i-direction
   real, dimension(:,:,:), allocatable :: denom_u
+  !> Denominator used for calculating density displacement, j-direction
   real, dimension(:,:,:), allocatable :: denom_v
-  integer :: id_denom_u, id_denom_v
 
-  !> Physical-space slope of interface (used for density weighting)
+  !> Physical-space slope of interface along i-direction (used for density weighting)
   real, dimension(:,:,:), allocatable :: phys_u
+  !> Physical-space slope of interface along j-direction (used for density weighting)
   real, dimension(:,:,:), allocatable :: phys_v
-  integer :: id_phys_u, id_phys_v
 
-  !> Coordinate-space slope of interface (used for density weighting)
+  !> Coordinate-space slope of interface along i-direction (used for density weighting)
   real, dimension(:,:,:), allocatable :: coord_u
+  !> Coordinate-space slope of interface along j-direction (used for density weighting)
   real, dimension(:,:,:), allocatable :: coord_v
-  integer :: id_coord_u, id_coord_v
 
-  !> Amount of limiting applied to smoothing and density (before weighting)
+  !> Amount of limiting applied to density (before weighting)
   real, dimension(:,:,:), allocatable :: limiting_density
+  !> Amount of limiting applied to smoothing (before weighting)
   real, dimension(:,:,:), allocatable :: limiting_smoothing
-  integer :: id_limiting_density, id_limiting_smoothing
 
+  !> The adjustment provided by the convective adjustment term
   real, dimension(:,:,:), allocatable :: w_adjust
-  integer :: id_w_adjust
 
+  !> Interface displacement due to density term
   real, dimension(:,:,:), allocatable :: disp_density
+  !> Interface displacement due to smoothing term
   real, dimension(:,:,:), allocatable :: disp_smoothing
+  !> Interface displacement due to unlimited smoothing term
   real, dimension(:,:,:), allocatable :: disp_unlimited
+
+  !>@{ Diagnostics IDs
+  integer :: id_slope_u, id_slope_v
+  integer :: id_denom_u, id_denom_v
+  integer :: id_phys_u, id_phys_v
+  integer :: id_coord_u, id_coord_v
+  integer :: id_limiting_density, id_limiting_smoothing
+  integer :: id_w_adjust
   integer :: id_disp_density, id_disp_smoothing, id_disp_unlimited
+  !>@}
 end type adapt_diag_CS
 
 !> Control structure for adaptive coordinates (coord_adapt).
@@ -113,6 +126,7 @@ type, public :: adapt_CS ; private
   !! for the restoring term target.
   type(zlike_CS), pointer :: zlike_CS => null()
 
+  !> Used for outputting diagnostics from within the regridding routine.
   type(adapt_diag_CS), pointer :: diag_CS => null()
 end type adapt_CS
 
@@ -168,17 +182,17 @@ subroutine set_adapt_params(CS, alpha_rho, alpha_p, adaptivity_timescale, use_me
      adjustment_scale)
 
   type(adapt_CS),    pointer    :: CS  !< The control structure for this module
-  real,    optional, intent(in) :: alpha_rho
-  real,    optional, intent(in) :: alpha_p
-  real,    optional, intent(in) :: adaptivity_timescale
-  logical, optional, intent(in) :: use_mean_h
-  logical, optional, intent(in) :: use_twin_gradient
-  real,    optional, intent(in) :: slope_cutoff
-  real,    optional, intent(in) :: min_smooth
-  logical, optional, intent(in) :: use_physical_slope
-  real,    optional, intent(in) :: restoring_timescale
-  logical, optional, intent(in) :: do_restore_mean
-  real,    optional, intent(in) :: adjustment_scale
+  real,    optional, intent(in) :: alpha_rho !< Density adaptivity coefficient
+  real,    optional, intent(in) :: alpha_p !< Pressure adaptivity coefficient
+  real,    optional, intent(in) :: adaptivity_timescale !< Adaptivity timescale
+  logical, optional, intent(in) :: use_mean_h !< Use uniform or "upstream" mean thickness?
+  logical, optional, intent(in) :: use_twin_gradient !< Calculate interface density gradient layers above and below
+  real,    optional, intent(in) :: slope_cutoff !< Stratified/unstratified cutoff
+  real,    optional, intent(in) :: min_smooth !< Minimum pressure adaptivity contribution
+  logical, optional, intent(in) :: use_physical_slope !< Use physical or along-interface slope
+  real,    optional, intent(in) :: restoring_timescale !< Timescale for restoring term
+  logical, optional, intent(in) :: do_restore_mean !< Restore to the mean height?
+  real,    optional, intent(in) :: adjustment_scale !< Hydrostatic adjustment scale
 
   if (.not. associated(CS)) call MOM_error(FATAL, "set_adapt_params: CS not associated")
 
@@ -195,6 +209,9 @@ subroutine set_adapt_params(CS, alpha_rho, alpha_p, adaptivity_timescale, use_me
   if (present(adjustment_scale))     CS%adjustment_scale = adjustment_scale
 end subroutine set_adapt_params
 
+!> Associate a diagnostic control structure with an existing
+!! AG control structure -- used to get around the circular
+!! dependency of diagnostics depending on coordinates.
 subroutine associate_adapt_diag(CS, diag_CS)
   type(adapt_CS), pointer :: CS
   type(adapt_diag_CS), target :: diag_CS
@@ -203,6 +220,8 @@ subroutine associate_adapt_diag(CS, diag_CS)
   CS%diag_CS => diag_CS
 end subroutine associate_adapt_diag
 
+!> Return the associated diagnostic control structure for an
+!! AG control structure
 function get_adapt_diag_CS(CS)
   type(adapt_CS), intent(in) :: CS
   type(adapt_diag_CS), pointer :: get_adapt_diag_CS
@@ -210,7 +229,12 @@ function get_adapt_diag_CS(CS)
   get_adapt_diag_CS => CS%diag_CS
 end function get_adapt_diag_CS
 
-subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
+!> Calculate the along-coordinate density derivatives
+!! and the physical analogue thereof. The derivatives can
+!! be calculated in the i- or j-direction, depending on the
+!! value of di/dj.
+subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
+     di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
   type(ocean_grid_type), intent(in) :: G
   type(verticalGrid_type), intent(in) :: GV
   type(adapt_CS), intent(in) :: CS
@@ -259,14 +283,15 @@ end subroutine calc_derivs
 subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thickness, dt)
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
-  type(unit_scale_type), intent(in) :: US
+  type(unit_scale_type),                       intent(in)    :: US   !< The dimensional unit scaling type
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: h    !< Layer thicknesses, in H (usually m or kg m-2)
-  type(thermo_var_ptrs),                       intent(in)    :: tv   !< A structure pointing to various thermodynamic variables
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(inout) :: dzInterface !< The changes in interface height due to regridding
-  type(adapt_CS),                              intent(in)    :: CS !< Regridding control structure
+  type(thermo_var_ptrs),                       intent(in)    :: tv   !< A structure pointing to thermodynamic variables
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(inout) :: dzInterface !< The interface changes
+  type(adapt_CS),                              intent(in)    :: CS  !< Regridding control structure
   type(filter_CS),                             intent(in)    :: fCS !< Filtering control structure
-  real, intent(in) :: min_thickness !< ALE layer minimum thickness
-  real, optional, intent(in) :: dt !< The intended timestep over which this regridding operation applies
+  real,                                        intent(in)    :: min_thickness !< ALE layer minimum thickness
+  real,                              optional, intent(in)    :: dt !< The intended timestep over which this
+                                                                   !! regridding operation applies
 
   ! local variables
   integer :: i, j, k, k2, kt, nz ! indices and dimension lengths
@@ -400,6 +425,10 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   ts_ratio = min(ts_ratio, 1.0)
 
   do K = 2,nz
+    dz_s_i(:,:) = 0. ; dz_s_j(:,:) = 0.
+    dz_p_i(:,:) = 0. ; dz_p_j(:,:) = 0.
+    dz_i(:,:) = 0. ; dz_j(:,:) = 0.
+
     do j = G%jsc-2,G%jec+2
       do i = G%isc-2,G%iec+2
         t_int(i,j) = ( &
@@ -557,7 +586,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         ! calculate weighting between density and pressure terms
         ! by a cutoff value on the local normalised stratification
         if (slope <= CS%slope_cutoff**2 .and. k > 2) then
-          weight = 1.0 - CS%min_smooth; weight2 = 0.
+          weight = 1.0 - CS%min_smooth ; weight2 = 0.
         else
           weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
         endif
@@ -599,7 +628,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! v-points
     do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J)< 0.5) then
+        if (G%mask2dCv(i,J) < 0.5) then
           dz_j(i,J) = 0.
           dz_s_j(i,J) = 0.
           dz_p_j(i,J) = 0.
@@ -739,7 +768,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         ! checkerboarding, so we reduce by another factor of 2
         dz_a(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
              * ((G%dyCu(I,j) * dz_i(I,j) - G%dyCu(I-1,j) * dz_i(I-1,j)) &
-             + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
+              + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
 
         ! apply the change in interface position due to this flux immediately
         z_int(i,j,K) = z_int(i,j,K) + dz_a(i,j,K)
@@ -824,7 +853,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       do i = G%isc-1,G%iec+1
         dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) / L_to_H &
              * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
-             + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
+              + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
       end do
     end do
   end do

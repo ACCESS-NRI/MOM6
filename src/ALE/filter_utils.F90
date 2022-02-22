@@ -5,6 +5,7 @@ use MOM_error_handler, only : MOM_error, FATAL
 
 implicit none
 
+!> Coordinate filtering control structure
 type, public :: filter_CS
   !> Weight given to old coordinate when blending between new and old grids [nondim]
   !! Used only below depth_of_time_filter_shallow, with a cubic variation
