@@ -480,7 +480,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         dk_sig_u = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i+1,j)**2)
 
         i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
-        if (i_denom == 0.) then
+        if (abs(i_denom) < eps) then
           ! if gradients in all directions are exactly zero, we don't want any flux
           dz_s_i(I,j) = 0.
         else
@@ -545,7 +545,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         end if
 
         ! calculate and diagnose along-coordinate slope
-        if (i_denom == 0.) then
+        if (abs(i_denom) < eps) then
           slope = 1.0
         else
           slope = (hdi_sig_u + hdj_sig_u) / i_denom
@@ -557,7 +557,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
              (hdj_sig_phys(i+1,J,K)**2 + hdj_sig_phys(i,J-1,K)**2))
         i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
 
-        if (i_denom == 0.) then
+        if (abs(i_denom) < eps) then
           ! unstratified limit
           phys_slope = 1.0
         else
@@ -630,7 +630,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         dk_sig_v = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i,j+1)**2)
 
         j_denom = hdj_sig_v + hdi_sig_v + dk_sig_v
-        if (j_denom == 0.) then
+        if (abs(j_denom) < eps) then
           dz_s_j(i,J) = 0.
         else
           dz_s_j(i,J) = hdj_sig(i,J,K) / sign(sqrt(j_denom), dk_sig_v)
@@ -688,7 +688,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         end if
 
         ! diagnose along-coordinate slope
-        if (j_denom == 0.) then
+        if (abs(j_denom) < eps) then
           slope = 1.0
         else
           slope = (hdi_sig_v + hdj_sig_v) / j_denom
@@ -699,7 +699,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
              (hdi_sig_phys(I,j+1,K)**2 + hdi_sig_phys(I-1,j,K)**2))
         j_denom = hdi_sig_v + hdj_sig_v + dk_sig_v
 
-        if (j_denom == 0.) then
+        if (abs(j_denom) < eps) then
           phys_slope = 1.0
         else
           phys_slope = (hdi_sig_v + hdj_sig_v) / j_denom
