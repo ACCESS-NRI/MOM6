@@ -455,24 +455,29 @@ subroutine ALE_register_coord_diags(Time, G, GV, US, diag, CS)
     diag_CS%id_limiting_density = register_diag_field("ocean_model", "adapt_limiting_density", &
          diag%axesTi, Time, &
          "Adaptive coordinate layer-limiting on density term (difference between "// &
-         "unlimited and limited flux, before weighting")
+         "unlimited and limited flux, before weighting", &
+         conversion=(GV%H_to_Z * US%Z_to_m) ** 2)
     diag_CS%id_limiting_smoothing = register_diag_field("ocean_model", "adapt_limiting_smoothing", &
          diag%axesTi, Time, &
          "Adaptive coordinate layer-limiting on smoothing term (difference between "// &
-         "unlimited and limited flux, before weighting")
+         "unlimited and limited flux, before weighting", &
+         conversion=(GV%H_to_Z * US%Z_to_m) ** 2)
 
     diag_CS%id_w_adjust = register_diag_field("ocean_model", "adapt_w_adjust", diag%axesTi, Time, &
          "Adaptive coordinate interface velocity due to hydrostatic adjustment")
 
     diag_CS%id_disp_density = register_diag_field("ocean_model", "adapt_disp_density", &
          diag%axesTi, Time, &
-         "Adaptive coordinate interface displacement due to density adaptivity")
+         "Adaptive coordinate interface displacement due to density adaptivity", &
+         conversion=GV%H_to_Z * US%Z_to_m)
     diag_CS%id_disp_smoothing = register_diag_field("ocean_model", "adapt_disp_smoothing", &
          diag%axesTi, Time, &
-         "Adaptive coordinate interface displacement due to (limited) smoothing")
+         "Adaptive coordinate interface displacement due to (limited) smoothing", &
+         conversion=GV%H_to_Z * US%Z_to_m)
     diag_CS%id_disp_unlimited = register_diag_field("ocean_model", "adapt_disp_unlimited", &
          diag%axesTi, Time, &
-         "Adaptive coordinate interface displacement due to (barotropic) smoothing")
+         "Adaptive coordinate interface displacement due to (barotropic) smoothing", &
+         conversion=US%z_to_m)
 
     if (diag_CS%id_slope_u > 0) allocate(diag_CS%slope_u(isdB:iedB,jsd:jed,nk+1))
     if (diag_CS%id_slope_v > 0) allocate(diag_CS%slope_v(isd:ied,jsdB:jedB,nk+1))

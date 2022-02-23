@@ -210,10 +210,11 @@ function get_adapt_diag_CS(CS)
   get_adapt_diag_CS => CS%diag_CS
 end function get_adapt_diag_CS
 
-subroutine calc_derivs(G, GV, CS, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
+subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
   type(ocean_grid_type), intent(in) :: G
   type(verticalGrid_type), intent(in) :: GV
   type(adapt_CS), intent(in) :: CS
+  type(unit_scale_type), intent(in) :: US
   real, dimension(SZI_(G), SZJ_(G), SZK_(GV)), intent(in) :: h
   real, dimension(SZI_(G), SZJ_(G), SZK_(GV)+1), intent(in) :: z_int
   type(thermo_var_ptrs), intent(in) :: tv
@@ -222,7 +223,10 @@ subroutine calc_derivs(G, GV, CS, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alp
   real, intent(in) :: alpha, beta, Idx
   real, intent(out) :: hd_sig, hd_sig_phys
 
+  real :: H_to_L
   real :: d_sig_up, d_sig_dn, d_sig, dk_sig, h_interp
+
+  H_to_L = GV%H_to_Z * US%Z_to_L
 
   if (CS%use_twin_gradient) then
     d_sig_up = alpha * (tv%t(i+di,j+dj,k-1) - tv%t(i,j,k-1)) &
@@ -248,8 +252,8 @@ subroutine calc_derivs(G, GV, CS, h, z_int, tv, i, j, k, di, dj, dk_sig_int, alp
   if (CS%use_mean_h) &
        h_interp = 0.25 * ((h(i,j,k-1) + h(i+di,j,k)) + (h(i,j,k) + h(i+di,j,k-1)))
 
-  hd_sig = h_interp * d_sig * Idx
-  hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K))
+  hd_sig = h_interp * d_sig * Idx * H_to_L
+  hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K)) * H_to_L
 end subroutine calc_derivs
 
 subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thickness, dt)
@@ -305,6 +309,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   real :: dz_p_unlim
   real :: tmp, dir, CFL
   real :: dsig_horiz, dsig_vert_up, dsig_vert_down
+  real :: H_to_L, L_to_H
 
   character(len=11) :: fname
 
@@ -316,6 +321,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
   eps = 1. ; eps = epsilon(eps)
   nz = GV%ke
+
+  L_to_H = US%L_to_Z * GV%Z_to_H
 
   call set_zlike_params(CS%zlike_CS, min_thickness=min_thickness)
 
@@ -339,7 +346,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   if (allocated(CS%diag_CS%disp_unlimited)) CS%diag_CS%disp_unlimited(:,:,:) = 0.0
 
   ! sum from free surface downward
-  z_int(:,:,1) = sum(h, 3) - G%bathyT ! free-surface
+  z_int(:,:,1) = sum(h, 3) - G%bathyT(:,:) * GV%Z_to_H ! free-surface
   do K = 1,nz
     z_int(:,:,K+1) = z_int(:,:,K) - h(:,:,k)
   enddo
@@ -375,7 +382,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! we'll restore to the predefined coordinate resolution
     z_mean(1) = 0.
     do K = 2,nz
-      z_mean(K) = z_mean(K-1) - CS%coordinate_resolution(k-1)
+      z_mean(K) = z_mean(K-1) - CS%coordinate_resolution(k-1) * GV%Z_to_H
     end do
   end if
 
@@ -415,23 +422,25 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     enddo
 
     ! calculate horizontal derivatives on i-points
+    ! reduce I-halo 2 -> 1
     do j = G%jsc-2,G%jec+2
       do I = G%IscB-1,G%IecB+1
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
-        call calc_derivs(G, GV, CS, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
+        call calc_derivs(G, GV, CS, US, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
              hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
       enddo
     enddo
 
     ! calculate horizontal derivatives on j-points
+    ! reduce J-halo 2 -> 1
     do J = G%JscB-1,G%JecB+1
       do i = G%isc-2,G%iec+2
         alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
 
-        call calc_derivs(G, GV, CS, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
+        call calc_derivs(G, GV, CS, US, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
              hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
       enddo
     enddo
@@ -467,7 +476,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
         ! to convert from the density gradient to the flux, flip the sign and multiply by
         ! kappa*dt
-        dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio
+        dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio * L_to_H**2
 
         dz_p_unlim = dz_s_i(I,j)
 
@@ -477,12 +486,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! hdi_sig positive -- left down, right up
           dz_s_i(I,j) = max(dz_s_i(I,j), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         else
           ! hdi_sig negative -- left up, right down
           dz_s_i(I,j) = min(dz_s_i(I,j), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         end if
 
         ! DIAG: limiting_density
@@ -493,7 +502,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         end if
 
         ! we also calculate the difference in pressure (interface position)
-        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio
+        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
         dz_p_unlim = dz_p_i(I,j)
         ! dz_p_i positive => left is further down than right
         ! => move left up, right down
@@ -502,12 +511,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! dz_p_i negative -- right up, left down
           dz_p_i(I,j) = max(dz_p_i(I,j), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         else
           ! dz_p_i positive -- left up, right down
           dz_p_i(I,j) = min(dz_p_i(I,j), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         end if
 
         ! DIAG: limiting_smoothing
@@ -577,12 +586,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! hdi_sig positive -- left down, right up
           dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         else
           ! hdi_sig negative -- left up, right down
           dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         end if
       end do
     end do
@@ -615,7 +624,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         if (allocated(CS%diag_CS%denom_v)) CS%diag_CS%denom_v(i,J,K) = sqrt(j_denom)
 
         ! dz_s_j beforehand is unitless (ratio of densities)
-        dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio
+        dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio * L_to_H**2
         ! dz_s_j is now [m2]
 
         dz_p_unlim = dz_s_j(i,J)
@@ -626,12 +635,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! hdj_sig positive -- left down, right up
           dz_s_j(i,J) = max(dz_s_j(i,J), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         else
           ! hdj_sig negative -- left up, right down
           dz_s_j(i,J) = min(dz_s_j(i,J), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         end if
 
         ! DIAG: limiting_density
@@ -641,17 +650,17 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           CS%diag_CS%limiting_density(i,j+1,K) = CS%diag_CS%limiting_density(i,j+1,K) + (dz_s_j(i,J) - dz_p_unlim)
         end if
 
-        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio
+        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
         dz_p_unlim = dz_p_j(i,J)
 
         if (dz_p_j(i,J) < 0.) then
           dz_p_j(i,J) = max(dz_p_j(i,J), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         else
           dz_p_j(i,J) = min(dz_p_j(i,J), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         end if
 
         ! DIAG: limiting_smoothing
@@ -713,12 +722,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! hdj_sig positive -- left down, right up
           dz_j(i,J) = max(dz_j(i,J), -0.125 * min( &
                h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         else
           ! hdj_sig negative -- left up, right down
           dz_j(i,J) = min(dz_j(i,J), 0.125 * min( &
                h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         end if
       end do
     end do
@@ -728,7 +737,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         ! prior to this point, dz_a and dz_p should be limited such that they
         ! can't cause any tangling. however, they may still lead to some grid-scale
         ! checkerboarding, so we reduce by another factor of 2
-        dz_a(i,j,K) = 0.25 * G%IareaT(i,j) &
+        dz_a(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
              * ((G%dyCu(I,j) * dz_i(I,j) - G%dyCu(I-1,j) * dz_i(I-1,j)) &
              + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
 
@@ -741,7 +750,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     if (allocated(CS%diag_CS%disp_density)) then
       do j = G%jsc-1,G%jec+1
         do i = G%isc-1,G%iec+1
-          CS%diag_CS%disp_density(i,j,K) = 0.25 * G%IareaT(i,j) &
+          CS%diag_CS%disp_density(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
                * ((G%dyCu(I,j) * dz_s_i(I,j) - G%dyCu(I-1,j) * dz_s_i(I-1,j)) &
                +  (G%dxCv(i,J) * dz_s_j(i,J) - G%dxCv(i,J-1) * dz_s_j(i,J-1)))
         end do
@@ -751,7 +760,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     if (allocated(CS%diag_CS%disp_smoothing)) then
       do j = G%jsc-1,G%jec+1
         do i = G%isc-1,G%iec+1
-          CS%diag_CS%disp_smoothing(i,j,K) = 0.25 * G%IareaT(i,j) &
+          CS%diag_CS%disp_smoothing(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
                * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
                +  (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
         end do
@@ -768,7 +777,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           cycle
         endif
 
-        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio
+        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
         ! dz_p_i positive => left is further down than right
         ! => move left up, right down
 
@@ -777,12 +786,12 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           ! dz_p_i negative -- right up, left down
           dz_p_i(I,j) = max(dz_p_i(I,j), -min( &
                (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
-               (z_int(i+1,j,1) - z_int(i+1,j,K)) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               (z_int(i+1,j,1) - z_int(i+1,j,K)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         else
           ! dz_p_i positive -- left up, right down
           dz_p_i(I,j) = min(dz_p_i(I,j), min( &
                (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
-               (z_int(i+1,j,K) - z_int(i+1,j,nz+1)) * G%areaT(i+1,j)) * G%IdyCu(I,j))
+               (z_int(i+1,j,K) - z_int(i+1,j,nz+1)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
         end if
         dz_p_i(I,j) = dz_p_i(I,j) * CS%min_smooth
       end do
@@ -795,16 +804,16 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           cycle
         endif
 
-        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio
+        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
 
         if (dz_p_j(i,J) < 0.) then
           dz_p_j(i,J) = max(dz_p_j(i,J), -min( &
                (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
-               (z_int(i,j+1,1) - z_int(i,j+1,K)) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               (z_int(i,j+1,1) - z_int(i,j+1,K)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         else
           dz_p_j(i,J) = min(dz_p_j(i,J), min( &
                (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
-               (z_int(i,j+1,K) - z_int(i,j+1,nz+1)) * G%areaT(i,j+1)) * G%IdxCv(i,J))
+               (z_int(i,j+1,K) - z_int(i,j+1,nz+1)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
         end if
         dz_p_j(i,J) = dz_p_j(i,J) * CS%min_smooth
       end do
@@ -813,7 +822,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! calculate flux due to barotropically-limited smoothing term
     do j = G%jsc-1,G%jec+1
       do i = G%isc-1,G%iec+1
-        dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) &
+        dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) / L_to_H &
              * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
              + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
       end do
@@ -838,7 +847,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
       if (fCS%depth_of_time_filter_shallow > 0.) then
         ! build a z-star column
-        call build_zstar_column(CS%zlike_CS, G%bathyT(i,j), sum(h(i,j,:)), z_mean)
+        call build_zstar_column(CS%zlike_CS, G%bathyT(i,j) * GV%Z_to_H, sum(h(i,j,:)), z_mean, zScale=GV%Z_to_H)
 
         ! filtered_grid_motion will fail if z_upd and z_mean are tangled with each other
         ! this basically means that every pair (z_upd(K),z_mean(K)) should be adjacent in a sorted list

@@ -584,8 +584,8 @@ subroutine initialize_regridding(CS, GV, US, max_depth, param_file, mdl, coord_m
     elseif (coordinateMode(coord_mode) == REGRIDDING_RHO) then
       call setCoordinateResolution(dz, CS, scale=US%kg_m3_to_R)
     elseif (coordinateMode(coord_mode) == REGRIDDING_ADAPTIVE) then
-      call setCoordinateResolution(dz, CS, scale=GV%m_to_H)
-      CS%coord_scale = GV%H_to_m
+      call setCoordinateResolution(dz, CS, scale=US%m_to_Z)
+      CS%coord_scale = US%Z_to_m
     else
       call setCoordinateResolution(dz, CS, scale=US%m_to_Z)
       CS%coord_scale = US%Z_to_m
