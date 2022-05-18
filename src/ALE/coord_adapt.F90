@@ -234,7 +234,7 @@ end function get_adapt_diag_CS
 !! be calculated in the i- or j-direction, depending on the
 !! value of di/dj.
 subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
-     di, dj, dk_sig_int, alpha, beta, Idx, hd_sig, hd_sig_phys)
+     di, dj, dk_sig_int, alpha, beta, Idx, mask, hd_sig, hd_sig_phys)
   type(ocean_grid_type), intent(in) :: G
   type(verticalGrid_type), intent(in) :: GV
   type(adapt_CS), intent(in) :: CS
@@ -244,7 +244,7 @@ subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
   type(thermo_var_ptrs), intent(in) :: tv
   integer, intent(in) :: i, j, k, di, dj
   real, dimension(SZI_(G), SZJ_(G)), intent(in) :: dk_sig_int
-  real, intent(in) :: alpha, beta, Idx
+  real, intent(in) :: alpha, beta, Idx, mask
   real, intent(out) :: hd_sig, hd_sig_phys
 
   real :: H_to_L
@@ -276,8 +276,8 @@ subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
   if (CS%use_mean_h) &
        h_interp = 0.25 * ((h(i,j,k-1) + h(i+di,j,k)) + (h(i,j,k) + h(i+di,j,k-1)))
 
-  hd_sig = h_interp * d_sig * Idx * H_to_L
-  hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K)) * H_to_L
+  hd_sig = h_interp * d_sig * Idx * H_to_L * mask
+  hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K)) * H_to_L * mask
 end subroutine calc_derivs
 
 subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thickness, dt)
@@ -458,7 +458,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
         call calc_derivs(G, GV, CS, US, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
-             hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
+             G%mask2dCu(I,j), hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
       enddo
     enddo
 
@@ -470,7 +470,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
 
         call calc_derivs(G, GV, CS, US, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
-             hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
+             G%mask2dCv(i,J), hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
       enddo
     enddo
 
