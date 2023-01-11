@@ -296,16 +296,11 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   ! local variables
   integer :: i, j, k, k2, kt, nz ! indices and dimension lengths
 
-  ! temperature and salinity on interfaces
-  real, dimension(SZI_(G),SZJ_(G)) :: t_int, s_int
   ! interface heights
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: z_int, z_new, h_int
   ! drho/dt and drho/ds on interfaces
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: alpha_int
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: beta_int
-  ! density and pressure flux components
-  real, dimension(SZIB_(G),SZJ_(G)) :: dz_i, dz_s_i, dz_p_i
-  real, dimension(SZI_(G),SZJB_(G)) :: dz_j, dz_s_j, dz_p_j
   ! vertical gradient in sigma
   real, dimension(SZI_(G),SZJ_(G)) :: dk_sig_int
   ! final change in interface height
@@ -430,6 +425,25 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   ts_ratio = dt / CS%adaptivity_timescale
   ts_ratio = min(ts_ratio, 1.0)
 
+  !$omp parallel default(none) &
+  !$omp          shared(tv, GV, G, CS, US, z_int, h, alpha_int, beta_int) &
+  !$omp          shared(hdi_sig, hdj_sig, hdi_sig_phys, hdj_sig_phys) &
+  !$omp          shared(L_to_H, ts_ratio, dz_a, dz_p, do_diag, eps, nz) &
+  !$omp          private(i, j, k, dk_sig_int, alpha, beta) &
+  !$omp          private(hdi_sig_u, hdj_sig_u, dk_sig_u, hdi_sig_v, hdj_sig_v, dk_sig_v, i_denom, j_denom, dz_p_unlim, slope, phys_slope, weight, weight2)
+  block
+    ! for some reason we get a segfault if these are brought in as private to the
+    ! parallel block, so instead we allocate them locally (they'll be deallocated at the
+    ! end of the block anyway, but annoying to have to use heap space)
+    real, allocatable, dimension(:,:) :: t_int, s_int
+    real, allocatable, dimension(:,:) :: dz_s_i, dz_s_j, dz_p_i, dz_p_j, dz_i, dz_j
+
+    allocate(t_int(SZI_(G),SZJ_(G)), s_int(SZI_(G),SZJ_(G)))
+    allocate(dz_s_i(SZIB_(G),SZJ_(G)), dz_s_j(SZI_(G),SZJB_(G)))
+    allocate(dz_p_i(SZIB_(G),SZJ_(G)), dz_p_j(SZI_(G),SZJB_(G)))
+    allocate(dz_i(SZIB_(G),SZJ_(G)), dz_j(SZI_(G),SZJB_(G)))
+
+  !$omp do
   do K = 2,nz
     dz_s_i(:,:) = 0. ; dz_s_j(:,:) = 0.
     dz_p_i(:,:) = 0. ; dz_p_j(:,:) = 0.
@@ -881,6 +895,9 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       end do
     end do
   end do
+  !$omp end do
+  end block
+  !$omp end parallel
 
   if (do_diag) then
     ! DIAG: disp_unlimited
@@ -889,6 +906,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   end if
 
   ts_ratio = dt / CS%restoring_timescale
+  !$omp parallel do private(z_upd, z_col, i, j, k)
   do j = G%jsc-1,G%jec+1
     do i = G%isc-1,G%iec+1
       dzInterface(i,j,:) = 0.
