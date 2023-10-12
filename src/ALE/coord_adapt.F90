@@ -333,7 +333,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   real :: dsig_horiz, dsig_vert_up, dsig_vert_down
   real :: H_to_L, L_to_H
 
-  logical :: do_diag = .true.
+  logical :: do_diag
 
   character(len=11) :: fname
 
@@ -351,6 +351,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   call set_zlike_params(CS%zlike_CS, min_thickness=min_thickness)
 
   ! zero out diagnostic arrays
+  do_diag = .true.
   if (.not. associated(CS%diag_CS)) then
     call MOM_error(WARNING, 'build_adapt_grid expected diag_CS associated')
     do_diag = .false.
