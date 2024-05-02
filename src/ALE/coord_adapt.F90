@@ -296,7 +296,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
                                                                    !! regridding operation applies
 
   ! local variables
-  integer :: i, j, k, k2, kt, nz ! indices and dimension lengths
+  integer :: i, j, k, k2, kt, nz, n ! indices and dimension lengths
+  integer :: np
 
   ! interface heights
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: z_int, z_new, h_int
@@ -432,7 +433,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   !$omp          shared(tv, GV, G, CS, US, z_int, h, alpha_int, beta_int) &
   !$omp          shared(hdi_sig, hdj_sig, hdi_sig_phys, hdj_sig_phys) &
   !$omp          shared(L_to_H, ts_ratio, dz_a, dz_p, do_diag, eps, nz) &
-  !$omp          private(i, j, k, dk_sig_int, alpha, beta) &
+  !$omp          private(i, j, k, n, np, dk_sig_int, alpha, beta) &
   !$omp          private(hdi_sig_u, hdj_sig_u, dk_sig_u, hdi_sig_v, hdj_sig_v, dk_sig_v, i_denom, j_denom, dz_p_unlim, slope, phys_slope, weight, weight2)
   block
     ! for some reason we get a segfault if these are brought in as private to the
@@ -440,11 +441,14 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! end of the block anyway, but annoying to have to use heap space)
     real, allocatable, dimension(:,:) :: t_int, s_int
     real, allocatable, dimension(:,:) :: dz_s_i, dz_s_j, dz_p_i, dz_p_j, dz_i, dz_j
+    real, allocatable, dimension(:,:) :: weight_adapt_i, weight_adapt_j, weight_smooth_i, weight_smooth_j
 
     allocate(t_int(SZI_(G),SZJ_(G)), s_int(SZI_(G),SZJ_(G)))
     allocate(dz_s_i(SZIB_(G),SZJ_(G)), dz_s_j(SZI_(G),SZJB_(G)))
     allocate(dz_p_i(SZIB_(G),SZJ_(G)), dz_p_j(SZI_(G),SZJB_(G)))
     allocate(dz_i(SZIB_(G),SZJ_(G)), dz_j(SZI_(G),SZJB_(G)))
+    allocate(weight_adapt_i(SZIB_(G),SZJ_(G)), weight_smooth_i(SZIB_(G),SZJ_(G)))
+    allocate(weight_adapt_j(SZI_(G),SZJB_(G)), weight_smooth_j(SZI_(G),SZJB_(G)))
 
   !$omp do
   do K = 2,nz
@@ -636,23 +640,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           weight = 1.0 - CS%alpha_p
         endif
 
-        dz_s_i(I,j) = dz_s_i(I,j) * weight
-        dz_p_i(I,j) = dz_p_i(I,j) * weight2
-
-        ! combining density and pressure fluxes
-        ! and re-apply limiter -- with a full cut-off this isn't necessary
-        dz_i(I,j) = dz_s_i(I,j) + dz_p_i(I,j)
-        if (dz_i(I,j) < 0.) then
-          ! hdi_sig positive -- left down, right up
-          dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        else
-          ! hdi_sig negative -- left up, right down
-          dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        end if
+        weight_adapt_i(I,j) = weight
+        weight_smooth_i(I,j) = weight2
       end do
     end do
 
@@ -782,8 +771,95 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           weight = 1.0 - CS%alpha_p
         endif
 
-        dz_s_j(i,J) = dz_s_j(i,J) * weight
-        dz_p_j(i,J) = dz_p_j(i,J) * weight2
+        weight_adapt_j(i,J) = weight
+        weight_smooth_j(i,J) = weight2
+      end do
+    end do
+
+    ! smooth and apply weights
+    do j = G%jsc-1,G%jec+1
+      do I = G%IscB-1,G%IecB+1
+        if (G%mask2dCu(I,j) < 0.5) cycle
+        weight = weight_adapt_i(I,j)
+        weight2 = weight_smooth_i(I,j)
+        np = 1
+
+        do n = 1,3
+          if (G%mask2dCu(I+n,j) > 0.5) then
+            weight = weight + weight_adapt_i(I+n,j)
+            weight2 = weight2 + weight_smooth_i(I+n,j)
+            np = np + 1
+          end if
+          if (G%mask2dCu(I-n,j) > 0.5) then
+            weight = weight + weight_adapt_i(I-n,j)
+            weight2 = weight2 + weight_smooth_i(I-n,j)
+            np = np + 1
+          end if
+          if (G%mask2dCu(I,j+n) > 0.5) then
+            weight = weight + weight_adapt_i(I,j+n)
+            weight2 = weight2 + weight_smooth_i(I,j+n)
+            np = np + 1
+          end if
+          if (G%mask2dCu(I,j-n) > 0.5) then
+            weight = weight + weight_adapt_i(I,j-n)
+            weight2 = weight2 + weight_smooth_i(I,j-n)
+            np = np + 1
+          end if
+        end do
+
+        ! smooth weight_adapt_i and weight_smooth_i to get weight and weight2 for this point
+        dz_s_i(I,j) = dz_s_i(I,j) * weight / np
+        dz_p_i(I,j) = dz_p_i(I,j) * weight2 / np
+
+        ! combining density and pressure fluxes
+        ! and re-apply limiter -- with a full cut-off this isn't necessary
+        dz_i(I,j) = dz_s_i(I,j) + dz_p_i(I,j)
+        if (dz_i(I,j) < 0.) then
+          ! hdi_sig positive -- left down, right up
+          dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
+               h(i,j,k) * G%areaT(i,j), &
+               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+        else
+          ! hdi_sig negative -- left up, right down
+          dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
+               h(i,j,k-1) * G%areaT(i,j), &
+               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+        end if
+      end do
+    end do
+
+    do J = G%JscB-1,G%JecB+1
+      do i = G%isc-1,G%iec+1
+        if (G%mask2dCv(i,J) < 0.5) cycle
+        weight = weight_adapt_j(i,J)
+        weight2 = weight_smooth_j(i,J)
+        np = 1
+
+        do n = 1,3
+          if (G%mask2dCv(i,J+n) > 0.5) then
+            weight = weight + weight_adapt_j(i,J+n)
+            weight2 = weight2 + weight_smooth_j(i,J+n)
+            np = np + 1
+          end if
+          if (G%mask2dCv(I-n,j) > 0.5) then
+            weight = weight + weight_adapt_j(i,J-n)
+            weight2 = weight2 + weight_smooth_j(i,J-n)
+            np = np + 1
+          end if
+          if (G%mask2dCv(I,j+n) > 0.5) then
+            weight = weight + weight_adapt_j(i+n,J)
+            weight2 = weight2 + weight_smooth_j(i+n,J)
+            np = np + 1
+          end if
+          if (G%mask2dCv(I,j-n) > 0.5) then
+            weight = weight + weight_adapt_j(i-n,J)
+            weight2 = weight2 + weight_smooth_j(i-n,J)
+            np = np + 1
+          end if
+        end do
+
+        dz_s_j(i,J) = dz_s_j(i,J) * weight / np
+        dz_p_j(i,J) = dz_p_j(i,J) * weight2 / np
 
         dz_j(i,J) = dz_s_j(i,J) + dz_p_j(i,J)
         if (dz_j(i,J) < 0.) then
