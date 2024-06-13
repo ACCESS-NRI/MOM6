@@ -783,22 +783,22 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         np = 1
 
         do n = 1,3
-          if (G%mask2dCu(I+n,j) > 0.5) then
+          if (G%mask2dCu(I+n,j) > 0.5 .and. I+n <= G%IecB+1) then
             weight = weight + weight_adapt_i(I+n,j)
             weight2 = weight2 + weight_smooth_i(I+n,j)
             np = np + 1
           end if
-          if (G%mask2dCu(I-n,j) > 0.5) then
+          if (G%mask2dCu(I-n,j) > 0.5 .and. I-n >= G%IscB-1) then
             weight = weight + weight_adapt_i(I-n,j)
             weight2 = weight2 + weight_smooth_i(I-n,j)
             np = np + 1
           end if
-          if (G%mask2dCu(I,j+n) > 0.5) then
+          if (G%mask2dCu(I,j+n) > 0.5 .and. j+n <= G%jec+1) then
             weight = weight + weight_adapt_i(I,j+n)
             weight2 = weight2 + weight_smooth_i(I,j+n)
             np = np + 1
           end if
-          if (G%mask2dCu(I,j-n) > 0.5) then
+          if (G%mask2dCu(I,j-n) > 0.5 .and. j-n >= G%jsc-1) then
             weight = weight + weight_adapt_i(I,j-n)
             weight2 = weight2 + weight_smooth_i(I,j-n)
             np = np + 1
@@ -834,22 +834,22 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
         np = 1
 
         do n = 1,3
-          if (G%mask2dCv(i,J+n) > 0.5) then
+          if (G%mask2dCv(i,J+n) > 0.5 .and. J+n <= G%JecB+1) then
             weight = weight + weight_adapt_j(i,J+n)
             weight2 = weight2 + weight_smooth_j(i,J+n)
             np = np + 1
           end if
-          if (G%mask2dCv(I-n,j) > 0.5) then
+          if (G%mask2dCv(i,J-n) > 0.5 .and. J-n >= G%JscB-1) then
             weight = weight + weight_adapt_j(i,J-n)
             weight2 = weight2 + weight_smooth_j(i,J-n)
             np = np + 1
           end if
-          if (G%mask2dCv(I,j+n) > 0.5) then
+          if (G%mask2dCv(i+n,J) > 0.5 .and. i+n <= G%iec+1) then
             weight = weight + weight_adapt_j(i+n,J)
             weight2 = weight2 + weight_smooth_j(i+n,J)
             np = np + 1
           end if
-          if (G%mask2dCv(I,j-n) > 0.5) then
+          if (G%mask2dCv(i-n,J) > 0.5 .and. i-n >= G%isc-1) then
             weight = weight + weight_adapt_j(i-n,J)
             weight2 = weight2 + weight_smooth_j(i-n,J)
             np = np + 1
