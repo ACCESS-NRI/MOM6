@@ -294,8 +294,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
                                                                    !! regridding operation applies
 
   ! local variables
-  integer :: i, j, k, k2, kt, nz, n ! indices and dimension lengths
-  integer :: np
+  integer :: i, j, k, k2, kt, nz ! indices and dimension lengths
 
   ! interface heights
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: z_int, z_new, h_int
@@ -431,15 +430,20 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   !$omp          shared(tv, GV, G, CS, US, z_int, h, alpha_int, beta_int) &
   !$omp          shared(hdi_sig, hdj_sig, hdi_sig_phys, hdj_sig_phys) &
   !$omp          shared(L_to_H, ts_ratio, dz_a, dz_p, do_diag, eps, nz) &
-  !$omp          private(i, j, k, n, np, dk_sig_int, alpha, beta) &
+  !$omp          private(i, j, k, dk_sig_int, alpha, beta) &
   !$omp          private(hdi_sig_u, hdj_sig_u, dk_sig_u, hdi_sig_v, hdj_sig_v, dk_sig_v, i_denom, j_denom, dz_p_unlim, slope, phys_slope, weight, weight2)
   block
+    use MOM_domains, only : pass_var, EAST_FACE, NORTH_FACE
+
     ! for some reason we get a segfault if these are brought in as private to the
     ! parallel block, so instead we allocate them locally (they'll be deallocated at the
     ! end of the block anyway, but annoying to have to use heap space)
     real, allocatable, dimension(:,:) :: t_int, s_int
     real, allocatable, dimension(:,:) :: dz_s_i, dz_s_j, dz_p_i, dz_p_j, dz_i, dz_j
-    real, allocatable, dimension(:,:) :: weight_adapt_i, weight_adapt_j, weight_smooth_i, weight_smooth_j
+    real, allocatable, dimension(:,:) :: weight_adapt_i, weight_smooth_i, weight_adapt_j, weight_smooth_j
+    ! number of active points in stencil, and stencil position
+    integer :: np, ni, nj
+    integer, parameter :: filter_width = 3
 
     allocate(t_int(SZI_(G),SZJ_(G)), s_int(SZI_(G),SZJ_(G)))
     allocate(dz_s_i(SZIB_(G),SZJ_(G)), dz_s_j(SZI_(G),SZJB_(G)))
@@ -453,6 +457,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     dz_s_i(:,:) = 0. ; dz_s_j(:,:) = 0.
     dz_p_i(:,:) = 0. ; dz_p_j(:,:) = 0.
     dz_i(:,:) = 0. ; dz_j(:,:) = 0.
+    weight_adapt_i(:,:) = 0. ; weight_smooth_i(:,:) = 0.
+    weight_adapt_j(:,:) = 0. ; weight_smooth_j(:,:) = 0.
 
     do j = G%jsc-2,G%jec+2
       do i = G%isc-2,G%iec+2
@@ -502,7 +508,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! u-points
     do j = G%jsc-1,G%jec+1
       do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) < 0.5) then
+        if (G%mask2dCu(I,j) == 0) then
           dz_i(I,j) = 0.
           dz_s_i(I,j) = 0.
           dz_p_i(I,j) = 0.
@@ -646,7 +652,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! v-points
     do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) < 0.5) then
+        if (G%mask2dCv(i,J) == 0) then
           dz_j(i,J) = 0.
           dz_s_j(i,J) = 0.
           dz_p_j(i,J) = 0.
@@ -774,38 +780,25 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       end do
     end do
 
-    ! smooth and apply weights
+    call pass_var(weight_adapt_i, G%Domain, position=EAST_FACE)
+    call pass_var(weight_smooth_i, G%Domain, position=EAST_FACE)
+    call pass_var(weight_adapt_j, G%Domain, position=NORTH_FACE)
+    call pass_var(weight_smooth_j, G%Domain, position=NORTH_FACE)
+
     do j = G%jsc-1,G%jec+1
       do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) < 0.5) cycle
-        weight = weight_adapt_i(I,j)
-        weight2 = weight_smooth_i(I,j)
-        np = 1
+        if (G%mask2dCu(I,j) == 0) cycle
 
-        do n = 1,3
-          if (G%mask2dCu(I+n,j) > 0.5 .and. I+n <= G%IecB+1) then
-            weight = weight + weight_adapt_i(I+n,j)
-            weight2 = weight2 + weight_smooth_i(I+n,j)
-            np = np + 1
-          end if
-          if (G%mask2dCu(I-n,j) > 0.5 .and. I-n >= G%IscB-1) then
-            weight = weight + weight_adapt_i(I-n,j)
-            weight2 = weight2 + weight_smooth_i(I-n,j)
-            np = np + 1
-          end if
-          if (G%mask2dCu(I,j+n) > 0.5 .and. j+n <= G%jec+1) then
-            weight = weight + weight_adapt_i(I,j+n)
-            weight2 = weight2 + weight_smooth_i(I,j+n)
-            np = np + 1
-          end if
-          if (G%mask2dCu(I,j-n) > 0.5 .and. j-n >= G%jsc-1) then
-            weight = weight + weight_adapt_i(I,j-n)
-            weight2 = weight2 + weight_smooth_i(I,j-n)
-            np = np + 1
-          end if
-        end do
+        weight = 0 ; weight2 = 0 ; np = 0
 
-        ! smooth weight_adapt_i and weight_smooth_i to get weight and weight2 for this point
+        do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
+          ! filter point is oob or masked: don't add it to our stencil average
+          if (i+ni < G%IsdB .or. i+ni > G%IedB .or. j+nj < G%jsd .or. j+nj > G%jed .or. G%mask2dCu(I+ni,j+nj) == 0) cycle
+          weight = weight + weight_adapt_i(I+ni,j+nj)
+          weight2 = weight2 + weight_smooth_i(I+ni,j+nj)
+          np = np + 1
+        end do; end do
+
         dz_s_i(I,j) = dz_s_i(I,j) * weight / np
         dz_p_i(I,j) = dz_p_i(I,j) * weight2 / np
 
@@ -828,33 +821,16 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
     do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) < 0.5) cycle
-        weight = weight_adapt_j(i,J)
-        weight2 = weight_smooth_j(i,J)
-        np = 1
+        if (G%mask2dCv(i,J) == 0) cycle
 
-        do n = 1,3
-          if (G%mask2dCv(i,J+n) > 0.5 .and. J+n <= G%JecB+1) then
-            weight = weight + weight_adapt_j(i,J+n)
-            weight2 = weight2 + weight_smooth_j(i,J+n)
-            np = np + 1
-          end if
-          if (G%mask2dCv(i,J-n) > 0.5 .and. J-n >= G%JscB-1) then
-            weight = weight + weight_adapt_j(i,J-n)
-            weight2 = weight2 + weight_smooth_j(i,J-n)
-            np = np + 1
-          end if
-          if (G%mask2dCv(i+n,J) > 0.5 .and. i+n <= G%iec+1) then
-            weight = weight + weight_adapt_j(i+n,J)
-            weight2 = weight2 + weight_smooth_j(i+n,J)
-            np = np + 1
-          end if
-          if (G%mask2dCv(i-n,J) > 0.5 .and. i-n >= G%isc-1) then
-            weight = weight + weight_adapt_j(i-n,J)
-            weight2 = weight2 + weight_smooth_j(i-n,J)
-            np = np + 1
-          end if
-        end do
+        weight = 0 ; weight2 = 0 ; np = 0
+
+        do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
+          if (i+ni < G%isd .or. i+ni > G%ied .or. j+nj < G%JsdB .or. j+nj > G%JedB .or. G%mask2dCv(i+ni,J+nj) == 0) cycle
+          weight = weight + weight_adapt_j(i+ni,J+nj)
+          weight2 = weight2 + weight_smooth_j(i+ni,J+nj)
+          np = np + 1
+        end do; end do
 
         dz_s_j(i,J) = dz_s_j(i,J) * weight / np
         dz_p_j(i,J) = dz_p_j(i,J) * weight2 / np
@@ -916,7 +892,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! restrictive than the layer-based one
     do j = G%jsc-1,G%jec+1
       do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) < 0.5) then
+        if (G%mask2dCu(I,j) == 0) then
           dz_p_i(I,j) = 0.
           cycle
         endif
@@ -943,7 +919,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
     do J = G%JscB-1,G%JecB+1
       do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) < 0.5) then
+        if (G%mask2dCv(i,J) == 0) then
           dz_p_j(i,J) = 0.
           cycle
         endif
@@ -988,7 +964,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     do i = G%isc-1,G%iec+1
       dzInterface(i,j,:) = 0.
       ! for land points, leave interfaecs undisturbed (possibly doesn't matter)
-      if (G%mask2dT(i,j) < 0.5) cycle
+      if (G%mask2dT(i,j) == 0) cycle
 
       ! calculate change in interface position due to restoring term
       ! z_int has already been updated by layer-limited fluxes
