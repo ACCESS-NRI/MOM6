@@ -11,7 +11,15 @@ endfunction(add_fortran_library)
 
 project(MOM6 DESCRIPTION "MOM6" LANGUAGES C Fortran)
 
+function(add_fortran_library LIB MOD_DIR)
+    add_library(${LIB} ${ARGN})
 
+    get_target_property(LIB_DIR ${LIB} BINARY_DIR)
+    set_target_properties(${LIB} PROPERTIES Fortran_MODULE_DIRECTORY ${LIB_DIR}/${MOD_DIR})
+
+    target_include_directories(${LIB} INTERFACE "$<BUILD_INTERFACE:${LIB_DIR}/${MOD_DIR}>")
+  endfunction(add_fortran_library)
+  
 # Common compiler flags and definitions
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fbacktrace -fconvert=big-endian -ffree-line-length-none -ffixed-line-length-none")
