@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.18)
 
+function(add_fortran_library LIB MOD_DIR)
+  add_library(${LIB} ${ARGN})
+
+  get_target_property(LIB_DIR ${LIB} BINARY_DIR)
+  set_target_properties(${LIB} PROPERTIES Fortran_MODULE_DIRECTORY ${LIB_DIR}/${MOD_DIR})
+
+  target_include_directories(${LIB} INTERFACE "$<BUILD_INTERFACE:${LIB_DIR}/${MOD_DIR}>")
+endfunction(add_fortran_library)
 
 project(MOM6 DESCRIPTION "MOM6" LANGUAGES C Fortran)
 
@@ -356,7 +364,7 @@ target_sources(OM3_mom6 PRIVATE
   ${CONFIG_SRC}/drivers/nuopc_cap/ocn_comp_NUOPC.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/time_utils.F90
 
-  extra_sources/mom_cap_gtracer_flux.F90
+  #extra_sources/mom_cap_gtracer_flux.F90
 )
 
 ### Install and Export
