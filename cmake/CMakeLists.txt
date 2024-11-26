@@ -1,37 +1,36 @@
 cmake_minimum_required(VERSION 3.18)
 
-function(add_fortran_library LIB MOD_DIR)
-  add_library(${LIB} ${ARGN})
+#[==============================================================================[
+#                         Basic project definition                              #
+#]==============================================================================]
 
-  get_target_property(LIB_DIR ${LIB} BINARY_DIR)
-  set_target_properties(${LIB} PROPERTIES Fortran_MODULE_DIRECTORY ${LIB_DIR}/${MOD_DIR})
+project(MOM6 VERSION "0.1.0"
+            PROJECT_HOMEPAGE_URL https://github.com/ACCESS-NRI/MOM6
+            DESCRIPTION "MOM6"
+            LANGUAGES C Fortran)
 
-  target_include_directories(${LIB} INTERFACE "$<BUILD_INTERFACE:${LIB_DIR}/${MOD_DIR}>")
-endfunction(add_fortran_library)
+#[==============================================================================[
+#                           Project configuration                               #
+#]==============================================================================]
 
-project(MOM6 DESCRIPTION "MOM6" LANGUAGES C Fortran)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR})
+include(GNUInstallDirs)
+include(FortranLib)
 
-function(add_fortran_library LIB MOD_DIR)
-    add_library(${LIB} ${ARGN})
-
-    get_target_property(LIB_DIR ${LIB} BINARY_DIR)
-    set_target_properties(${LIB} PROPERTIES Fortran_MODULE_DIRECTORY ${LIB_DIR}/${MOD_DIR})
-
-    target_include_directories(${LIB} INTERFACE "$<BUILD_INTERFACE:${LIB_DIR}/${MOD_DIR}>")
-  endfunction(add_fortran_library)
-  
 # Common compiler flags and definitions
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fbacktrace -fconvert=big-endian -ffree-line-length-none -ffixed-line-length-none")
   if(${CMAKE_Fortran_COMPILER_VERSION} VERSION_GREATER_EQUAL 10)
     set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fallow-argument-mismatch")
   endif()
+  set(CMAKE_Fortran_FLAGS "-fdefault-real-8 -fdefault-double-8")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O")
   set(CMAKE_Fortran_FLAGS_DEBUG "-g -Wall -Og -ffpe-trap=zero,overflow -fcheck=bounds")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -qno-opt-dynamic-align  -convert big_endian -assume byterecl -ftz -traceback -assume realloc_lhs -fp-model source")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O2 -debug minimal")
   set(CMAKE_Fortran_FLAGS_DEBUG "-O0 -g -check uninit -check bounds -check pointers -fpe0 -check noarg_temp_created")
+  set(CMAKE_Fortran_FLAGS "-r8")
 else()
   message(WARNING "Fortran compiler with ID ${CMAKE_Fortran_COMPILER_ID} will be used with CMake default options")
 endif()
@@ -51,16 +50,33 @@ endif()
 add_compile_definitions(
   _USE_GENERIC_TRACER
   _USE_MOM6_DIAG
+  #CESMCOUPLED
 )
 
+## Fortran modules path; currently this is simply set to be the include dir
+set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
+  CACHE STRING
+  "Fortran module installation path (Not a cmake native variable)"
+)
+
+#[==============================================================================[
+#                              External packages                                #
+#]==============================================================================]
+
+find_package(NetCDF REQUIRED Fortran)
+find_package(fms COMPONENTS R8 REQUIRED)
+find_package(PIO 2.5.3 REQUIRED COMPONENTS C Fortran)
+#find_package(FoX 4.1.2 REQUIRED)
+
 ### Targets
+
+## MOM6 library
 
 set(SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 set(CONFIG_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../config_src")
 
-## MOM6 library
 add_fortran_library(OM3_mom6 mod STATIC)
-add_library(AccessOM3::mom6 ALIAS OM3_mom6)
+
 target_include_directories(OM3_mom6 PRIVATE $<BUILD_INTERFACE:${SRC}/framework>)
 if(OM3_MOM_SYMMETRIC)
   target_include_directories(OM3_mom6 PRIVATE $<BUILD_INTERFACE:${CONFIG_SRC}/memory/dynamic_symmetric>)
@@ -69,8 +85,9 @@ else()
 endif()
 target_compile_options(OM3_mom6 PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:${fortran_compile_flags}>")
 target_link_libraries(OM3_mom6
-  PUBLIC esmf
-  PRIVATE AccessOM3::nuopc_cap_share AccessOM3::share FMS::fms_r8
+  #PUBLIC esmf
+  PRIVATE FMS::fms_r8
+  #PRIVATE AccessOM3::nuopc_cap_share AccessOM3::share FMS::fms_r8
 )
 
 
@@ -124,6 +141,8 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/core/MOM_unit_tests.F90
   ${SRC}/core/MOM_variables.F90
   ${SRC}/core/MOM_verticalGrid.F90
+  ${SRC}/core/MOM_forcing_type.F90 #add_patched_sources
+  ${SRC}/core/MOM_dynamics_split_RK2b.F90 #ml
 
   ${SRC}/diagnostics/MOM_debugging.F90
   ${SRC}/diagnostics/MOM_diagnostics.F90
@@ -146,6 +165,8 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/equation_of_state/MOM_EOS_Wright_red.F90
   ${SRC}/equation_of_state/MOM_temperature_convert.F90
   ${SRC}/equation_of_state/MOM_TFreeze.F90
+
+  ${SRC}/equation_of_state/MOM_EOS_base_type.F90 # ml
 
   ${SRC}/equation_of_state/TEOS10/gsw_chem_potential_water_t_exact.f90
   ${SRC}/equation_of_state/TEOS10/gsw_ct_freezing_exact.f90
@@ -210,6 +231,7 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/framework/MOM_unit_scaling.F90
   ${SRC}/framework/MOM_write_cputime.F90
   ${SRC}/framework/posix.F90
+  ${SRC}/framework/MOM_coupler_types.F90 #add_patched_sources
 
   ${SRC}/ice_shelf/MOM_ice_shelf_diag_mediator.F90
   ${SRC}/ice_shelf/MOM_ice_shelf_dynamics.F90
@@ -252,6 +274,7 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/parameterizations/lateral/MOM_thickness_diffuse.F90
   ${SRC}/parameterizations/lateral/MOM_tidal_forcing.F90
   ${SRC}/parameterizations/lateral/MOM_Zanna_Bolton.F90
+  ${SRC}/parameterizations/lateral/MOM_self_attr_load.F90 # ml
 
   ${SRC}/parameterizations/stochastic/MOM_stochastics.F90
 
@@ -305,6 +328,8 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/tracer/RGC_tracer.F90
   ${SRC}/tracer/tracer_example.F90
 
+  ${SRC}/tracer/MOM_generic_tracer.F90 #add_patched_sources
+
   ${SRC}/user/adjustment_initialization.F90
   ${SRC}/user/baroclinic_zone_initialization.F90
   ${SRC}/user/basin_builder.F90
@@ -341,6 +366,7 @@ target_sources(OM3_mom6 PRIVATE
   ${SRC}/user/user_initialization.F90
   ${SRC}/user/user_revise_forcing.F90
 
+
   ${CONFIG_SRC}/external/database_comms/MOM_database_comms.F90
   ${CONFIG_SRC}/external/database_comms/database_client_interface.F90
 
@@ -355,6 +381,9 @@ target_sources(OM3_mom6 PRIVATE
   ${CONFIG_SRC}/external/stochastic_physics/get_stochy_pattern.F90
   ${CONFIG_SRC}/external/stochastic_physics/stochastic_physics.F90
 
+  ${CONFIG_SRC}/external/GFDL_ocean_BGC/generic_tracer_utils.F90 #ml
+  ${CONFIG_SRC}/external/GFDL_ocean_BGC/generic_tracer.F90 #ml
+
   ${CONFIG_SRC}/infra/FMS2/MOM_coms_infra.F90
   ${CONFIG_SRC}/infra/FMS2/MOM_constants.F90
   ${CONFIG_SRC}/infra/FMS2/MOM_cpu_clock_infra.F90
@@ -367,12 +396,17 @@ target_sources(OM3_mom6 PRIVATE
   ${CONFIG_SRC}/infra/FMS2/MOM_io_infra.F90
   ${CONFIG_SRC}/infra/FMS2/MOM_time_manager.F90
 
+  ${CONFIG_SRC}/infra/FMS2/MOM_couplertype_infra.F90 #add_patched_sources
+
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_time.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_surface_forcing_nuopc.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/ocn_comp_NUOPC.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/time_utils.F90
 
-  #extra_sources/mom_cap_gtracer_flux.F90
+  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap.F90 #add_patched_sources
+  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_methods.F90 #add_patched_sources
+  ${CONFIG_SRC}/drivers/nuopc_cap/mom_ocean_model_nuopc.F90 #add_patched_sources
+
 )
 
 ### Install and Export
