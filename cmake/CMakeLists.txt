@@ -65,6 +65,7 @@ set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
 
 find_package(NetCDF REQUIRED Fortran)
 find_package(fms COMPONENTS R8 REQUIRED)
+find_package(ESMF 8.3.0 MODULE REQUIRED)
 #find_package(PIO 2.5.3 REQUIRED COMPONENTS C Fortran)
 #find_package(FoX 4.1.2 REQUIRED)
 
