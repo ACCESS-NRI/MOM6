@@ -85,7 +85,7 @@ else()
 endif()
 target_compile_options(OM3_mom6 PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:${fortran_compile_flags}>")
 target_link_libraries(OM3_mom6
-  #PUBLIC esmf
+  PUBLIC esmf
   PRIVATE FMS::fms_r8
   #PRIVATE AccessOM3::nuopc_cap_share AccessOM3::share FMS::fms_r8
 )
