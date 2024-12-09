@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.18)
 
 project(MOM6 VERSION "0.1.0"
              DESCRIPTION "MOM6"
-             PROJECT_HOMEPAGE_URL https://github.com/ACCESS-NRI/MOM6
+             HOMEPAGE_URL https://github.com/ACCESS-NRI/MOM6
              LANGUAGES C Fortran)
 
 #[==============================================================================[
