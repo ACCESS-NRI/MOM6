@@ -50,8 +50,14 @@ endif()
 add_compile_definitions(
   _USE_GENERIC_TRACER
   _USE_MOM6_DIAG
-  #CESMCOUPLED
 )
+
+# Conditionally define CESMCOUPLED
+if (CESMCOUPLED)
+  add_compile_definitions(
+    CESMCOUPLED
+  )
+endif()
 
 ## Fortran modules path; currently this is simply set to be the include dir
 set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
