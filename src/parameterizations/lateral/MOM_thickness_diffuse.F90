@@ -2127,7 +2127,12 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
                        ! rotation [nondim].
   real :: Stanley_coeff ! Coefficient relating the temperature gradient and sub-gridscale
                         ! temperature variance [nondim]
-  integer :: default_answer_date  ! The default setting for the various ANSWER_DATE flags.
+  logical :: khth_use_ebt_struct ! If true, uses the equivalent barotropic structure
+                                 ! as the vertical structure of thickness diffusivity.
+                                 ! Used to determine if FULL_DEPTH_KHTH_MIN should be
+                                 ! available.
+  logical :: use_meke = .false. ! If true, use the MEKE formulation for the thickness diffusivity.
+  integer :: default_answer_date ! The default setting for the various ANSWER_DATE flags.
   integer :: i, j
 
   CS%initialized = .true.
@@ -2275,12 +2280,12 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
                  "MEKE_GM_SRC_ALT is true.  Values below 20240601 recover the answers from the "//&
                  "original implementation, while higher values use expressions that satisfy "//&
                  "rotational symmetry.", &
-                 default=20240101, do_not_log=.not.CS%GM_src_alt) ! ### Change default to default_answer_date.
+                 default=default_answer_date, do_not_log=.not.CS%GM_src_alt)
   call get_param(param_file, mdl, "MEKE_GM_SRC_ALT_SLOPE_BUG", CS%MEKE_src_slope_bug, &
                  "If true, use a bug that limits the positive values, but not the negative values, "//&
                  "of the slopes used when MEKE_GM_SRC_ALT is true.  When this is true, it breaks "//&
                  "all of the symmetry rules that MOM6 is supposed to obey.", &
-                 default=.true., do_not_log=.not.CS%GM_src_alt) ! ### Change default to False.
+                 default=.false., do_not_log=.not.CS%GM_src_alt)
 
   call get_param(param_file, mdl, "MEKE_GEOMETRIC", CS%MEKE_GEOMETRIC, &
                  "If true, uses the GM coefficient formulation from the GEOMETRIC "//&
