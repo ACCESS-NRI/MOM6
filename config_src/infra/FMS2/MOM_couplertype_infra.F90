@@ -18,7 +18,7 @@ use atmos_ocean_fluxes_mod, only : aof_set_coupler_flux
 use MOM_domain_infra,  only : domain2D
 use MOM_time_manager,  only : time_type
 
-implicit none ; private
+implicit none ;
 
 public :: CT_spawn, CT_initialized, CT_destructor
 public :: CT_set_diags, CT_send_data, CT_data_override, CT_write_chksums
