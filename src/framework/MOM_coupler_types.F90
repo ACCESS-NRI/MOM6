@@ -8,7 +8,8 @@ use MOM_couplertype_infra, only : CT_set_diags, CT_send_data, CT_write_chksums, 
 use MOM_couplertype_infra, only : CT_copy_data, CT_increment_data, CT_rescale_data
 use MOM_couplertype_infra, only : CT_set_data, CT_extract_data, CT_redistribute_data
 use MOM_couplertype_infra, only : coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
-use coupler_types_mod, only : ind_flux, ind_alpha, ind_csurf, ind_kw
+use MOM_couplertype_infra, only : ind_flux, ind_alpha, ind_csurf
+use coupler_types_mod, only : ind_kw
 use MOM_domain_infra,      only : domain2D
 use MOM_time_manager,      only : time_type
 
@@ -22,7 +23,8 @@ public :: atmos_ocn_coupler_flux, coupler_type_data_override
 public :: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 ! These are encoding constant parameters that indicate whether a flux, solubility or
 ! surface ocean concentration are being set or accessed with an inquiry.
-public :: ind_flux, ind_alpha, ind_csurf, ind_kw
+public :: ind_flux, ind_alpha, ind_csurf
+public :: ind_kw
 
 !> This is the interface to spawn one coupler_bc_type into another.
 interface coupler_type_spawn
