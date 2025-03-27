@@ -449,7 +449,6 @@ target_sources(mom6lib PRIVATE
 if (MOM6_ACCESS3)
   target_sources(mom6lib PRIVATE
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_time.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_gtracer_flux.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_surface_forcing_nuopc.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/ocn_comp_NUOPC.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/time_utils.F90
