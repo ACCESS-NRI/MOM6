@@ -22,11 +22,6 @@ message(STATUS "  - MOM6_ACCESS3     ${MOM6_ACCESS3}" )
 message(STATUS "  - MOM6_OPENMP      ${MOM6_OPENMP}"  )
 message(STATUS "  - MOM6_ASYMMETRIC  ${MOM6_ASYMMETRIC}")
 
-if(MOM6_ACCESS3)
-  option(MOM6_CESMCOUPLED "Use CESMCOUPLED"                                     OFF)
-  message(STATUS "  - MOM6_CESMCOUPLED   ${MOM6_CESMCOUPLED}")
-endif()
-
 #[==============================================================================[
 #                           Project configuration                               #
 #]==============================================================================]
@@ -68,7 +63,7 @@ endif()
 
 add_compile_definitions(_USE_GENERIC_TRACER _USE_MOM6_DIAG)
 
-if (MOM6_CESMCOUPLED)
+if (MOM6_ACCESS3)
   add_compile_definitions(CESMCOUPLED)
 endif()
 
