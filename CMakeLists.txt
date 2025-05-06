@@ -449,6 +449,7 @@ if (MOM6_ACCESS3)
   ${CONFIG_SRC}/drivers/nuopc_cap/time_utils.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_methods.F90
+  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_gtracer_flux.F90
   ${CONFIG_SRC}/drivers/nuopc_cap/mom_ocean_model_nuopc.F90
   )
 else()
