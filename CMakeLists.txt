@@ -60,8 +60,8 @@ else()
   message(WARNING "C compiler with ID ${CMAKE_C_COMPILER_ID} will be used with CMake default options")
 endif()
 
-
-add_compile_definitions(_USE_GENERIC_TRACER _USE_MOM6_DIAG)
+# See https://github.com/ACCESS-NRI/GFDL-generic-tracers/issues/29
+add_compile_definitions(_USE_GENERIC_TRACER) # _USE_MOM6_DIAG)
 
 if (MOM6_ACCESS3)
   add_compile_definitions(CESMCOUPLED)
@@ -78,6 +78,7 @@ set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
 #]==============================================================================]
 
 find_package(fms COMPONENTS R8 REQUIRED)
+find_package(GFDLGTracers REQUIRED)
 
 if(NOT TARGET NetCDF::NetCDF_Fortran OR NOT TARGET NetCDF::NetCDF_C) #fms provides NETCDF inteface
   message(FATAL_ERROR "NetCDF interface missing from FMS package")
@@ -124,7 +125,7 @@ target_include_directories(mom6lib PRIVATE ${MOM_MEMORY_DIR})
 target_compile_options(mom6lib PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:${fortran_compile_flags}>")
 
 # link libraries
-target_link_libraries(mom6lib PRIVATE FMS::fms_r8)
+target_link_libraries(mom6lib PRIVATE FMS::fms_r8 GFDLGTracers::gtracers)
 
 if(MOM6_ACCESS3)
   target_link_libraries(mom6lib
@@ -420,9 +421,6 @@ target_sources(mom6lib PRIVATE
 
   ${CONFIG_SRC}/external/stochastic_physics/get_stochy_pattern.F90
   ${CONFIG_SRC}/external/stochastic_physics/stochastic_physics.F90
-
-  ${CONFIG_SRC}/external/GFDL_ocean_BGC/generic_tracer_utils.F90
-  ${CONFIG_SRC}/external/GFDL_ocean_BGC/generic_tracer.F90
 
   ${CONFIG_SRC}/infra/FMS2/MOM_coms_infra.F90
   ${CONFIG_SRC}/infra/FMS2/MOM_constants.F90
