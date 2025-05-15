@@ -12,6 +12,7 @@ include(CMakeFindDependencyMacro)
 set(_required_components ${Mom6lib_FIND_COMPONENTS})
 
 find_dependency(fms COMPONENTS R8 REQUIRED)
+find_dependency(GFDLGTracers REQUIRED)
 find_dependency(NetCDF REQUIRED Fortran)
 if (NOT NetCDF_PARALLEL)
     message(FATAL_ERROR "NetCDF does not have parallel I/O support!")
