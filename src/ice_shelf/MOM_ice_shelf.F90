@@ -1789,6 +1789,9 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   ISS => CS%ISS
 
   new_sim = .false.
+  PRINT*,'CLAIRE PRINTING dirs%input_filename(1:1): ',dirs%input_filename(1:1)
+  PRINT*,'CLAIRE PRINTING dirs%input_filename: ',dirs%input_filename
+  PRINT*,'CLAIRE PRINTING LEN_TRIM(dirs%input_filename): ',LEN_TRIM(dirs%input_filename)
   if ((dirs%input_filename(1:1) == 'n') .and. &
       (LEN_TRIM(dirs%input_filename) == 1)) new_sim = .true.
 
