@@ -1692,7 +1692,7 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, handles,
       long_name='Area integrated mass leaving ocean due to evap and seaice form', units='kg s-1')
 
   handles%id_total_net_massin = register_scalar_field('ocean_model', 'total_net_massin', Time, diag, &
-      long_name='Area integrated mass entering ocean due to predip, runoff, ice melt', units='kg s-1')
+      long_name='Area integrated mass entering ocean due to precip, runoff, ice melt', units='kg s-1')
 
   !=========================================================================
   ! area averaged surface mass transport
