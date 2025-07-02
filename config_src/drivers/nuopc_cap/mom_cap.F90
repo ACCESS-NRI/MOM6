@@ -677,6 +677,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   if (runtype == "initial") then
     if (cesm_coupled) then
       restartfiles = "n"
+      dirs%input_filename = "n" !CLAIRE
       PRINT*,'PRINTING CLAIRE restartfiles = "n" in config_src/drivers/nuopc_cap/mom_cap.F90'
     else
       call get_MOM_input(dirs=dirs)
