@@ -83,9 +83,6 @@ find_package(GFDLGTracers REQUIRED)
 if(NOT TARGET NetCDF::NetCDF_Fortran OR NOT TARGET NetCDF::NetCDF_C) #fms provides NETCDF inteface
   message(FATAL_ERROR "NetCDF interface missing from FMS package")
 endif()
-if (NOT NetCDF_PARALLEL)
-    message(FATAL_ERROR "NetCDF does not have parallel I/O support!")
-endif()
 
 if (MOM6_ACCESS3)
   find_package(Access3Share REQUIRED cdeps timing share nuopc_cap_share)
