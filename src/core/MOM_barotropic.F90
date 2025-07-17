@@ -4651,7 +4651,9 @@ subroutine barotropic_init(u, v, h, eta, Time, G, GV, US, param_file, diag, CS, 
                  default=default_answer_date, do_not_log=.not.GV%Boussinesq)
   if (.not.GV%Boussinesq) CS%answer_date = max(CS%answer_date, 20230701)
 
-  call get_param(param_file, mdl, "VISC_REM_BUG", visc_rem_bug, default=.true., do_not_log=.true.)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "VISC_REM_BUG", visc_rem_bug, default=.false., do_not_log=.true.)
   call get_param(param_file, mdl, "VISC_REM_BT_WEIGHT_BUG", CS%wt_uv_bug, &
                  "If true, recover a bug in barotropic solver that uses an unnormalized weight "//&
                  "function for vertical averages of baroclinic velocity and forcing. Default "//&

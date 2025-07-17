@@ -114,6 +114,17 @@ function register_Kelvin_OBC(param_file, CS, US, OBC_Reg)
                    "at the open boundaries.", units="m s-1", default=1.0, scale=US%m_s_to_L_T)
   endif
 
+  call get_param(param_file, mdl, "KELVIN_WAVE_VEL_NUDGING_TIMESCALE", CS%OBC_nudging_time, &
+                 "The timescale with which the inflowing open boundary velocities are nudged toward "//&
+                 "their intended values with the Kelvin wave test case, or a negative value to keep "//&
+                 "the value that is set when the OBC segments are initialized.", &
+                 units="s", default=-1.0, scale=US%s_to_T)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "KELVIN_SET_OBC_INDEXING_BUGS", CS%indexing_bugs, &
+                 "If true, retain several horizontal indexing bugs that were in the original "//&
+                 "version of Kelvin_set_OBC_data.", default=enable_bugs)
+
   ! Register the Kelvin open boundary.
   call register_OBC(casename, param_file, OBC_Reg)
   register_Kelvin_OBC = .true.
