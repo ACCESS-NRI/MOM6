@@ -16,15 +16,4 @@ spack:
       - '%{{ oneapi_compiler }} target={{ target }}'
   concretizer:
     unify: false
-    reuse:
-      roots: false
-      from:
-      - type: buildcache
-        exclude:
-        - 'access3'
-        - 'access-cice'
-        - 'access3-share'
-        - 'access-generic-tracers'
-        - 'access-mocsy'
-        - 'access-ww3'
   view: false
