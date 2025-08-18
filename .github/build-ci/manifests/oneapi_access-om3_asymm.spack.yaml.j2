@@ -11,12 +11,18 @@ spack:
     access-mom6:
       require:
       - '@git.{{ ref }} +asymmetric_mem'
+    fms:
+      require:
+        - '@2025.03:'
     esmf:
       require:
         - '@8.7.0'
         - 'fflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
         - 'cflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
         - 'cxxflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
+    openmpi:
+      require:
+        - '@4.1.7:'
     gcc-runtime:
       require:
       - '%gcc target={{ target }}'
