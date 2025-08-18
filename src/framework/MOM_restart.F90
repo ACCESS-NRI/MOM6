@@ -2190,6 +2190,9 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
     else
       filepath = trim(directory)//trim(fname)
       inquire(file=filepath, exist=fexists)
+      if (.not. fexists) filepath = trim(filepath)//".nc"
+
+      inquire(file=filepath, exist=fexists)
       if (fexists) then
         nf = nf + 1
         if (present(IO_handles)) &
@@ -2200,6 +2203,11 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
         if (is_root_pe() .and. (present(IO_handles))) &
           call MOM_error(NOTE,"MOM_restart: MOM run restarted using : "//trim(filepath))
       elseif (CS%parallel_restartfiles) then
+        filepath = trim(directory)//trim(fname)
+        length   = len_trim(filepath)
+        if (length < 3 .or. filepath(length-2:length) /= '.nc') then
+          filepath = trim(filepath)//'.nc'
+        endif
         fexists = file_exists(filepath, G%Domain)
         if (fexists) then
             nf = nf + 1
