@@ -11,6 +11,12 @@ spack:
     access-mom6:
       require:
       - '@git.{{ ref }} +asymmetric_mem'
+    esmf:
+      require:
+        - '@8.7.0'
+        - 'fflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
+        - 'cflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
+        - 'cxxflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
     gcc-runtime:
       require:
       - '%gcc target={{ target }}'
