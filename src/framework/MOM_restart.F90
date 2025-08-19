@@ -2109,7 +2109,7 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
   integer :: nf              ! The number of files that have been found so far
   integer :: m, length
   logical :: still_looking   ! If true, the code is still looking for automatically named files
-  logical :: fexists, fexists_parallel ! True if a file has been found
+  logical :: fexists, fexists_decomp ! True if a file has been found
   character(len=32) :: filename_appendix = '' ! Filename appendix for ensemble runs
   character(len=80) :: restartname
 
@@ -2191,14 +2191,14 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
       filepath = trim(directory)//trim(fname)
       inquire(file=filepath, exist=fexists)
       if (.not.fexists .and. CS%parallel_restartfiles) &
-        fexists_parallel = file_exists(filepath, G%Domain)
+        fexists_decomp = file_exists(filepath, G%Domain)
 
       ! If not found, try with ".nc" extension
-      if (.not.(fexists .or. fexists_parallel)) then
+      if (.not.(fexists .or. fexists_decomp)) then
         filepath = trim(filepath)//".nc"
         inquire(file=filepath, exist=fexists)
         if (.not.fexists .and. CS%parallel_restartfiles) &
-              fexists_parallel = file_exists(filepath, G%Domain)
+              fexists_decomp = file_exists(filepath, G%Domain)
       endif
 
       if (fexists) then
@@ -2210,7 +2210,7 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
         if (present(file_paths)) file_paths(nf) = filepath
         if (is_root_pe() .and. (present(IO_handles))) &
           call MOM_error(NOTE,"MOM_restart: MOM run restarted using : "//trim(filepath))
-      elseif (fexists_parallel) then
+      elseif (fexists_decomp) then
         nf = nf + 1
         if (present(IO_handles)) &
           call IO_handles(nf)%open(trim(filepath), READONLY_FILE, MOM_domain=G%Domain)
