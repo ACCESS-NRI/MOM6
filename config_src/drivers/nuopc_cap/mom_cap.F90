@@ -677,12 +677,8 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   if (runtype == "initial") then
     if (cesm_coupled) then
       restartfiles = "n"
-      dirs%input_filename = "n" !CLAIRE
-      PRINT*,'PRINTING CLAIRE restartfiles = "n" in config_src/drivers/nuopc_cap/mom_cap.F90'
     else
       call get_MOM_input(dirs=dirs)
-      PRINT*,'PRINTING CLAIRE restartfiles NOT "n" in config_src/drivers/nuopc_cap/mom_cap.F90'
-      PRINT*,'PRINTING CLAIRE dirs%input_filename(1:1) = ',dirs%input_filename(1:1)
       restartfiles = dirs%input_filename(1:1)
     endif
     call ESMF_LogWrite('MOM_cap:restartfile = '//trim(restartfiles), ESMF_LOGMSG_INFO)
