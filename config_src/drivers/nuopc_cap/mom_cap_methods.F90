@@ -22,7 +22,7 @@ use MOM_grid,                  only: ocean_grid_type
 use MOM_domains,               only: pass_var
 use MOM_coupler_types,         only: coupler_2d_bc_type
 use mpp_domains_mod,           only: mpp_get_compute_domain
-use MOM_ice_shelf              only: ice_shelf_CS
+use MOM_ice_shelf,              only: ice_shelf_CS
 
 #ifdef _USE_GENERIC_TRACER
 use MOM_coupler_types,         only: set_coupler_type_data
@@ -91,7 +91,6 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
                                                        !! describes the atmospheric tracer fields to
                                                        !! be imported for the calculation of generic
                                                        !! tracer fluxes.
-  type(ice_shelf_CS)            , intent(in)    :: CS       !< ice shelf state
   integer                       , intent(inout) :: rc                 !< Return code
 
   ! Local Variables
@@ -614,13 +613,14 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
 end subroutine mom_import
 
 !> Maps outgoing ocean data to ESMF State
-subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, rc)
+subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, rc, CS)
   type(ocean_public_type) , intent(in)    :: ocean_public !< Ocean surface state
   type(ocean_grid_type)   , intent(in)    :: ocean_grid   !< Ocean model grid
   type(ocean_state_type)  , pointer       :: ocean_state  !< Ocean state
   type(ESMF_State)        , intent(inout) :: exportState  !< outgoing data
   type(ESMF_Clock)        , intent(in)    :: clock        !< ESMF clock
   integer                 , intent(inout) :: rc           !< Return code
+  type(ice_shelf_CS)            , intent(in)    :: CS       !< ice shelf state
 
   ! Local variables
   integer                         :: i, j, ig, jg         ! indices
