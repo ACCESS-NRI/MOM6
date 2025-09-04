@@ -613,7 +613,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
 end subroutine mom_import
 
 !> Maps outgoing ocean data to ESMF State
-subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, rc, CS)
+subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, CS, rc)
   type(ocean_public_type) , intent(in)    :: ocean_public !< Ocean surface state
   type(ocean_grid_type)   , intent(in)    :: ocean_grid   !< Ocean model grid
   type(ocean_state_type)  , pointer       :: ocean_state  !< Ocean state
