@@ -678,6 +678,7 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
       omask(i,j) = nint(ocean_grid%mask2dT(ig,jg)) - nint(CS%ISS%hmask(ig,jg))
     enddo
   enddo
+  PRINT*, 'omask', omask
 
   call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, omask, ocean_grid, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
