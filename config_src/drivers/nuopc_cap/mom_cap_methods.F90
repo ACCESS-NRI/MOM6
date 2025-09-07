@@ -22,7 +22,6 @@ use MOM_grid,                  only: ocean_grid_type
 use MOM_domains,               only: pass_var
 use MOM_coupler_types,         only: coupler_2d_bc_type
 use mpp_domains_mod,           only: mpp_get_compute_domain
-use MOM_ice_shelf              only: ice_shelf_CS
 
 #ifdef _USE_GENERIC_TRACER
 use MOM_coupler_types,         only: set_coupler_type_data
@@ -91,7 +90,6 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
                                                        !! describes the atmospheric tracer fields to
                                                        !! be imported for the calculation of generic
                                                        !! tracer fluxes.
-  type(ice_shelf_CS)            , intent(in)    :: ice_shelf_CS       !< ice shelf state
   integer                       , intent(inout) :: rc                 !< Return code
 
   ! Local Variables
@@ -675,7 +673,7 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
     jg = j + ocean_grid%jsc - jsc
     do i = isc, iec
       ig = i + ocean_grid%isc - isc
-      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg)) - nint(ice_shelf_CS%ISS%hmask(ig,jg))
+      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg))
     enddo
   enddo
 
