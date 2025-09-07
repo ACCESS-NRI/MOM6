@@ -32,7 +32,6 @@ use MOM_cap_methods,          only: ChkErr
 use MOM_ensemble_manager,     only: ensemble_manager_init
 use MOM_coms,                 only: sum_across_PEs
 use MOM_coupler_types,        only: coupler_1d_bc_type, coupler_2d_bc_type
-use MOM_ice_shelf,              only: ice_shelf_CS
 
 #ifdef CESMCOUPLED
 use shr_log_mod,             only: shr_log_setLogUnit
@@ -1694,7 +1693,6 @@ subroutine DataInitialize(gcomp, rc)
   type(ice_ocean_boundary_type), pointer :: Ice_ocean_boundary => NULL()
   type(ocean_internalstate_wrapper)      :: ocean_internalstate
   type(ocean_grid_type), pointer         :: ocean_grid
-  type(ice_shelf_CS)            :: CS
   character(240)                         :: msgString
   character(240)                         :: fldname
   character(240)                         :: timestr
@@ -1724,7 +1722,7 @@ subroutine DataInitialize(gcomp, rc)
   ocean_state        => ocean_internalstate%ptr%ocean_state_type_ptr
   call get_ocean_grid(ocean_state, ocean_grid)
 
-  call mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, CS, rc=rc)
+  call mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
@@ -1799,7 +1797,6 @@ subroutine ModelAdvance(gcomp, rc)
   type(coupler_2d_bc_type),      pointer :: atm_fields         => NULL()
   type(ocean_internalstate_wrapper)      :: ocean_internalstate
   type(ocean_grid_type)        , pointer :: ocean_grid
-  type(ice_shelf_CS)            :: CS
   type(time_type)                        :: Time
   type(time_type)                        :: Time_import
   type(time_type)                        :: Time_step_coupled
@@ -1987,7 +1984,7 @@ subroutine ModelAdvance(gcomp, rc)
     ! Export Data
     !---------------
 
-    call mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, CS, rc=rc)
+    call mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     if (dbug > 0) then

@@ -86,7 +86,7 @@ public ice_sheet_calving_to_ocean_sfc
 ! vary with the Boussinesq approximation, the Boussinesq variant is given first.
 
 !> Control structure that contains ice shelf parameters and diagnostics handles
-type, public :: ice_shelf_CS
+type, public :: ice_shelf_CS ; private
   ! Parameters
   type(MOM_restart_CS), pointer :: restart_CSp => NULL() !< A pointer to the restart control
                                                   !! structure for the ice shelves
