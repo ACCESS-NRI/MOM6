@@ -673,7 +673,7 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
     jg = j + ocean_grid%jsc - jsc
     do i = isc, iec
       ig = i + ocean_grid%isc - isc
-      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg))
+      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg)) - nint(ocean_state%fluxes%frac_shelf_h(ig,jg))
     enddo
   enddo
 
