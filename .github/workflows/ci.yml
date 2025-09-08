@@ -39,4 +39,5 @@ jobs:
       spack-manifest-data-path: .github/build-ci/data/standard.json
       spack-packages-ref: dougie-delete
       # spack-config-ref: main
-      spack-ref: releases/v1.0
+      # spack-ref: releases/v1.0
+      container-image-version: :rocky-v1.0
