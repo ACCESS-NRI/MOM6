@@ -22,12 +22,6 @@ use MOM_grid,                  only: ocean_grid_type
 use MOM_domains,               only: pass_var
 use MOM_coupler_types,         only: coupler_2d_bc_type
 use mpp_domains_mod,           only: mpp_get_compute_domain
-use mpp_mod, only :  mpp_pe
-
-use netcdf
-use MOM_netcdf, only: export_real_array_2d, export_real_array_3d
-use MOM_diag_mediator, only : post_data, register_diag_field
-use MOM_diag_mediator, only : safe_alloc_ptr, diag_ctrl, time_type
 
 #ifdef _USE_GENERIC_TRACER
 use MOM_coupler_types,         only: set_coupler_type_data
@@ -648,8 +642,6 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
   real(ESMF_KIND_R8), allocatable :: dhdx(:,:), dhdy(:,:)
   real(ESMF_KIND_R8), allocatable :: dhdx_rot(:,:), dhdy_rot(:,:)
   character(len=*)  , parameter   :: subname = '(mom_export)'
-  integer :: id
-  character(len=10) :: my_string
 
   rc = ESMF_SUCCESS
 
@@ -684,23 +676,6 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
       omask(i,j) =  nint(ocean_grid%mask2dT(ig,jg)) - ceiling(ocean_state%ice_shelf_CSp%ISS%hmask(ig,jg))
     enddo
   enddo
-!  id = register_diag_field('ocean_model', 'frac_shelf_h', ocean_state%diag%axesT1, ocean_state%Time, &
-!      'Ice Shelf Fractional Area in cell', 'none')
-!  call post_data(id, ocean_state%fluxes%frac_shelf_h, ocean_state%diag)
-!
-!  id = register_diag_field('ocean_model', 'omask', ocean_state%diag%axesT1, ocean_state%Time, &
-!      'omask', 'none')
-!  call post_data(id, omask, ocean_state%diag)
-
-
-  !PRINT*,'PRINTING CLAIRE OMASK',omask
-  !PRINT*,'PRINTING CLAIRE FRAC_SHELF_H',ocean_state%fluxes%frac_shelf_h
-  !! CLAIRE OUTPUT NETCDF FOR FUN !!
-!  write(my_string, '(I5)') mpp_pe()
-
-!  call export_real_array_2d('frac_shelf_h' // my_string // '.nc',ocean_state%fluxes%frac_shelf_h,'frac_shelf_h')
-!  call export_real_array_2d('hmask' // my_string // '.nc',ocean_state%ice_shelf_CSp%ISS%hmask, 'hmask')
-!  call export_real_array_2d('omask' // my_string // '.nc',omask,'omask')
 
   call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, omask, ocean_grid, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return

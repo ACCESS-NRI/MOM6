@@ -1139,16 +1139,12 @@ subroutine ocean_public_type_chksum(id, timestep, ocn)
 
 end subroutine ocean_public_type_chksum
 
-subroutine get_ocean_grid(OS, Gridp)!, frac_shelf_h)
+subroutine get_ocean_grid(OS, Gridp)
   ! Obtain the ocean grid.
   type(ocean_state_type) :: OS
   type(ocean_grid_type) , pointer :: Gridp
-!  real, dimension(SZI_(G),SZJ_(G)), &
-!                     optional, pointer   :: frac_shelf_h    !< The fraction of the grid cell covered
-!                                                               !! by a floating ice shelf [nondim].
 
   Gridp => OS%grid
-!  frac_shelf_h => OS%fluxes%frac_shelf_h
   return
 end subroutine get_ocean_grid
 
