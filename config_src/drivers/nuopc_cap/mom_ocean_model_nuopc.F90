@@ -47,6 +47,7 @@ use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
 use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
+use MOM_ice_shelf, only : initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
 use MOM_coupler_types,       only : coupler_1d_bc_type, coupler_2d_bc_type
 use MOM_coupler_types,       only : coupler_type_spawn, coupler_type_write_chksums
@@ -395,6 +396,11 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
     call initialize_ice_shelf(param_file, OS%grid, OS%Time, OS%ice_shelf_CSp, &
                               OS%diag, Time_init, OS%dirs%output_directory, OS%forces, OS%fluxes)
   endif
+  if (OS%use_ice_shelf)  then
+    call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%fluxes)
+    call initialize_ice_shelf_forces(OS%ice_shelf_CSp, OS%grid, OS%US, OS%forces)
+  endif
+
   if (OS%icebergs_alter_ocean)  then
     call marine_ice_init(OS%Time, OS%grid, param_file, OS%diag, OS%marine_ice_CSp)
     if (.not. OS%use_ice_shelf) &
@@ -1133,12 +1139,16 @@ subroutine ocean_public_type_chksum(id, timestep, ocn)
 
 end subroutine ocean_public_type_chksum
 
-subroutine get_ocean_grid(OS, Gridp)
+subroutine get_ocean_grid(OS, Gridp)!, frac_shelf_h)
   ! Obtain the ocean grid.
   type(ocean_state_type) :: OS
   type(ocean_grid_type) , pointer :: Gridp
+!  real, dimension(SZI_(G),SZJ_(G)), &
+!                     optional, pointer   :: frac_shelf_h    !< The fraction of the grid cell covered
+!                                                               !! by a floating ice shelf [nondim].
 
   Gridp => OS%grid
+!  frac_shelf_h => OS%fluxes%frac_shelf_h
   return
 end subroutine get_ocean_grid
 

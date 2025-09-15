@@ -19,6 +19,7 @@ use netcdf, only : NF90_GLOBAL
 use netcdf, only : nf90_inquire, nf90_inquire_dimension, nf90_inquire_variable
 use netcdf, only : nf90_inq_dimids, nf90_inq_varids
 use netcdf, only : NF90_MAX_NAME
+use netcdf, only : nf90_inq_varid
 
 use MOM_error_handler, only : MOM_error, FATAL
 use MOM_io_infra, only : READONLY_FILE, WRITEONLY_FILE
@@ -42,6 +43,7 @@ public :: get_netcdf_fields
 public :: get_netcdf_filename
 public :: read_netcdf_field
 
+public :: export_real_array_2d, export_real_array_3d, import_real_array_3d
 
 !> Internal time value used to indicate an uninitialized time
 real, parameter :: NULLTIME = -1
@@ -806,4 +808,107 @@ subroutine check_netcdf_call(ncerr, header, message)
   endif
 end subroutine check_netcdf_call
 
+!!!!!!!!!!!!!!!!!!!!!  HACK  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+subroutine import_real_array_3d(file_name, array, var_name)
+        character(len=*), intent(in)    :: file_name
+        real,          intent(inout) :: array(:, :, :)
+        character(len=*), intent(in)    :: var_name
+        integer                         :: ncid, varid
+        integer                         :: x_dimid, y_dimid, z_dimid
+
+        ! Open the NetCDF file read-only.
+        call check(nf90_open(file_name, NF90_NOWRITE, ncid))
+
+        ! Get the `varid` of the data variable, based on its name.
+        call check(nf90_inq_varid(ncid, var_name, varid))
+
+        ! Read the data.
+        call check(nf90_get_var(ncid, varid, array))
+
+        ! Close the file.
+        call check(nf90_close(ncid))
+end subroutine import_real_array_3d
+
+subroutine export_real_array_3d(file_name, array, var_name)
+        character(len=*), intent(in)    :: file_name
+        real,          intent(in)       :: array(:, :, :)
+        character(len=*), intent(in)    :: var_name
+        integer                         :: ncid, varid
+        integer                         :: x_dimid, y_dimid, z_dimid
+        real                            :: fillval, zero
+
+        zero = 0.0
+
+        ! Create the NetCDF file. Override file, if it already exists.
+        call check(nf90_create(file_name, NF90_CLOBBER, ncid))
+
+        ! Define the dimensions. NetCDF returns the IDs `x_dimid` and `y_dimid`.
+        call check(nf90_def_dim(ncid, 'x', size(array, 1), x_dimid))
+        call check(nf90_def_dim(ncid, 'y', size(array, 2), y_dimid))
+        call check(nf90_def_dim(ncid, 'z', size(array, 3), z_dimid))
+
+        ! Define the variable type (NF90_FLOAT: float).
+        !call check(nf90_def_var(ncid, var_name, NF90_FLOAT, [ x_dimid, y_dimid, z_dimid ], varid))
+        call check(nf90_def_var(ncid, var_name, NF90_DOUBLE, [ x_dimid, y_dimid, z_dimid ], varid))
+
+        fillval = zero / zero
+        call check( nf90_put_att(ncid, varid, "_FillValue", fillval) )
+
+        ! End define mode.
+        call check(nf90_enddef(ncid))
+
+        ! Write the data to the file.
+        call check(nf90_put_var(ncid, varid, array))
+
+        ! Close the file.
+        call check(nf90_close(ncid))
+end subroutine export_real_array_3d
+
+subroutine export_real_array_2d(file_name, array, var_name)
+        character(len=*), intent(in)    :: file_name
+        real,          intent(in)       :: array(:, :)
+        character(len=*), intent(in)    :: var_name
+        integer                         :: ncid, varid
+        integer                         :: x_dimid, y_dimid
+
+        ! Create the NetCDF file. Override file, if it already exists.
+        call check(nf90_create(file_name, NF90_CLOBBER, ncid))
+
+        ! Define the dimensions. NetCDF returns the IDs `x_dimid` and `y_dimid`.
+        call check(nf90_def_dim(ncid, 'x', size(array, 1), x_dimid))
+        call check(nf90_def_dim(ncid, 'y', size(array, 2), y_dimid))
+
+        ! Define the variable type (NF90_FLOAT: float).
+        !call check(nf90_def_var(ncid, var_name, NF90_FLOAT, [ x_dimid, y_dimid ], varid))
+        call check(nf90_def_var(ncid, var_name, NF90_DOUBLE, [ x_dimid, y_dimid ], varid))
+
+        ! End define mode.
+        call check(nf90_enddef(ncid))
+
+        ! Write the data to the file.
+        call check(nf90_put_var(ncid, varid, array))
+
+        ! Close the file.
+        call check(nf90_close(ncid))
+end subroutine export_real_array_2d
+
+subroutine check(stat)
+        integer, intent(in) :: stat
+
+        if (stat /= NF90_NOERR) then
+            print '(a)', trim(nf90_strerror(stat))
+            stop
+        end if
+end subroutine check
+
+function itoa(i) result(res)
+  character(:),allocatable :: res
+  integer,intent(in) :: i
+  character(range(i)+2) :: tmp
+  write(tmp,'(i0)') i
+  res = trim(tmp)
+end function
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 end module MOM_netcdf
