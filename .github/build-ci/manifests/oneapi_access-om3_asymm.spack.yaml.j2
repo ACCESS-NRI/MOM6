@@ -1,25 +1,16 @@
 spack:
   specs:
-  - 'access-om3@latest'
+  - 'access-om3@latest ^openmpi'
   packages:
     cmake:
       require:
       - '@3.31.6'
     access3:
       require:
-      - 'configurations=MOM6-CICE6,MOM6-CICE6-WW3'
+      - 'configurations=MOM6,MOM6-CICE6,MOM6-CICE6-WW3'
     access-mom6:
       require:
       - '@git.{{ ref }} +asymmetric_mem'
-    esmf:
-      require:
-        - '@8.7.0'
-        - 'fflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
-        - 'cflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
-        - 'cxxflags="-march=sapphirerapids -mtune=sapphirerapids -unroll -O0"'
-    openmpi:
-      require:
-        - '@4.1.7:'
     gcc-runtime:
       require:
       - '%gcc target={{ target }}'
