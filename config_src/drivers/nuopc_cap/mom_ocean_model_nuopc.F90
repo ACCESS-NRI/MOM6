@@ -744,7 +744,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
          OS%dirs%restart_output_dir) ! Is this needed?
     if (OS%use_ice_shelf) then
       call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, &
-           OS%dirs%restart_output_dir)
+            './RESTART/') !OS%dirs%restart_output_dir)
     endif
   else
     if (BTEST(OS%Restart_control,1)) then
@@ -753,7 +753,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
       call forcing_save_restart(OS%forcing_CSp, OS%grid, OS%Time, &
            OS%dirs%restart_output_dir, time_stamped=.true.)
       if (OS%use_ice_shelf) then
-        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir, .true.)
+        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/', .true.) ! OS%dirs%restart_output_dir, .true.)
       endif
     endif
     if (BTEST(OS%Restart_control,0)) then
@@ -762,7 +762,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
       call forcing_save_restart(OS%forcing_CSp, OS%grid, OS%Time, &
            OS%dirs%restart_output_dir)
       if (OS%use_ice_shelf) then
-        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
+        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/') !OS%dirs%restart_output_dir)
       endif
     endif
   endif
@@ -823,7 +823,7 @@ subroutine ocean_model_save_restart(OS, Time, directory, filename_suffix)
   call forcing_save_restart(OS%forcing_CSp, OS%grid, Time, restart_dir)
 
   if (OS%use_ice_shelf) then
-    call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
+    call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/') ! OS%dirs%restart_output_dir)
   endif
 end subroutine ocean_model_save_restart
 
