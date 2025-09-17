@@ -771,7 +771,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
          OS%dirs%restart_output_dir) ! Is this needed?
     if (OS%use_ice_shelf) then
       call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, &
-           OS%dirs%restart_output_dir)
+            './RESTART/') !OS%dirs%restart_output_dir)
     endif
     ! Give the FMS coupler_bc_type tracer flux restart the same name root as the ocean restart.
     call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, OS%Time, OS%dirs%restart_output_dir, &
@@ -784,7 +784,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
       call forcing_save_restart(OS%forcing_CSp, OS%grid, OS%Time, &
            OS%dirs%restart_output_dir, time_stamped=.true.)
       if (OS%use_ice_shelf) then
-        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir, .true.)
+        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/', .true.) ! OS%dirs%restart_output_dir, .true.)
       endif
       ! With no ocean restart name to share, the FMS coupler_bc_type tracer flux restart falls
       ! back on its own name root.
@@ -797,7 +797,7 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
       call forcing_save_restart(OS%forcing_CSp, OS%grid, OS%Time, &
            OS%dirs%restart_output_dir)
       if (OS%use_ice_shelf) then
-        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
+        call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/') !OS%dirs%restart_output_dir)
       endif
       call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, OS%Time, &
                                     OS%dirs%restart_output_dir)
@@ -864,7 +864,7 @@ subroutine ocean_model_save_restart(OS, Time, directory, filename_suffix)
   call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, Time, restart_dir)
 
   if (OS%use_ice_shelf) then
-    call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
+    call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, './RESTART/') ! OS%dirs%restart_output_dir)
   endif
 end subroutine ocean_model_save_restart
 
