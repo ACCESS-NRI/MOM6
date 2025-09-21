@@ -35,7 +35,7 @@ jobs:
       allow-ssh-into-spack-install: false  # If true, PR author must ssh into instance to complete job
       spack-manifest-data-path: .github/build-ci/data/standard.json
       spack-packages-ref: api-v2
-      # FIXME: This tests having multiple upstreams for different versions of spack
+      # FIXME: This tests having multiple upstreams for different versions of spack!
       spack-config-ref: build-ci-247-multi-upstream
       spack-ref: releases/v1.0
       container-image-version: :rocky-v1.0
