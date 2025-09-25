@@ -1710,10 +1710,12 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
 
   call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag)
 
-  ! Post the numerical mixing
+  ! Compute and post the numerical mixing
   if (IDs%id_numerical_mixing_T > 0) then
     nmT(:,:,:) = 0.
-    call numerical_mixing(G, GV, C, C_adxy, h, h_tend, Idt, C_adx, umo, C_ady, vmo, scale_constant, rho_ref, nmT)
+    ! Reg%Tr(1)%ad_x this accesses info from the tracer registry but I am not sure of the order of the tracers
+    call numerical_mixing(G, GV, C, Reg%Tr(1)%advection_xy, h, h_tend, Idt, Reg%Tr(1)%ad_x, umo, Reg%Tr(1)%ad_y, vmo, &
+                          scale_constant, rho_ref, nmT)
     call post_data(IDs%id_numerical_mixing_T, nmT, diag)
   ! For now just temperature
   ! elseif (IDs%id_numerical_mixing_S > 0) then

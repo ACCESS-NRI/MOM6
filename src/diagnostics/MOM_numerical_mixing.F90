@@ -27,7 +27,7 @@ subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_a
   real,                     intent(inout) :: umo(:, :, :)      !< Total zonal mass transport
   real,                     intent(inout) :: C_ady(:, :, :)    !< Explicit meridional advection of tracer C
   real,                     intent(inout) :: vmo(:, :, :)      !< Total meridional mass transport
-  real,                     intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for temperature
+  real,                     intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
   real,                     intent(in) :: rho_ref              !< Reference density
   real,                     intent(inout) :: nm(:, :, :)       !< temporary numerical mixing
 
@@ -36,8 +36,8 @@ subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_a
 
   !< adjust for correct dimensions
   C_adxy = C_adxy / (scale_constant * rho_ref) !< units: [C]ms⁻¹
-  C_adx = C_adx / (scale_constant  * rho_ref)  !< units: [C]m⁻²s⁻¹
-  C_ady = C_ady / (scale_constant  * rho_ref)  !< units: [C]m⁻²s⁻¹
+  C_adx = C_adx / (scale_constant * rho_ref)   !< units: [C]m⁻²s⁻¹
+  C_ady = C_ady / (scale_constant * rho_ref)   !< units: [C]m⁻²s⁻¹
   umo = umo / rho_ref                          !< units: m³s⁻¹
   vmo = vmo / rho_ref                          !< units: m³s⁻¹
 
@@ -68,8 +68,8 @@ subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, 
         h1 = h(i, j, k)
         hadv = h1 + dt * h_tendency(i, j, k)
         C1 = C(i, j, k)
-        Cadv = (h1 * C1 + dt * C_adxy(i, j, k)) / hadv
-        nm(i-1, j-1, k) = (hadv * Cadv**2 - h1 * C1**2) / dt
+        Cadv = h1 * C1 + dt * C_adxy(i, j, k)
+        nm(i-1, j-1, k) = (Cadv**2 / hadv - h1 * C1**2) / dt
       enddo
     enddo
   enddo
