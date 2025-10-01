@@ -80,7 +80,7 @@ end subroutine thickness_weighted_variance_change
 subroutine zonal_upwind_fluxes(C, C_adx, uh, A, is, ie, js, je, nz, nm)
 
   implicit none
-  real, intent(in) :: C(:, :, :)            ! < Tracer to calculate numerical mixing for
+  real, intent(in) :: C(:, :, :)            !< Tracer to calculate numerical mixing for
   real, intent(in) :: C_adx(:, :, :)        !< Explicit zonal advection of tracer C
   real, intent(in) :: uh(:, :, :)           !< Zonal transport
   real, intent(in) :: A(:, :, :)            !< Area of grid cells

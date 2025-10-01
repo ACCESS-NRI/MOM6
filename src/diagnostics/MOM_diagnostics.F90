@@ -162,7 +162,6 @@ type, public :: transport_diag_IDs ; private
   integer :: id_uhtr = -1, id_umo = -1, id_umo_2d = -1
   integer :: id_vhtr = -1, id_vmo = -1, id_vmo_2d = -1
   integer :: id_dynamics_h = -1, id_dynamics_h_tendency = -1
-  integer :: id_numerical_mixing_T = -1, integer :: id_numerical_mixing_S = -1
   !>@}
 end type transport_diag_IDs
 
@@ -1651,9 +1650,8 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: umo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nmT ! Numerical mixing of temperature
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nmS ! Numerical mixing of salinity
                           ! [H T-1 ~> m s-1 or kg m-2 s-1].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
@@ -1710,19 +1708,16 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
 
   call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag)
 
-  ! Compute and post the numerical mixing
-  if (IDs%id_numerical_mixing_T > 0) then
-    nmT(:,:,:) = 0.
-    ! Reg%Tr(1)%ad_x this accesses info from the tracer registry but I am not sure of the order of the tracers
-    call numerical_mixing(G, GV, C, Reg%Tr(1)%advection_xy, h, h_tend, Idt, Reg%Tr(1)%ad_x, umo, Reg%Tr(1)%ad_y, vmo, &
-                          scale_constant, rho_ref, nmT)
-    call post_data(IDs%id_numerical_mixing_T, nmT, diag)
-  ! For now just temperature
-  ! elseif (IDs%id_numerical_mixing_S > 0) then
-  !   nmS(:,:,:) = 0.
-  !   call numerical_mixing(C, C_adxy, h, h_tendency, Idt, C_adx, umo, C_ady, vmo, V, scale_constant, rho_ref, nmS)
-  !   call post_data(IDs%id_numerical_mixing_S, nmS, diag)
-  endif
+  do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
+    Tr => Reg%Tr(m)
+    ! Compute and post the numerical mixing
+    if (Tr%id_numerical_mixing > 0) then
+      nm(:,:,:) = 0.
+      call numerical_mixing(G, GV, C, Tr%advection_xy, h, h_tend, Idt, Tr%ad_x, umo, Tr%ad_y, vmo, &
+                            3991.86795711963, rho_ref, nm)
+      call post_data(Tr%numerical_mixing, nm, diag)
+    endif
+  endif; enddo
 
   call diag_restore_grids(diag)
 
@@ -2256,10 +2251,6 @@ subroutine register_transport_diags(Time, G, GV, US, IDs, diag)
   IDs%id_dynamics_h_tendency = register_diag_field('ocean_model','dynamics_h_tendency', &
       diag%axesTl, Time, 'Change in layer thicknesses due to horizontal dynamics', &
       trim(thickness_units)//" s-1", conversion=GV%H_to_MKS*US%s_to_T, v_extensive=.true.)
-  IDs%id_numerical_mixing_T = register_diag_field('ocean_model','numerical_mixing_T', &
-      diag%mask3dT, Time, 'Spurious mixing of temperature due to advection', "C^2ms-1")
-  IDs%id_numerical_mixing_S = register_diag_field('ocean_model','numerical_mixing_S', &
-      diag%mask3dT, Time, 'Spurious mixing of salinity due to advection', "[S]^2ms-1")
 
 end subroutine register_transport_diags
 
