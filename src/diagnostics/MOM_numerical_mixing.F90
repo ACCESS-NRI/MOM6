@@ -62,17 +62,13 @@ subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, 
   integer :: i, j, k
   real :: h1, C1, hadv, Cadv
 
-  do i = is+1, ie-2
-    do j = js+1, je-2
-      do k = 1, nz
-        h1 = h(i, j, k)
-        hadv = h1 + dt * h_tendency(i, j, k)
-        C1 = C(i, j, k)
-        Cadv = h1 * C1 + dt * C_adxy(i, j, k)
-        nm(i-1, j-1, k) = (Cadv**2 / hadv - h1 * C1**2) / dt
-      enddo
-    enddo
-  enddo
+  do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
+    h1 = h(i, j, k)
+    hadv = h1 + dt * h_tendency(i, j, k)
+    C1 = C(i, j, k)
+    Cadv = h1 * C1 + dt * C_adxy(i, j, k)
+    nm(i-1, j-1, k) = (Cadv**2 / hadv - h1 * C1**2) / dt
+  enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_change
 
@@ -94,15 +90,11 @@ subroutine zonal_upwind_fluxes(C, C_adx, uh, A, is, ie, js, je, nz, nm)
 
   call zonal_upwind_values(uh, C, Cupwind)
 
-  do i = is+1, ie-2
-    do j = js+1, je-2
-      do k = 1, nz
-        east = 2 * C_adx(i, j, k) * Cupwind(i, j, k) - uh(i, j, k) * Cupwind(i, j, k)**2
-        west = 2 * C_adx(i-1, j, k) * Cupwind(i-1, j, k) - uh(i-1, j, k) * Cupwind(i-1, j, k)**2
-        nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((east - west) / A(i, j, k))
-      enddo
-    enddo
-  enddo
+  do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
+    east = 2 * C_adx(i, j, k) * Cupwind(i, j, k) - uh(i, j, k) * Cupwind(i, j, k)**2
+    west = 2 * C_adx(i-1, j, k) * Cupwind(i-1, j, k) - uh(i-1, j, k) * Cupwind(i-1, j, k)**2
+    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((east - west) / A(i, j, k))
+  enddo ; enddo ; enddo
 
 end subroutine zonal_upwind_fluxes
 
@@ -117,17 +109,13 @@ subroutine zonal_upwind_values(u, C, Cupwind, is, ie, js, je, nz)
 
   integer :: i, j, k
 
-  do i = is, ie-2
-    do j = js, je-3
-      do k = 1, nz
-        if (u(i, j, k) >= 0) then
-          Cupwind(i, j, k) = C(i, j, k)
-        else if (u(i, j, k) < 0) then
-          Cupwind(i, j, k) = C(i+1, j, k)
-        end if
-      end do
-    end do
-  end do
+  do i = is, ie-2 ; do j = js, je-3 ; do k = 1, nz
+    if (u(i, j, k) >= 0) then
+      Cupwind(i, j, k) = C(i, j, k)
+    elseif (u(i, j, k) < 0) then
+      Cupwind(i, j, k) = C(i+1, j, k)
+    endif
+  enddo ; enddo ; enddo
 
 end subroutine zonal_upwind_values
 
@@ -149,15 +137,11 @@ subroutine meridional_upwind_fluxes(C, C_ady, vh, A, is, ie, js, je, nz, nm )
 
   call meridional_upwind_values(vh, C, Cupwind)
 
-  do i = is+1, ie-2
-    do j = js+1, je-2
-      do k = 1, nz
-        north = 2 * C_ady(i, j, k) * Cupwind(i, j, k) - vh(i, j, k) * Cupwind(i, j, k)**2
-        south = 2 * C_ady(i, j-1, k) * Cupwind(i, j-1, k) - vh(i, j-1, k) * Cupwind(i, j-1, k)**2
-        nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((north - south) / A(i, j, k))
-      enddo
-    enddo
-  enddo
+  do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
+    north = 2 * C_ady(i, j, k) * Cupwind(i, j, k) - vh(i, j, k) * Cupwind(i, j, k)**2
+    south = 2 * C_ady(i, j-1, k) * Cupwind(i, j-1, k) - vh(i, j-1, k) * Cupwind(i, j-1, k)**2
+    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((north - south) / A(i, j, k))
+  enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_fluxes
 
@@ -171,17 +155,13 @@ subroutine meridional_upwind_values(v, C, Cupwind, is, ie, js, je, nz)
 
   integer :: i, j, k
 
-  do i = is, ie-3
-    do j = js, js-2
-      do k = 1, nz
-        if (v(i, j, k) >= 0) then
-          Cupwind(i, j, k) = C(i, j, k)
-        else if (v(i, j, k) < 0) then
-          Cupwind(i, j, k) = C(i, j+1, k)
-        end if
-      end do
-    end do
-  end do
+  do i = is, ie-3 ; do j = js, js-2 ; do k = 1, nz
+    if (v(i, j, k) >= 0) then
+      Cupwind(i, j, k) = C(i, j, k)
+    elseif (v(i, j, k) < 0) then
+      Cupwind(i, j, k) = C(i, j+1, k)
+    endif
+  enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_values
 
