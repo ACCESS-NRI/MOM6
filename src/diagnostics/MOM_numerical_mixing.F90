@@ -8,7 +8,7 @@ use MOM_verticalGrid,  only : verticalGrid_type
 
 implicit none ; private
 
-public numerical_mixing
+public numerical_mixing ! git change
 
 contains
 
