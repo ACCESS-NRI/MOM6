@@ -1710,12 +1710,11 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
 
   do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
     Tr => Reg%Tr(m)
-    ! Compute and post the numerical mixing
+    ! Compute and post the numerical mixing if required
     if (Tr%id_numerical_mixing > 0) then
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr%t, Tr%advection_xy, h, h_tend, Idt, Tr%ad_x, umo, Tr%ad_y, vmo, &
-                            3991.86795711963, rho_ref, nm)
-      call post_data(Tr%numerical_mixing, nm, diag)
+      call numerical_mixing(G, GV, Tr, h, h_tend, Idt, umo, vmo, 3991.86795711963, rho_ref, nm)
+      call post_data(Tr%id_numerical_mixing, nm, diag)
     endif
   endif; enddo
 
