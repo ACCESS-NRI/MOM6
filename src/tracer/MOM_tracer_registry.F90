@@ -383,7 +383,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           v_extensive=.true., &
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"numerical_mixing", &
-                  diag%mask3dTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", "[C]^2ms-1")
+                  diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", "[C]^2ms-1")
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
           diag%axesCuL, Time, "Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
@@ -410,7 +410,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           flux_units, v_extensive=.true., conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T, &
           x_cell_method='sum')
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"numerical_mixing", &
-                  diag%mask3dTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", "[C]^2ms-1")
+                  diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", "[C]^2ms-1")
     endif
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
