@@ -16,7 +16,7 @@ contains
 subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_ady, vmo, scale_constant, rho_ref, nm)
 
   implicit none
-  type(ocean_grid_type),    intent(inout) :: G                 !< ocean grid structure
+  type(ocean_grid_type),    intent(in) :: G                    !< ocean grid structure
   type(verticalGrid_type),  intent(in)    :: GV                !< ocean vertical grid structure
   real,                     intent(in) :: C(:, :, :)           !< Tracer to calculate numerical mixing for
   real,                     intent(inout) :: C_adxy(:, :, :)   !< Explicit horizontal advection of tracer C
@@ -42,8 +42,8 @@ subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_a
   vmo = vmo / rho_ref                          !< units: m³s⁻¹
 
   call thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, ie, js, je, nz, nm)
-  call zonal_upwind_fluxes(C, C_adx, umo, G%IareaT, is, ie, js, je, nz, nm)
-  call meridional_upwind_fluxes(C, C_ady, vmo, G%IareaT, is, ie, js, je, nz, nm)
+  call zonal_upwind_fluxes(C, C_adx, umo, G, is, ie, js, je, nz, nm)
+  call meridional_upwind_fluxes(C, C_ady, vmo, G, is, ie, js, je, nz, nm)
 
 end subroutine numerical_mixing
 
@@ -73,13 +73,13 @@ subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, 
 end subroutine thickness_weighted_variance_change
 
 !< Subroutine to calculate the zonal upwind fluxes
-subroutine zonal_upwind_fluxes(C, C_adx, uh, A, is, ie, js, je, nz, nm)
+subroutine zonal_upwind_fluxes(C, C_adx, uh, G, is, ie, js, je, nz, nm)
 
   implicit none
   real, intent(in) :: C(:, :, :)            !< Tracer to calculate numerical mixing for
   real, intent(in) :: C_adx(:, :, :)        !< Explicit zonal advection of tracer C
   real, intent(in) :: uh(:, :, :)           !< Zonal transport
-  real, intent(in) :: A(:, :, :)            !< Area of grid cells
+  type(ocean_grid_type), intent(in) :: G    !< ocean grid structure for inverse area
 
   integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
   real, intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
@@ -93,7 +93,7 @@ subroutine zonal_upwind_fluxes(C, C_adx, uh, A, is, ie, js, je, nz, nm)
   do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
     east = 2 * C_adx(i, j, k) * Cupwind(i, j, k) - uh(i, j, k) * Cupwind(i, j, k)**2
     west = 2 * C_adx(i-1, j, k) * Cupwind(i-1, j, k) - uh(i-1, j, k) * Cupwind(i-1, j, k)**2
-    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((east - west) / A(i, j, k))
+    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((east - west) / G%IareaT(i, j))
   enddo ; enddo ; enddo
 
 end subroutine zonal_upwind_fluxes
@@ -120,13 +120,13 @@ subroutine zonal_upwind_values(u, C, Cupwind, is, ie, js, je, nz)
 end subroutine zonal_upwind_values
 
 !< Subroutine to calculate the meriodional upwind flues
-subroutine meridional_upwind_fluxes(C, C_ady, vh, A, is, ie, js, je, nz, nm )
+subroutine meridional_upwind_fluxes(C, C_ady, vh, G, is, ie, js, je, nz, nm )
 
   implicit none
-  real, intent(in) :: C(:, :, :)        !< Tracer to calculate numerical mixing for
-  real, intent(in) :: C_ady(:, :, :)    !< Explicit zonal advection of tracer C
-  real, intent(in) :: vh(:, :, :)       !< Meridional transport
-  real, intent(in) :: A(:, :, :)        !< Area of grid cells
+  real, intent(in) :: C(:, :, :)            !< Tracer to calculate numerical mixing for
+  real, intent(in) :: C_ady(:, :, :)        !< Explicit zonal advection of tracer C
+  real, intent(in) :: vh(:, :, :)           !< Meridional transport
+  type(ocean_grid_type), intent(in) :: G    !< ocean grid structure for inverse area
 
   integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
   real, intent(inout) :: nm(:, :, :)
@@ -140,7 +140,7 @@ subroutine meridional_upwind_fluxes(C, C_ady, vh, A, is, ie, js, je, nz, nm )
   do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
     north = 2 * C_ady(i, j, k) * Cupwind(i, j, k) - vh(i, j, k) * Cupwind(i, j, k)**2
     south = 2 * C_ady(i, j-1, k) * Cupwind(i, j-1, k) - vh(i, j-1, k) * Cupwind(i, j-1, k)**2
-    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((north - south) / A(i, j, k))
+    nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((north - south) / G%IareaT(i, j))
   enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_fluxes
