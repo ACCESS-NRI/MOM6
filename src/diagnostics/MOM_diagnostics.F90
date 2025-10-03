@@ -29,7 +29,7 @@ use MOM_grid,              only : ocean_grid_type
 use MOM_interface_heights, only : find_eta, find_col_mass
 use MOM_spatial_means,     only : global_area_mean, global_layer_mean
 use MOM_spatial_means,     only : global_volume_mean, global_area_integral
-use MOM_tracer_registry,   only : tracer_registry_type, post_tracer_transport_diagnostics
+use MOM_tracer_registry,   only : tracer_type, tracer_registry_type, post_tracer_transport_diagnostics
 use MOM_unit_scaling,      only : unit_scale_type
 use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
@@ -1655,7 +1655,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
-  integer :: i, j, k, is, ie, js, je, nz
+  type(tracer_type), pointer :: Tr                   !< Tracer type for numerical mixing
+  real :: scale_constant, rho_ref
+  integer :: i, j, k, is, ie, js, je, nz, m
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   Idt = 1. / dt_trans
@@ -1712,8 +1714,10 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     Tr => Reg%Tr(m)
     ! Compute and post the numerical mixing if required
     if (Tr%id_numerical_mixing > 0) then
+      scale_constant = 3991.86795711963
+      rho_ref = 1035.0
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, h_tend, Idt, umo, vmo, 3991.86795711963, rho_ref, nm)
+      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, umo, vmo, scale_constant, rho_ref, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag)
     endif
   endif; enddo
