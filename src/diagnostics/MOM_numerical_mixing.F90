@@ -1,4 +1,4 @@
-!> Functions and routines involved in calculating numerical mixing
+!> Functions and routines involved in calculating numerical mixing of tracers due to advection
 module MOM_numerical_mixing
 
 use MOM_diag_mediator, only : diag_ctrl
@@ -16,8 +16,8 @@ contains
 subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_ady, vmo, scale_constant, rho_ref, nm)
 
   implicit none
-  type(ocean_grid_type),    intent(in) :: G                    !< ocean grid structure
-  type(verticalGrid_type),  intent(in)    :: GV                !< ocean vertical grid structure
+  type(ocean_grid_type),    intent(in) :: G                    !< Ocean grid structure
+  type(verticalGrid_type),  intent(in) :: GV                   !< Ocean vertical grid structure
   real,                     intent(in) :: C(:, :, :)           !< Tracer to calculate numerical mixing for
   real,                     intent(inout) :: C_adxy(:, :, :)   !< Explicit horizontal advection of tracer C
   real,                     intent(in) :: h(:, :, :)           !< Thickness
@@ -29,10 +29,10 @@ subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_a
   real,                     intent(inout) :: vmo(:, :, :)      !< Total meridional mass transport
   real,                     intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
   real,                     intent(in) :: rho_ref              !< Reference density
-  real,                     intent(inout) :: nm(:, :, :)       !< temporary numerical mixing
+  real,                     intent(inout) :: nm(:, :, :)       !< Numerical mixing diagnostic
 
-  integer :: is, ie, js, je, nz                                !< Grid cell centre indexes
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  integer :: nz  !< Grid cell layer indexes
+  nz = GV%ke
 
   !< adjust for correct dimensions
   C_adxy = C_adxy / (scale_constant * rho_ref) !< units: [C]ms⁻¹
@@ -41,14 +41,14 @@ subroutine numerical_mixing(G, GV, C, C_adxy, h, h_tendency, dt, C_adx, umo, C_a
   umo = umo / rho_ref                          !< units: m³s⁻¹
   vmo = vmo / rho_ref                          !< units: m³s⁻¹
 
-  call thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, ie, js, je, nz, nm)
-  call zonal_upwind_fluxes(C, C_adx, umo, G, is, ie, js, je, nz, nm)
-  call meridional_upwind_fluxes(C, C_ady, vmo, G, is, ie, js, je, nz, nm)
+  call thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, G, nz, nm)
+  call zonal_upwind_fluxes(C, C_adx, umo, G, nz, nm)
+  call meridional_upwind_fluxes(C, C_ady, vmo, G, nz, nm)
 
 end subroutine numerical_mixing
 
 !< Subroutine to calculate the thickness weighted variance change over a timestep
-subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, ie, js, je, nz, nm)
+subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, G, nz, nm)
 
   implicit none
   real, intent(in) :: C(:, :, :)               !< Tracer to calculate numerical mixing for
@@ -56,11 +56,15 @@ subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, 
   real, intent(in) :: h(:, :, :)               !< Thickness
   real, intent(in) :: h_tendency(:, :, :)      !< Thickness tendency
   real, intent(in) :: dt                       !< Model timestep
-  integer, intent(in) :: is, ie, js, je, nz    !< Grid cell centre indexes
+  type(ocean_grid_type), intent(in) :: G       !< Ocean grid structure
+  integer, intent(in) :: nz                    !< Grid cell layer indexes
   real, intent(inout) :: nm(:, :, :)           !< Numerical mixing diagnostic to update
 
-  integer :: i, j, k
-  real :: h1, C1, hadv, Cadv
+  integer :: is, ie, js, je                    !< Grid cell centre indexes
+  integer :: i, j, k                           !< Counters
+  real :: h1, C1, hadv, Cadv                   !< Temporary grid cell variables
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
     h1 = h(i, j, k)
@@ -73,41 +77,47 @@ subroutine thickness_weighted_variance_change(C, C_adxy, h, h_tendency, dt, is, 
 end subroutine thickness_weighted_variance_change
 
 !< Subroutine to calculate the zonal upwind fluxes
-subroutine zonal_upwind_fluxes(C, C_adx, uh, G, is, ie, js, je, nz, nm)
+subroutine zonal_upwind_fluxes(C, C_adx, umo, G, nz, nm)
 
   implicit none
   real, intent(in) :: C(:, :, :)            !< Tracer to calculate numerical mixing for
-  real, intent(in) :: C_adx(:, :, :)        !< Explicit zonal advection of tracer C
-  real, intent(in) :: uh(:, :, :)           !< Zonal transport
-  type(ocean_grid_type), intent(in) :: G    !< ocean grid structure for inverse area
-
-  integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
+  real, intent(in) :: C_adx(:, :, :)        !< Explicit zonal advection of tracer
+  real, intent(in) :: umo(:, :, :)          !< Zonal mass transport
+  type(ocean_grid_type), intent(in) :: G    !< Ocean grid structure for inverse area
+  integer, intent(in) :: nz                 !< Grid cell layer indexes
   real, intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
-  integer :: i, j, k
-  real :: Cupwind(ie-2, je-3, nz)           !< Empty variable for the upwind values of C
-  real :: east, west                        !< east and west locations for zonal derivative
+  integer :: is, ie, js, je                 !< Grid cell centre indexes
+  integer :: i, j, k                        !< Counters
+  real :: Cupwind(G%iec-2, G%jec-3, nz)     !< Empty variable for the upwind values of C
+  real :: east, west                        !< East and West positions for zonal derivative
 
-  call zonal_upwind_values(uh, C, Cupwind)
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+
+  call zonal_upwind_values(umo, C, Cupwind, G, nz)
 
   do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
-    east = 2 * C_adx(i, j, k) * Cupwind(i, j, k) - uh(i, j, k) * Cupwind(i, j, k)**2
-    west = 2 * C_adx(i-1, j, k) * Cupwind(i-1, j, k) - uh(i-1, j, k) * Cupwind(i-1, j, k)**2
+    east = 2 * C_adx(i, j, k) * Cupwind(i, j, k) - umo(i, j, k) * Cupwind(i, j, k)**2
+    west = 2 * C_adx(i-1, j, k) * Cupwind(i-1, j, k) - umo(i-1, j, k) * Cupwind(i-1, j, k)**2
     nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((east - west) / G%IareaT(i, j))
   enddo ; enddo ; enddo
 
 end subroutine zonal_upwind_fluxes
 
 !< Subroutine to calculate upwind values in zonal direction
-subroutine zonal_upwind_values(u, C, Cupwind, is, ie, js, je, nz)
+subroutine zonal_upwind_values(u, C, Cupwind, G, nz)
 
   implicit none
   real, intent(in) :: u(:, :, :)            !< Zonal transport
   real, intent(in) :: C(:, :, :)            !< Tracer
-  integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
-  real, intent(inout) :: Cupwind(:, :, :)   !< Zonal upwind values of C calculated using u
+  real, intent(inout) :: Cupwind(:, :, :)   !< Zonal upwind values of C calculated using v
+  type(ocean_grid_type), intent(in) :: G    !< Ocean grid structure for inverse area
+  integer, intent(in) :: nz                 !< Grid cell layer indexes
 
-  integer :: i, j, k
+  integer :: is, ie, js, je                 !< Grid cell centre indexes
+  integer :: i, j, k                        !< Counters
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do i = is, ie-2 ; do j = js, je-3 ; do k = 1, nz
     if (u(i, j, k) >= 0) then
@@ -120,40 +130,46 @@ subroutine zonal_upwind_values(u, C, Cupwind, is, ie, js, je, nz)
 end subroutine zonal_upwind_values
 
 !< Subroutine to calculate the meriodional upwind flues
-subroutine meridional_upwind_fluxes(C, C_ady, vh, G, is, ie, js, je, nz, nm )
+subroutine meridional_upwind_fluxes(C, C_ady, vmo, G, nz, nm)
 
   implicit none
   real, intent(in) :: C(:, :, :)            !< Tracer to calculate numerical mixing for
-  real, intent(in) :: C_ady(:, :, :)        !< Explicit zonal advection of tracer C
-  real, intent(in) :: vh(:, :, :)           !< Meridional transport
-  type(ocean_grid_type), intent(in) :: G    !< ocean grid structure for inverse area
+  real, intent(in) :: C_ady(:, :, :)        !< Explicit meridional advection of tracer
+  real, intent(in) :: vmo(:, :, :)          !< Meridional mass transport
+  type(ocean_grid_type), intent(in) :: G    !< Ocean grid structure for inverse area
+  integer, intent(in) :: nz                 !< Grid cell layer indexes
+  real, intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
-  integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
-  real, intent(inout) :: nm(:, :, :)
+  integer :: is, ie, js, je                 !< Grid cell centre indexes
+  integer :: i, j, k                        !< Counters
+  real :: Cupwind(G%iec-3, G%jec-2, nz)     !< Empty variable for the meridional upwind tracer values
+  real :: north, south                      !< North and South positions for meridional derivative
+  
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
-  integer :: i, j, k
-  real :: Cupwind(ie-3, je-2, nz)
-  real :: north, south
-
-  call meridional_upwind_values(vh, C, Cupwind)
+  call meridional_upwind_values(vmo, C, Cupwind, G, nz)
 
   do i = is+1, ie-2 ; do j = js+1, je-2 ; do k = 1, nz
-    north = 2 * C_ady(i, j, k) * Cupwind(i, j, k) - vh(i, j, k) * Cupwind(i, j, k)**2
-    south = 2 * C_ady(i, j-1, k) * Cupwind(i, j-1, k) - vh(i, j-1, k) * Cupwind(i, j-1, k)**2
+    north = 2 * C_ady(i, j, k) * Cupwind(i, j, k) - vmo(i, j, k) * Cupwind(i, j, k)**2
+    south = 2 * C_ady(i, j-1, k) * Cupwind(i, j-1, k) - vmo(i, j-1, k) * Cupwind(i, j-1, k)**2
     nm(i-1, j-1, k) = nm(i-1, j-1, k) + ((north - south) / G%IareaT(i, j))
   enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_fluxes
 
-subroutine meridional_upwind_values(v, C, Cupwind, is, ie, js, je, nz)
+subroutine meridional_upwind_values(v, C, Cupwind, G, nz)
 
   implicit none
   real, intent(in) :: v(:, :, :)            !< Meridional transport
   real, intent(in) :: C(:, :, :)            !< Tracer
-  integer, intent(in) :: is, ie, js, je, nz !< Grid cell centre indexes
   real, intent(inout) :: Cupwind(:, :, :)   !< Meridional upwind values of C calculated using v
+  type(ocean_grid_type), intent(in) :: G    !< Ocean grid structure for inverse area
+  integer, intent(in) :: nz                 !< Grid cell layer indexes
 
-  integer :: i, j, k
+  integer :: is, ie, js, je                 !< Grid cell centre indexes
+  integer :: i, j, k                        !< Counters
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do i = is, ie-3 ; do j = js, js-2 ; do k = 1, nz
     if (v(i, j, k) >= 0) then
