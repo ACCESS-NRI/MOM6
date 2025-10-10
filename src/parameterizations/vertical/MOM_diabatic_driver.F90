@@ -183,6 +183,8 @@ type, public :: diabatic_CS ; private
   logical :: Use_KdWork_diag = .false.  !< Logical flag to indicate if any Kd_work diagnostics are on.
   logical :: Use_N2_diag = .false.   !< Logical flag to indicate if any N2 diagnostics are on.
 
+  logical :: frazil_not_under_iceshelves !< If true, turn off frazil under ice shelves
+
   !>@{ Diagnostic IDs
   integer :: id_ea       = -1, id_eb       = -1 ! used by layer diabatic
   integer :: id_ea_t     = -1, id_eb_t     = -1, id_ea_s   = -1, id_eb_s     = -1
@@ -374,7 +376,12 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
     endif
 
     if (associated(fluxes%p_surf_full)) then
-      call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff)
+      if (CS%frazil_not_under_iceshelves) then
+        call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff, &
+                        frac_shelf_h=fluxes%frac_shelf_h)
+      else
+        call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff)
+      endif
     else
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, halo=CS%halo_TS_diff)
     endif
@@ -434,7 +441,12 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
     endif
 
     if (associated(fluxes%p_surf_full)) then
-      call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full)
+      if (CS%frazil_not_under_iceshelves) then
+        call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff, &
+                        frac_shelf_h=fluxes%frac_shelf_h)
+      else
+        call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff)
+      endif
     else
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp)
     endif
@@ -3685,6 +3697,10 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
       CS%boundary_forcing_tendency_diag = .true.
     endif
   endif
+
+  call get_param(param_file, mdl, "FRAZIL_NOT_UNDER_ICESHELF", CS%frazil_not_under_iceshelves, &
+                 "If true, do not use frazil scheme underneath ice shelves "//&
+                 "defined by frac_shelf_h greater than 0.", default=.false.)
 
   ! diagnostics for tendencies of temp and heat due to frazil
   CS%id_frazil_h = register_diag_field('ocean_model', 'frazil_h', diag%axesTL, Time, &
