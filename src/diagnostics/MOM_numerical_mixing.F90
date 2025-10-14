@@ -93,11 +93,13 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
 
   call zonal_upwind_values(umo, Tr, Cupwind, G, nz)
 
-  do i = is, ie ; do j = js, je ; do k = 1, nz
-    east = 2 * (Tr%ad_x(i, j, k) / Tr_adv_scale) * Cupwind(i, j, k) - umo(i, j, k) * Cupwind(i, j, k)**2
-    west = 2 * (Tr%ad_x(i-1, j, k) / Tr_adv_scale) * Cupwind(i-1, j, k) - umo(i-1, j, k) * Cupwind(i-1, j, k)**2
-    nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j)) 
-  enddo ; enddo ; enddo
+  do k =1, nz
+    do j = js, je ; do i = is, ie
+      east = 2 * (Tr%ad_x(I, j, k) / Tr_adv_scale) * Cupwind(i, j, k) - umo(I, j, k) * Cupwind(i, j, k)**2
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(i-1, j, k) - umo(I-1, j, k) * Cupwind(i-1, j, k)**2
+      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j)) 
+    enddo ; enddo
+  enddo
 
 end subroutine zonal_upwind_fluxes
 
@@ -146,11 +148,13 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
   call meridional_upwind_values(vmo, Tr, Cupwind, G, nz)
 
-  do i = is, ie ; do j = js, je ; do k = 1, nz
-    north = 2 * (Tr%ad_y(i, j, k) / Tr_adv_scale)* Cupwind(i, j, k) - vmo(i, j, k) * Cupwind(i, j, k)**2
-    south = 2 * (Tr%ad_y(i, j-1, k) / Tr_adv_scale)* Cupwind(i, j-1, k) - vmo(i, j-1, k) * Cupwind(i, j-1, k)**2
-    nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
-  enddo ; enddo ; enddo
+  do k = 1, nz
+    do i = is, ie ; do j = js, je
+      north = 2 * (Tr%ad_y(i, J, k) / Tr_adv_scale)* Cupwind(i, j, k) - vmo(i, J, k) * Cupwind(i, j, k)**2
+      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale)* Cupwind(i, j-1, k) - vmo(i, J-1, k) * Cupwind(i, J-1, k)**2
+      nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
+    enddo ; enddo
+  enddo
 
 end subroutine meridional_upwind_fluxes
 
