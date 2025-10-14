@@ -93,7 +93,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
 
   call zonal_upwind_values(umo, Tr, Cupwind, G, nz)
 
-  do i = is, ie-1 ; do j = js, je ; do k = 1, nz
+  do i = is, ie ; do j = js, je ; do k = 1, nz
     east = 2 * (Tr%ad_x(i, j, k) / Tr_adv_scale) * Cupwind(i, j, k) - umo(i, j, k) * Cupwind(i, j, k)**2
     west = 2 * (Tr%ad_x(i-1, j, k) / Tr_adv_scale) * Cupwind(i-1, j, k) - umo(i-1, j, k) * Cupwind(i-1, j, k)**2
     nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j)) 
