@@ -38,9 +38,9 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
   umo = umo / rho_ref  !< units: m³s⁻¹
   vmo = vmo / rho_ref  !< units: m³s⁻¹
 
-  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
-!  call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
-!  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
+!  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
+  call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
 end subroutine numerical_mixing
 
