@@ -84,10 +84,10 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   integer,               intent(in) :: nz              !< Grid cell layer indexes
   real,                  intent(inout) :: nm(:, :, :)  !< Numerical mixing diagnostic to update
 
-  integer :: is, ie, js, je              !< Grid cell centre indexes
-  integer :: i, j, k                     !< Counters
-  real :: Cupwind(G%iec, G%jec, nz)  !< Empty variable for the upwind values of C
-  real :: east, west                     !< East and West positions for zonal derivative
+  integer :: is, ie, js, je         !< Grid cell centre indexes
+  integer :: i, j, k                !< Counters
+  real :: Cupwind(G%iec, G%jec, nz) !< Empty variable for the upwind values of C
+  real :: east, west                !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
@@ -137,10 +137,10 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
   integer, intent(in) :: nz                          !< Grid cell layer indexes
   real, intent(inout) :: nm(:, :, :)                 !< Numerical mixing diagnostic to update
 
-  integer :: is, ie, js, je              !< Grid cell centre indexes
-  integer :: i, j, k                     !< Counters
+  integer :: is, ie, js, je          !< Grid cell centre indexes
+  integer :: i, j, k                 !< Counters
   real :: Cupwind(G%iec, G%jec, nz)  !< Empty variable for the meridional upwind tracer values
-  real :: north, south                   !< North and South positions for meridional derivative
+  real :: north, south               !< North and South positions for meridional derivative
   
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
