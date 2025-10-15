@@ -28,6 +28,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
   real,                     intent(in) :: rho_ref              !< Reference density
   real,                     intent(inout) :: nm(:, :, :)       !< Numerical mixing diagnostic
 
+  !< Local variables
   integer :: nz         !< Grid cell layer indexes
   real :: Tr_adv_scale  !< Scaling required for advection terms to ensure dimensions are correct
                         ! e.g. for temperature need to divide by specific heat capacity * rho_ref
@@ -57,6 +58,7 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, d
   integer,               intent(in) :: nz                   !< Grid cell layer indexes
   real,                  intent(inout) :: nm(:, :, :)       !< Numerical mixing diagnostic to update
 
+  !< Local variables
   integer :: is, ie, js, je   !< Grid cell centre indexes
   integer :: i, j, k          !< Counters
   real :: h1, C1, hadv, Cadv  !< Temporary grid cell variables
@@ -86,6 +88,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   integer,               intent(in) :: nz              !< Grid cell layer indexes
   real,                  intent(inout) :: nm(:, :, :)  !< Numerical mixing diagnostic to update
 
+  !< Local variables
   integer :: is, ie, js, je           !< Grid cell centre indexes
   integer :: i, j, k                  !< Counters
   real :: Cupwind(0:G%iec, G%jec, nz) !< Empty variable for the upwind values of C
@@ -99,7 +102,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
     do j = js, je ; do i = is, ie
       east = 2 * (Tr%ad_x(I, j, k) / Tr_adv_scale) * Cupwind(I, j, k) - umo(I, j, k) * Cupwind(I, j, k)**2
       west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - umo(I-1, j, k) * Cupwind(I-1, j, k)**2
-      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j)) 
+      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
@@ -115,6 +118,7 @@ subroutine zonal_upwind_values(u, Tr, Cupwind, G, nz)
   type(ocean_grid_type), intent(in) :: G                    !< Ocean grid structure for inverse area
   integer,               intent(in) :: nz                   !< Grid cell layer indexes
 
+  !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
@@ -143,17 +147,18 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
   integer, intent(in) :: nz                          !< Grid cell layer indexes
   real, intent(inout) :: nm(:, :, :)                 !< Numerical mixing diagnostic to update
 
+  !< Local variables
   integer :: is, ie, js, je            !< Grid cell centre indexes
   integer :: i, j, k                   !< Counters
   real :: Cupwind(G%iec, 0:G%jec, nz)  !< Empty variable for the meridional upwind tracer values
   real :: north, south                 !< North and South positions for meridional derivative
-  
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   call meridional_upwind_values(vmo, Tr, Cupwind, G, nz)
 
   do k = 1, nz
-    do i = is, ie ; do j = js, je
+    do j = js, je ; do i = is, ie
       north = 2 * (Tr%ad_y(i, J, k) / Tr_adv_scale)* Cupwind(i, J, k) - vmo(i, J, k) * Cupwind(i, J, k)**2
       south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale)* Cupwind(i, J-1, k) - vmo(i, J-1, k) * Cupwind(i, J-1, k)**2
       nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
@@ -171,13 +176,14 @@ subroutine meridional_upwind_values(v, Tr, Cupwind, G, nz)
   type(ocean_grid_type), intent(in) :: G                    !< Ocean grid structure for inverse area
   integer,               intent(in) :: nz                   !< Grid cell layer indexes
 
+  !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do i = is, ie ; do j = js, js+1
+    do j = js, je+1 ; do i = is, ie
       if (v(i, J-1, k) >= 0) then
         Cupwind(i, J-1, k) = Tr%t(i, j-1, k)
       elseif (v(i, J-1, k) < 0) then
