@@ -40,7 +40,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
 
 !  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
-  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
+!  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
 end subroutine numerical_mixing
 
@@ -86,7 +86,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
 
   integer :: is, ie, js, je         !< Grid cell centre indexes
   integer :: i, j, k                !< Counters
-  real :: Cupwind(G%iec, G%jec, nz) !< Empty variable for the upwind values of C
+  real :: Cupwind(0:G%iec, G%jec, nz) !< Empty variable for the upwind values of C
   real :: east, west                !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
@@ -95,8 +95,8 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
-      east = 2 * (Tr%ad_x(I, j, k) / Tr_adv_scale) * Cupwind(i, j, k) - umo(I, j, k) * Cupwind(i, j, k)**2
-      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(i-1, j, k) - umo(I-1, j, k) * Cupwind(i-1, j, k)**2
+      east = 2 * (Tr%ad_x(I, j, k) / Tr_adv_scale) * Cupwind(I, j, k) - umo(I, j, k) * Cupwind(I, j, k)**2
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - umo(I-1, j, k) * Cupwind(I-1, j, k)**2
       nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j)) 
     enddo ; enddo
   enddo
@@ -118,13 +118,15 @@ subroutine zonal_upwind_values(u, Tr, Cupwind, G, nz)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
-  do i = is, ie ; do j = js, je ; do k = 1, nz
-    if (u(i, j, k) >= 0) then
-      Cupwind(i, j, k) = Tr%t(i, j, k)
-    elseif (u(i, j, k) < 0) then
-      Cupwind(i, j, k) = Tr%t(i+1, j, k)
-    endif
-  enddo ; enddo ; enddo
+  do k = 1, nz
+    do j = js, je ; do i = is, ie+1
+      if (u(I-1, j, k) >= 0) then
+        Cupwind(I-1, j, k) = Tr%t(i-1, j, k)
+      elseif (u(I-1, j, k) < 0) then
+        Cupwind(I-1, j, k) = Tr%t(i, j, k)
+      endif
+    enddo ; enddo
+  enddo
 
 end subroutine zonal_upwind_values
 
