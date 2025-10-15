@@ -39,8 +39,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
   vmo = vmo / rho_ref  !< units: m³s⁻¹
 
 !  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
-  call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
-!  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
+!  call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
 end subroutine numerical_mixing
 
@@ -86,10 +86,10 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   integer,               intent(in) :: nz              !< Grid cell layer indexes
   real,                  intent(inout) :: nm(:, :, :)  !< Numerical mixing diagnostic to update
 
-  integer :: is, ie, js, je         !< Grid cell centre indexes
-  integer :: i, j, k                !< Counters
+  integer :: is, ie, js, je           !< Grid cell centre indexes
+  integer :: i, j, k                  !< Counters
   real :: Cupwind(0:G%iec, G%jec, nz) !< Empty variable for the upwind values of C
-  real :: east, west                !< East and West positions for zonal derivative
+  real :: east, west                  !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
@@ -143,10 +143,10 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
   integer, intent(in) :: nz                          !< Grid cell layer indexes
   real, intent(inout) :: nm(:, :, :)                 !< Numerical mixing diagnostic to update
 
-  integer :: is, ie, js, je          !< Grid cell centre indexes
-  integer :: i, j, k                 !< Counters
-  real :: Cupwind(G%iec, G%jec, nz)  !< Empty variable for the meridional upwind tracer values
-  real :: north, south               !< North and South positions for meridional derivative
+  integer :: is, ie, js, je            !< Grid cell centre indexes
+  integer :: i, j, k                   !< Counters
+  real :: Cupwind(G%iec, 0:G%jec, nz)  !< Empty variable for the meridional upwind tracer values
+  real :: north, south                 !< North and South positions for meridional derivative
   
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
@@ -154,8 +154,8 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
   do k = 1, nz
     do i = is, ie ; do j = js, je
-      north = 2 * (Tr%ad_y(i, J, k) / Tr_adv_scale)* Cupwind(i, j, k) - vmo(i, J, k) * Cupwind(i, j, k)**2
-      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale)* Cupwind(i, j-1, k) - vmo(i, J-1, k) * Cupwind(i, J-1, k)**2
+      north = 2 * (Tr%ad_y(i, J, k) / Tr_adv_scale)* Cupwind(i, J, k) - vmo(i, J, k) * Cupwind(i, J, k)**2
+      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale)* Cupwind(i, J-1, k) - vmo(i, J-1, k) * Cupwind(i, J-1, k)**2
       nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
     enddo ; enddo
   enddo
@@ -176,13 +176,15 @@ subroutine meridional_upwind_values(v, Tr, Cupwind, G, nz)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
-  do i = is, ie ; do j = js, js ; do k = 1, nz
-    if (v(i, j, k) >= 0) then
-      Cupwind(i, j, k) = Tr%t(i, j, k)
-    elseif (v(i, j, k) < 0) then
-      Cupwind(i, j, k) = Tr%t(i, j+1, k)
-    endif
-  enddo ; enddo ; enddo
+  do k = 1, nz
+    do i = is, ie ; do j = js, js+1
+      if (v(i, J-1, k) >= 0) then
+        Cupwind(i, J-1, k) = Tr%t(i, j-1, k)
+      elseif (v(i, J-1, k) < 0) then
+        Cupwind(i, J-1, k) = Tr%t(i, j, k)
+      endif
+    enddo ; enddo
+  enddo
 
 end subroutine meridional_upwind_values
 
