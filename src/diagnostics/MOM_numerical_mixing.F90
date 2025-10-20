@@ -41,7 +41,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
 
 !  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
-  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
+  ! call meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, nz, nm)
 
 end subroutine numerical_mixing
 
@@ -89,10 +89,10 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   real,                  intent(inout) :: nm(:, :, :)  !< Numerical mixing diagnostic to update
 
   !< Local variables
-  integer :: is, ie, js, je           !< Grid cell centre indexes
-  integer :: i, j, k                  !< Counters
-  real :: Cupwind(0:G%iec, G%jec, nz) !< Empty variable for the upwind values of C
-  real :: east, west                  !< East and West positions for zonal derivative
+  integer :: is, ie, js, je                              !< Grid cell centre indexes
+  integer :: i, j, k                                     !< Counters
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV))  :: Cupwind !< Empty variable for the upwind values of C
+  real :: east, west                                     !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
@@ -125,11 +125,11 @@ subroutine zonal_upwind_values(u, Tr, Cupwind, G, nz)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do j = js, je ; do i = is, ie+1
-      if (u(I-1, j, k) >= 0) then
-        Cupwind(I-1, j, k) = Tr%t(i-1, j, k)
-      elseif (u(I-1, j, k) < 0) then
-        Cupwind(I-1, j, k) = Tr%t(i, j, k)
+    do j = js, je ; do I = is-1, ie
+      if (u(I, j, k) >= 0) then
+        Cupwind(I, j, k) = Tr%t(i, j, k)
+      elseif (u(I, j, k) < 0) then
+        Cupwind(I, j, k) = Tr%t(i+1, j, k)
       endif
     enddo ; enddo
   enddo
