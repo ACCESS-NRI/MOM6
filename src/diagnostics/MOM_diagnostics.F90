@@ -1714,10 +1714,10 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     Tr => Reg%Tr(m)
     ! Compute and post the numerical mixing if required
     if (Tr%id_numerical_mixing > 0) then
-      scale_constant = 3991.86795711963
-      rho_ref = 1035.0
+      scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+      !rho_ref = 1035.0
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, umo, vmo, scale_constant, rho_ref, nm)
+      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, uhtr, vhtr, scale_constant, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag)
     endif
   endif; enddo
