@@ -91,7 +91,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   !< Local variables
   integer :: is, ie, js, je             !< Grid cell centre indexes
   integer :: i, j, k                    !< Counters
-  real :: Cupwind(SZIB_(G),SZJ_(G),nz)  !< Empty variable for the upwind values of C
+  real :: Cupwind(G%IscB:G%IecB,G%jec,nz)  !< Empty variable for the upwind values of C
   real :: east, west                    !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
