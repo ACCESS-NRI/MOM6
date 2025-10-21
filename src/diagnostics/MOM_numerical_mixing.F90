@@ -64,7 +64,7 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, d
   real :: h1, C1, hadv, Cadv      !< Temporary variables for thickness and tracer at current timestep
                                   !< and the changes in thickness and tracer due to advection.
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec, nz = GV%ke
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
@@ -95,9 +95,9 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, GV, nm)
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: Cupwind  !< Empty variable for the upwind values of C
   real :: east, west                                     !< East and West positions for zonal derivative
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec, nz = GV%ke
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call zonal_upwind_values(umo, Tr, Cupwind, G, nz)
+  call zonal_upwind_values(umo, Tr, G, nz, Cupwind)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
@@ -154,9 +154,9 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, GV, nm)
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: Cupwind !< Empty variable for the meridional upwind tracer values
   real :: north, south                                  !< North and South positions for meridional derivative
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec, nz = GV%ke
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call meridional_upwind_values(vmo, Tr, Cupwind, G, nz)
+  call meridional_upwind_values(vmo, Tr, G, nz, Cupwind)
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
