@@ -25,8 +25,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
   real,                    intent(in) :: h_tendency(:, :, :)  !< Thickness tendency
   real,                    intent(in) :: dt                   !< Model timestep
   real,                    intent(in) :: Idt                  !< Inverse model timestep
-  real,                    intent(in) :: uhtr(:, :, :)        !< Total zonal mass transport
-  real,                    intent(in) :: vhtr(:, :, :)        !< Total meridional mass transport
+  real,                    intent(in) :: uhtr(:, :, :)        !< Accumulated zonal transport
+  real,                    intent(in) :: vhtr(:, :, :)        !< Accumulated meridional transport
   real,                    intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
   real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
 
@@ -90,17 +90,20 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
   !< Local variables
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
   integer :: i, j, k                                     !< Counters
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: uh       !< Zonal thickness transport
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: Cupwind  !< Empty variable for the upwind values of C
   real :: east, west                                     !< East and West positions for zonal derivative
 
+  uh = uhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call zonal_upwind_values(uhtr, Idt, Tr, G, nz, Cupwind)
+  call zonal_upwind_values(uh, Tr, G, nz, Cupwind)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
-      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * Cupwind(I, j, k)   - (uhtr(I, j, k)   * Idt) * Cupwind(I, j, k)**2
-      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - (uhtr(I-1, j, k) * Idt) * Cupwind(I-1, j, k)**2
+      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * Cupwind(I, j, k)   - uh(I, j, k)   * Cupwind(I, j, k)**2
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - uh(I-1, j, k) * Cupwind(I-1, j, k)**2
       nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
@@ -108,11 +111,10 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
 end subroutine zonal_upwind_fluxes
 
 !< Subroutine to calculate upwind values in zonal direction
-subroutine zonal_upwind_values(uhtr, Idt, Tr, G, nz, Cupwind)
+subroutine zonal_upwind_values(uh, Tr, G, nz, Cupwind)
 
   implicit none
-  real,                     intent(in) :: uhtr(:, :, :)     !< Accumulates zonal transport
-  real,                     intent(in) :: Idt            !< Inverse model timestep
+  real,                     intent(in) :: uh(:, :, :)       !< Zonal thickness transport
   type(tracer_type),        intent(in) :: Tr                !< Tracer
   type(ocean_grid_type),    intent(in) :: G                 !< Ocean grid structure for inverse area
   integer,                  intent(in) :: nz                !< Grid cell layer indexes
@@ -126,9 +128,9 @@ subroutine zonal_upwind_values(uhtr, Idt, Tr, G, nz, Cupwind)
 
   do k = 1, nz
     do j = js, je ; do I = is-1, ie
-      if (uhtr(I, j, k)*Idt >= 0) then
+      if (uh(I, j, k) >= 0) then
         Cupwind(I, j, k) = Tr%t(i, j, k)
-      elseif (uhtr(I, j, k)*Idt < 0) then
+      elseif (uh(I, j, k) < 0) then
         Cupwind(I, j, k) = Tr%t(i+1, j, k)
       endif
     enddo ; enddo
@@ -151,27 +153,29 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
   !< Local variables
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
   integer :: i, j, k                                     !< Counters
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vh       !< Meridional thickness transport
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: Cupwind  !< Empty variable for the meridional upwind tracer values
   real :: north, south                                   !< North and South positions for meridional derivative
 
+  vh = vhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call meridional_upwind_values(vhtr, Tr, G, nz, Cupwind)
+  call meridional_upwind_values(vh, Tr, G, nz, Cupwind)
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
-      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * Cupwind(i, J, k)   - (vhtr(i, J, k)   * Idt) * Cupwind(i, J, k)**2
-      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * Cupwind(i, J-1, k) - (vhtr(i, J-1, k) * Idt) * Cupwind(i, J-1, k)**2
+      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * Cupwind(i, J, k)   - vh(i, J, k)   * Cupwind(i, J, k)**2
+      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * Cupwind(i, J-1, k) - vh(i, J-1, k) * Cupwind(i, J-1, k)**2
       nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
 end subroutine meridional_upwind_fluxes
 
-subroutine meridional_upwind_values(vhtr, Tr, G, nz, Cupwind)
+subroutine meridional_upwind_values(vh, Tr, G, nz, Cupwind)
 
   implicit none
-  real,                  intent(in) :: vhtr(:, :, :)     !< Accumulated meridional transport
+  real,                  intent(in) :: vh(:, :, :)       !< Meridional transport
   type(tracer_type),     intent(in) :: Tr                !< Tracer
   type(ocean_grid_type), intent(in) :: G                 !< Ocean grid structure for inverse area
   integer,               intent(in) :: nz                !< Grid cell layer indexes
@@ -185,9 +189,9 @@ subroutine meridional_upwind_values(vhtr, Tr, G, nz, Cupwind)
 
   do k = 1, nz
     do j = js, je+1 ; do i = is, ie
-      if (vhtr(i, J-1, k) >= 0) then
+      if (vh(i, J-1, k) >= 0) then
         Cupwind(i, J-1, k) = Tr%t(i, j-1, k)
-      elseif (vhtr(i, J-1, k) < 0) then
+      elseif (vh(i, J-1, k) < 0) then
         Cupwind(i, J-1, k) = Tr%t(i, j, k)
       endif
     enddo ; enddo
