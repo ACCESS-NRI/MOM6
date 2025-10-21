@@ -35,8 +35,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
                         ! e.g. for temperature need to divide by specific heat capacity * rho_ref
   Tr_adv_scale = scale_constant * GV%Rho0
 
-  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
-!  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
+!  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
+  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
 !  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
 
 end subroutine numerical_mixing
@@ -95,7 +95,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call zonal_upwind_values(uhtr, Tr, G, nz, Cupwind)
+  call zonal_upwind_values(uhtr, Idt, Tr, G, nz, Cupwind)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
@@ -108,10 +108,11 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
 end subroutine zonal_upwind_fluxes
 
 !< Subroutine to calculate upwind values in zonal direction
-subroutine zonal_upwind_values(uhtr, Tr, G, nz, Cupwind)
+subroutine zonal_upwind_values(uhtr, Idt, Tr, G, nz, Cupwind)
 
   implicit none
   real,                     intent(in) :: uhtr(:, :, :)     !< Accumulates zonal transport
+  real,                     intent(in) :: Idt            !< Inverse model timestep
   type(tracer_type),        intent(in) :: Tr                !< Tracer
   type(ocean_grid_type),    intent(in) :: G                 !< Ocean grid structure for inverse area
   integer,                  intent(in) :: nz                !< Grid cell layer indexes
@@ -125,9 +126,9 @@ subroutine zonal_upwind_values(uhtr, Tr, G, nz, Cupwind)
 
   do k = 1, nz
     do j = js, je ; do I = is-1, ie
-      if (uhtr(I, j, k) >= 0) then
+      if (uhtr(I, j, k)*Idt >= 0) then
         Cupwind(I, j, k) = Tr%t(i, j, k)
-      elseif (uhtr(I, j, k) < 0) then
+      elseif (uhtr(I, j, k)*Idt < 0) then
         Cupwind(I, j, k) = Tr%t(i+1, j, k)
       endif
     enddo ; enddo
