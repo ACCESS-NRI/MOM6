@@ -189,11 +189,11 @@ subroutine meridional_upwind_values(vh, Tr, G, nz, Cupwind)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do j = js, je+1 ; do i = is, ie
-      if (vh(i, J-1, k) >= 0) then
-        Cupwind(i, J-1, k) = Tr%t(i, j-1, k)
-      elseif (vh(i, J-1, k) < 0) then
-        Cupwind(i, J-1, k) = Tr%t(i, j, k)
+    do j = js-1, je ; do i = is, ie
+      if (vh(i, J, k) >= 0) then
+        Cupwind(i, J, k) = Tr%t(i, j, k)
+      elseif (vh(i, J, k) < 0) then
+        Cupwind(i, J, k) = Tr%t(i, j+1, k)
       endif
     enddo ; enddo
   enddo
