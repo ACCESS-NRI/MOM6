@@ -95,7 +95,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
   real :: east, west                                     !< East and West positions for zonal derivative
 
   uh = uhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
-
+  Cupwind(:, :, :) = 0.
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call zonal_upwind_values(uh, Tr, G, nz, Cupwind)
@@ -158,6 +158,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
   real :: north, south                                   !< North and South positions for meridional derivative
 
   vh = vhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
+  Cupwind(:, :, :) = 0.
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call meridional_upwind_values(vh, Tr, G, nz, Cupwind)
