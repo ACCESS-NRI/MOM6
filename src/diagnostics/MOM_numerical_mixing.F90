@@ -18,17 +18,17 @@ contains
 subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_constant, rho_ref, nm)
 
   implicit none
-  type(ocean_grid_type),    intent(in) :: G                    !< Ocean grid structure
-  type(verticalGrid_type),  intent(in) :: GV                   !< Ocean vertical grid structure
-  type(tracer_type),        intent(in) :: Tr                   !< Tracer
-  real,                     intent(in) :: h(:, :, :)           !< Thickness
-  real,                     intent(in) :: h_tendency(:, :, :)  !< Thickness tendency
-  real,                     intent(in) :: dt                   !< Model timestep
-  real,                     intent(inout) :: umo(:, :, :)      !< Total zonal mass transport
-  real,                     intent(inout) :: vmo(:, :, :)      !< Total meridional mass transport
-  real,                     intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
-  real,                     intent(in) :: rho_ref              !< Reference density
-  real,                     intent(inout) :: nm(:, :, :)       !< Numerical mixing diagnostic
+  type(ocean_grid_type),       intent(in) :: G                    !< Ocean grid structure
+  type(verticalGrid_type),     intent(in) :: GV                   !< Ocean vertical grid structure
+  type(tracer_type),           intent(in) :: Tr                   !< Tracer
+  real,                        intent(in) :: h(:, :, :)           !< Thickness
+  real,                        intent(in) :: h_tendency(:, :, :)  !< Thickness tendency
+  real,                        intent(in) :: dt                   !< Model timestep
+  real,                     intent(inout) :: umo(:, :, :)         !< Total zonal mass transport
+  real,                     intent(inout) :: vmo(:, :, :)         !< Total meridional mass transport
+  real,                        intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
+  real,                        intent(in) :: rho_ref              !< Reference density
+  real,                     intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
 
   !< Local variables
   real :: Tr_adv_scale  !< Scaling required for advection terms to ensure dimensions are correct
@@ -46,7 +46,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, umo, vmo, scale_consta
 end subroutine numerical_mixing
 
 !< Subroutine to calculate the thickness weighted variance change over a timestep
-subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, nz, nm)
+subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, G, GV, nm)
 
   implicit none
   type(tracer_type),       intent(in) :: Tr                   !< Tracer
@@ -151,7 +151,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, GV, nm)
   !< Local variables
   integer :: is, ie, js, je, nz                         !< Grid cell centre and layer indexes
   integer :: i, j, k                                    !< Counters
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)):: Cupwind  !< Empty variable for the meridional upwind tracer values
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: Cupwind !< Empty variable for the meridional upwind tracer values
   real :: north, south                                  !< North and South positions for meridional derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec, nz = GV%ke
@@ -168,14 +168,14 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vmo, G, GV, nm)
 
 end subroutine meridional_upwind_fluxes
 
-subroutine meridional_upwind_values(v, Tr, Cupwind, G, nz)
+subroutine meridional_upwind_values(v, Tr, G, nz, Cupwind)
 
   implicit none
-  real,                  intent(in) :: v(:, :, :)           !< Meridional transport
-  type(tracer_type),     intent(in) :: Tr                   !< Tracer
-  real,                  intent(inout) :: Cupwind(:, :, :)  !< Meridional upwind values of C calculated using v
-  type(ocean_grid_type), intent(in) :: G                    !< Ocean grid structure for inverse area
-  integer,               intent(in) :: nz                   !< Grid cell layer indexes
+  real,                  intent(in) :: v(:, :, :)        !< Meridional transport
+  type(tracer_type),     intent(in) :: Tr                !< Tracer
+  type(ocean_grid_type), intent(in) :: G                 !< Ocean grid structure for inverse area
+  integer,               intent(in) :: nz                !< Grid cell layer indexes
+  real,               intent(inout) :: Cupwind(:, :, :)  !< Meridional upwind values of C calculated using v
 
   !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
