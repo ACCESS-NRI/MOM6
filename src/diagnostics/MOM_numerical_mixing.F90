@@ -68,8 +68,8 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, d
       h1 = h(i, j, k)
       hadv = h1 + dt * h_tendency(i, j, k)
       C1 = Tr%t(i, j, k)
-      Cadv = h1 * C1 + dt * Tr%advection_xy(i, j, k) / Tr_adv_scale
-      nm(i, j, k) = (Cadv**2 / hadv - h1 * C1**2) * Idt
+      Cadv = h1 * C1 + ( dt * Tr%advection_xy(i, j, k) ) / Tr_adv_scale
+      nm(i, j, k) = ( (Cadv**2 / hadv) - (h1 * C1**2) ) * Idt
     enddo ; enddo
   enddo
 
