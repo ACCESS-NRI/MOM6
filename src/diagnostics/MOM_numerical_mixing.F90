@@ -89,10 +89,10 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, umo, G, nz, nm)
   real,                  intent(inout) :: nm(:, :, :)  !< Numerical mixing diagnostic to update
 
   !< Local variables
-  integer :: is, ie, js, je                              !< Grid cell centre indexes
-  integer :: i, j, k                                     !< Counters
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV))  :: Cupwind !< Empty variable for the upwind values of C
-  real :: east, west                                     !< East and West positions for zonal derivative
+  integer :: is, ie, js, je                   !< Grid cell centre indexes
+  integer :: i, j, k                          !< Counters
+  real :: Cupwind(SZIB_(G),SZJ_(G),SZK_(GV))  !< Empty variable for the upwind values of C
+  real :: east, west                          !< East and West positions for zonal derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
