@@ -37,8 +37,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
 
 
   call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
-  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
-  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
+!  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
+!  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
 
 end subroutine numerical_mixing
 
