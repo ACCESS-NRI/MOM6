@@ -1651,12 +1651,13 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
                           ! [H T-1 ~> m s-1 or kg m-2 s-1].
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind of tracer
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr                   !< Tracer type for numerical mixing
-  real :: scale_constant, rho_ref
+  real :: scale_constant  !< Scale for numerical mixing e.g. specific heat capacity
   integer :: i, j, k, is, ie, js, je, nz, m
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -1712,12 +1713,13 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
 
   do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
     Tr => Reg%Tr(m)
-    ! Compute and post the numerical mixing if required
     if (Tr%id_numerical_mixing > 0) then
       scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+      x_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, uhtr, vhtr, scale_constant, nm)
+      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, uhtr, vhtr, scale_constant, x_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag)
+      if (Tr%id_zonal_upwind > 0) call post_data(Tr%id_zonal_upwind, x_upwind, diag)
     endif
   endif; enddo
 
