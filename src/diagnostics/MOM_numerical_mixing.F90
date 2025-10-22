@@ -100,14 +100,14 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
 
   call zonal_upwind_values(uh, Tr, G, nz, Cupwind)
 
-  nm = Cupwind
-  ! do k =1, nz
-  !   do j = js, je ; do i = is, ie
-  !     east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * Cupwind(I, j, k)   - uh(I, j, k)   * Cupwind(I, j, k)**2
-  !     west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - uh(I-1, j, k) * Cupwind(I-1, j, k)**2
-  !     nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
-  !   enddo ; enddo
-  ! enddo
+  do k =1, nz
+    do j = js, je ; do i = is, ie
+      ! east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * Cupwind(I, j, k)   - uh(I, j, k)   * Cupwind(I, j, k)**2
+      ! west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - uh(I-1, j, k) * Cupwind(I-1, j, k)**2
+      ! nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
+      nm(i, j, k) = Cupwind(I, j, k)
+    enddo ; enddo
+  enddo
 
 end subroutine zonal_upwind_fluxes
 
@@ -125,10 +125,10 @@ subroutine zonal_upwind_values(uh, Tr, G, nz, Cupwind)
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+  Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do j = js, je ; do I = is-1, ie
+    do j = js, je ; do I = Is, Ie
       if (uh(I, j, k) >= 0) then
         Cupwind(I, j, k) = Tr%t(i, j, k)
       elseif (uh(I, j, k) < 0) then
