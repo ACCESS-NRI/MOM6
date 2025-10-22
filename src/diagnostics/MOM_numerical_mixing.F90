@@ -10,7 +10,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public numerical_mixing, zonal_upwind_values
+public numerical_mixing
 
 contains
 
@@ -128,7 +128,7 @@ subroutine zonal_upwind_values(uh, Tr, G, nz, x_upwind)
   Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do j = js, je ; do I = Is-1, Ie
+    do j = js, je ; do I = Is, Ie
       if (uh(I, j, k) >= 0) then
         x_upwind(I, j, k) = Tr%t(i, j, k)
       elseif (uh(I, j, k) < 0) then
