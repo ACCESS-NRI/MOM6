@@ -98,14 +98,16 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, nm)
   Cupwind(:, :, :) = 0.
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call zonal_upwind_values(uh, Tr, G, nz, Cupwind)
+  ! call zonal_upwind_values(uh, Tr, G, nz, Cupwind)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
       ! east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * Cupwind(I, j, k)   - uh(I, j, k)   * Cupwind(I, j, k)**2
       ! west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * Cupwind(I-1, j, k) - uh(I-1, j, k) * Cupwind(I-1, j, k)**2
       ! nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
-      nm(i, j, k) = Cupwind(I, j, k) - Cupwind(I-1, j, k)
+      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) - uh(I, j, k)
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) - uh(I-1, j, k)
+      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
