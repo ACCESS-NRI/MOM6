@@ -70,7 +70,7 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, d
       h1 = h(i, j, k)
       hadv = h1 + dt * h_tendency(i, j, k)
       C1 = Tr%t(i, j, k)
-      Cadv = h1 * C1 + ( dt * Tr%advection_xy(i, j, k) ) / Tr_adv_scale
+      Cadv = h1 * C1 +  dt * (Tr%advection_xy(i, j, k)  / Tr_adv_scale)
       nm(i, j, k) = ( (Cadv**2 / hadv) - (h1 * C1**2) ) * Idt
     enddo ; enddo
   enddo
@@ -96,7 +96,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: uh       !< Zonal thickness transport
   real :: east, west                                     !< East and West positions for zonal derivative
 
-  uh = uhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
+  uh = (uhtr * (GV%H_to_RZ * Idt) / GV%Rho0
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call zonal_upwind_values(uh, Tr, G, nz, x_upwind)
@@ -158,7 +158,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, y_upwind
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vh       !< Meridional thickness transport
   real :: north, south                                   !< North and South positions for meridional derivative
 
-  vh = vhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
+  vh = (vhtr * (GV%H_to_RZ * Idt)) / GV%Rho0
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call meridional_upwind_values(vh, Tr, G, nz, y_upwind)
