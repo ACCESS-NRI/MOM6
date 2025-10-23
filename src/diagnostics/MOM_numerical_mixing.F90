@@ -96,7 +96,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: uh       !< Zonal thickness transport
   real :: east, west                                     !< East and West positions for zonal derivative
 
-  uh = (uhtr * (GV%H_to_RZ * Idt) / GV%Rho0
+  uh = (uhtr * GV%H_to_RZ * Idt) / GV%Rho0
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call zonal_upwind_values(uh, Tr, G, nz, x_upwind)
@@ -158,7 +158,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, y_upwind
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vh       !< Meridional thickness transport
   real :: north, south                                   !< North and South positions for meridional derivative
 
-  vh = (vhtr * (GV%H_to_RZ * Idt)) / GV%Rho0
+  vh = (vhtr * GV%H_to_RZ * Idt) / GV%Rho0
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call meridional_upwind_values(vh, Tr, G, nz, y_upwind)
