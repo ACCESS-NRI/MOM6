@@ -15,7 +15,7 @@ public numerical_mixing
 contains
 
 !< Calculate the suprious ``numerical'' mixing of tracer C due to advection.
-subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, nm)
+subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
 
   implicit none
   type(ocean_grid_type),   intent(in) :: G                    !< Ocean grid structure
@@ -28,7 +28,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
   real,                    intent(in) :: uhtr(:, :, :)        !< Accumulated zonal transport
   real,                    intent(in) :: vhtr(:, :, :)        !< Accumulated meridional transport
   real,                    intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
-  real,                 intent(inout) :: x_upwind(:, :, :) !< Zonal upwind value for tracer
+  real,                 intent(inout) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
+  real,                 intent(inout) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
   real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
 
   !< Local variables
@@ -36,9 +37,9 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
                         ! e.g. for temperature need to divide by specific heat capacity * rho_ref
   Tr_adv_scale = scale_constant * GV%Rho0
 
-!  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
+  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
-!  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, y_upwind, nm)
 
 end subroutine numerical_mixing
 
@@ -80,14 +81,14 @@ end subroutine thickness_weighted_variance_change
 subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
 
   implicit none
-  type(tracer_type),       intent(in) :: Tr             !< Tracer
-  real,                    intent(in) :: Tr_adv_scale   !< Scaling for tracer advection
-  real,                    intent(in) :: uhtr(:, :, :)  !< Accumulated zonal fluxes
-  real,                    intent(in) :: Idt            !< Inverse model timestep
-  type(ocean_grid_type),   intent(in) :: G              !< Ocean grid structure for inverse area
-  type(verticalGrid_type), intent(in) :: GV             !< Ocean vertical grid structure
-  real,                 intent(inout) :: x_upwind(:, :, :) !< Zonal upwind value for tracer
-  real,                 intent(inout) :: nm(:, :, :)    !< Numerical mixing diagnostic to update
+  type(tracer_type),       intent(in) :: Tr                 !< Tracer
+  real,                    intent(in) :: Tr_adv_scale       !< Scaling for tracer advection
+  real,                    intent(in) :: uhtr(:, :, :)      !< Accumulated zonal fluxes
+  real,                    intent(in) :: Idt                !< Inverse model timestep
+  type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure for inverse area
+  type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
+  real,                 intent(inout) :: x_upwind(:, :, :)  !< Zonal upwind value for tracer
+  real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
   !< Local variables
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
@@ -102,10 +103,9 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
-      ! east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - uh(I, j, k)   * x_upwind(I, j, k)**2
-      ! west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - uh(I-1, j, k) * x_upwind(I-1, j, k)**2
-      ! nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
-      nm(i, j, k) = nm(i, j, k) + x_upwind(I, j, k) - x_upwind(I-1, j, k)
+      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - uh(I, j, k)   * x_upwind(I, j, k)**2
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - uh(I-1, j, k) * x_upwind(I-1, j, k)**2
+      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
@@ -115,10 +115,10 @@ end subroutine zonal_upwind_fluxes
 subroutine zonal_upwind_values(uh, Tr, G, nz, x_upwind)
 
   implicit none
-  real,                     intent(in) :: uh(:, :, :)       !< Zonal thickness transport
-  type(tracer_type),        intent(in) :: Tr                !< Tracer
-  type(ocean_grid_type),    intent(in) :: G                 !< Ocean grid structure for inverse area
-  integer,                  intent(in) :: nz                !< Grid cell layer indexes
+  real,                     intent(in) :: uh(:, :, :)        !< Zonal thickness transport
+  type(tracer_type),        intent(in) :: Tr                 !< Tracer
+  type(ocean_grid_type),    intent(in) :: G                  !< Ocean grid structure for inverse area
+  integer,                  intent(in) :: nz                 !< Grid cell layer indexes
   real,                  intent(inout) :: x_upwind(:, :, :)  !< Zonal upwind values of C calculated using uhtr
 
   !< Local variables
@@ -140,61 +140,60 @@ subroutine zonal_upwind_values(uh, Tr, G, nz, x_upwind)
 end subroutine zonal_upwind_values
 
 !< Subroutine to calculate the meriodional upwind flues
-subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, nm)
+subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, y_upwind, nm)
 
   implicit none
-  type(tracer_type),       intent(in) :: Tr             !< Tracer
-  real,                    intent(in) :: Tr_adv_scale   !< Scaling for tracer advection
-  real,                    intent(in) :: vhtr(:, :, :)  !< Meridional mass transport
-  real,                    intent(in) :: Idt            !< Inverse model timestep
-  type(ocean_grid_type),   intent(in) :: G              !< Ocean grid structure for inverse area
-  type(verticalGrid_type), intent(in) :: GV             !< Ocean vertical grid structure
-  real,                 intent(inout) :: nm(:, :, :)    !< Numerical mixing diagnostic to update
+  type(tracer_type),       intent(in) :: Tr                 !< Tracer
+  real,                    intent(in) :: Tr_adv_scale       !< Scaling for tracer advection
+  real,                    intent(in) :: vhtr(:, :, :)      !< Meridional mass transport
+  real,                    intent(in) :: Idt                !< Inverse model timestep
+  type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure for inverse area
+  type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
+  real,                 intent(inout) :: y_upwind(:, :, :)  !< Meridional upwind tracer values
+  real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
   !< Local variables
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
   integer :: i, j, k                                     !< Counters
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vh       !< Meridional thickness transport
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: Cupwind  !< Empty variable for the meridional upwind tracer values
   real :: north, south                                   !< North and South positions for meridional derivative
 
   vh = vhtr * ((GV%H_to_RZ * Idt) / GV%Rho0)
-  Cupwind(:, :, :) = 0.
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  call meridional_upwind_values(vh, Tr, G, nz, Cupwind)
+  call meridional_upwind_values(vh, Tr, G, nz, y_upwind)
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
-      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * Cupwind(i, J, k)   - vh(i, J, k)   * Cupwind(i, J, k)**2
-      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * Cupwind(i, J-1, k) - vh(i, J-1, k) * Cupwind(i, J-1, k)**2
+      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - vh(i, J, k)   * y_upwind(i, J, k)**2
+      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - vh(i, J-1, k) * y_upwind(i, J-1, k)**2
       nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
 end subroutine meridional_upwind_fluxes
 
-subroutine meridional_upwind_values(vh, Tr, G, nz, Cupwind)
+subroutine meridional_upwind_values(vh, Tr, G, nz, y_upwind)
 
   implicit none
-  real,                  intent(in) :: vh(:, :, :)       !< Meridional transport
-  type(tracer_type),     intent(in) :: Tr                !< Tracer
-  type(ocean_grid_type), intent(in) :: G                 !< Ocean grid structure for inverse area
-  integer,               intent(in) :: nz                !< Grid cell layer indexes
-  real,               intent(inout) :: Cupwind(:, :, :)  !< Meridional upwind values of C calculated using vhtr
+  real,                  intent(in) :: vh(:, :, :)        !< Meridional transport
+  type(tracer_type),     intent(in) :: Tr                 !< Tracer
+  type(ocean_grid_type), intent(in) :: G                  !< Ocean grid structure for inverse area
+  integer,               intent(in) :: nz                 !< Grid cell layer indexes
+  real,               intent(inout) :: y_upwind(:, :, :)  !< Meridional upwind values of C calculated using vhtr
 
   !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+  is = G%isc ; ie = G%iec ; Js = G%JscB ; Je = G%JecB
 
   do k = 1, nz
-    do j = js-1, je ; do i = is, ie
+    do J = Js-1, Je ; do i = is, ie
       if (vh(i, J, k) >= 0) then
-        Cupwind(i, J, k) = Tr%t(i, j, k)
+        y_upwind(i, J, k) = Tr%t(i, j, k)
       elseif (vh(i, J, k) < 0) then
-        Cupwind(i, J, k) = Tr%t(i, j+1, k)
+        y_upwind(i, J, k) = Tr%t(i, j+1, k)
       endif
     enddo ; enddo
   enddo
