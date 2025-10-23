@@ -37,7 +37,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
                         ! e.g. for temperature need to divide by specific heat capacity * rho_ref
   Tr_adv_scale = scale_constant * GV%Rho0
 
-  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
+  ! call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, Idt, G, GV, x_upwind, nm)
   call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, Idt, G, GV, y_upwind, nm)
 
