@@ -148,12 +148,12 @@ subroutine zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 end subroutine zonal_upwind_values
 
 !< Subroutine to calculate the meriodional upwind flues
-subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, v_trans, mass_transport_scale, G, GV, y_upwind, nm)
+subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
 
   implicit none
   type(tracer_type),       intent(in) :: Tr                    !< Tracer
   real,                    intent(in) :: Tr_adv_scale          !< Scaling for tracer advection
-  real,                    intent(in) :: v_trans(:, :, :)      !< Meridional transport
+  real,                    intent(in) :: vhtr(:, :, :)         !< Accumulated meridional transport
   real,                    intent(in) :: mass_transport_scale  !< Scaling for mass transport
   type(ocean_grid_type),   intent(in) :: G                     !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                    !< Ocean vertical grid structure
@@ -165,12 +165,12 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, v_trans, mass_transport_sc
   integer :: i, j, k                                     !< Counters
   real :: north, south                                   !< North and South positions for meridional derivative
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: v_trans  !< Meridional transport
-
+  
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   v_trans(:, :, :) = 0.
   do k=1,nz ; do J=js-1,je ; do i=is,ie
-    v_trans(i,J,k) = vhtr(i,J,k) * H_to_RZ_dt / GV%Rho0
+    v_trans(i,J,k) = vhtr(i,J,k) * mass_transport_scale
   enddo ; enddo ; enddo
 
   call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
