@@ -40,8 +40,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, uhtr, vhtr, scale
   mass_transport_scale =(Idt * GV%H_to_RZ) / GV%Rho0
 
   call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, h_tendency, dt, Idt, G, GV, nm)
-  ! call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
-  ! call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
+  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
 
 end subroutine numerical_mixing
 
