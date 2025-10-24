@@ -35,7 +35,7 @@ use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
 use MOM_verticalGrid,      only : verticalGrid_type, get_thickness_units, get_flux_units
 use MOM_wave_speed,        only : wave_speed, wave_speed_CS, wave_speed_init
-use MOM_numerical_mixing,  only : numerical_mixing
+use MOM_numerical_mixing,  only : numerical_mixing, zonal_upwind_values, meridional_upwind_values
 
 implicit none ; private
 
@@ -1651,7 +1651,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
                           ! [H T-1 ~> m s-1 or kg m-2 s-1].
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: u_trans ! zonal transport
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: v_trans ! meridional transport
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
@@ -1716,10 +1718,24 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     Tr => Reg%Tr(m)
     if (Tr%id_numerical_mixing > 0) then
       scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+      
+      u_trans(:, :, :) = 0.
+      do k=1,nz ; do j=js,je ; do I=is-1,ie
+        u_trans(I,j,k) = uhtr(I,j,k) * H_to_RZ_dt / GV%Rho0
+      enddo ; enddo ; enddo
+      
+      v_trans(:, :, :) = 0.
+      do k=1,nz ; do J=js-1,je ; do i=is,ie
+        v_trans(i,J,k) = vhtr(i,J,k) * H_to_RZ_dt / GV%Rho0
+      enddo ; enddo ; enddo
+
       x_upwind(:, :, :) = 0.
+      call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
       y_upwind(:, :, :) = 0.
+      call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
+      
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
+      call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, u_trans, v_trans, scale_constant, x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag)
     endif
   endif; enddo
