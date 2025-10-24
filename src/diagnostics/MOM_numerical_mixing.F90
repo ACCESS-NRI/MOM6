@@ -28,8 +28,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, u_trans, v_trans,
   real,                    intent(in) :: u_trans(:, :, :)     !< Zonal transport
   real,                    intent(in) :: v_trans(:, :, :)     !< Meridional transport
   real,                    intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
-  real,                 intent(inout) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
-  real,                 intent(inout) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
+  real,                    intent(in) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
+  real,                    intent(in) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
   real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
 
   !< Local variables
@@ -125,7 +125,7 @@ subroutine zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
   Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
 
   do k = 1, nz
-    do j = js, je ; do I = Is-1, Ie
+    do j = js, je ; do I = Is, Ie
       if (u_trans(I, j, k) >= 0) then
         x_upwind(I, j, k) = Tr%t(i, j, k)
       elseif (u_trans(I, j, k) < 0) then
@@ -184,7 +184,7 @@ subroutine meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
   is = G%isc ; ie = G%iec ; Js = G%JscB ; Je = G%JecB
 
   do k = 1, nz
-    do J = Js-1, Je ; do i = is, ie
+    do J = Js, Je ; do i = is, ie
       if (v_trans(i, J, k) >= 0) then
         y_upwind(i, J, k) = Tr%t(i, j, k)
       elseif (v_trans(i, J, k) < 0) then
