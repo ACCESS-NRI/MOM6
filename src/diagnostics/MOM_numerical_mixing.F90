@@ -112,7 +112,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, 
       ! east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - u_trans(I, j, k)   * x_upwind(I, j, k)**2
       ! west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
       east = 2 * x_upwind(I, j, k)
-      west = 2 * x_upwind(I-1, j, k))
+      west = 2 * x_upwind(I-1, j, k)
       nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
