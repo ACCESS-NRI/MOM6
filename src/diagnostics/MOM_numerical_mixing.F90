@@ -109,10 +109,8 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, 
 
   do k =1, nz
     do j = js, je ; do i = is, ie
-      ! east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - u_trans(I, j, k)   * x_upwind(I, j, k)**2
-      ! west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
-      east = 2 * x_upwind(I, j, k)
-      west = 2 * x_upwind(I-1, j, k)
+      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - u_trans(I, j, k)   * x_upwind(I, j, k)**2
+      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
       nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
@@ -178,10 +176,8 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
-      ! north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - v_trans(i, J, k)   * y_upwind(i, J, k)**2
-      ! south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - v_trans(i, J-1, k) * y_upwind(i, J-1, k)**2
-      north = 2 * y_upwind(i, J, k)
-      south = 2 * y_upwind(i, J-1, k)
+      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - v_trans(i, J, k)   * y_upwind(i, J, k)**2
+      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - v_trans(i, J-1, k) * y_upwind(i, J-1, k)**2
       nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
     enddo ; enddo
   enddo
