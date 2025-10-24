@@ -1730,9 +1730,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       enddo ; enddo ; enddo
 
       x_upwind(:, :, :) = 0.
-      call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
+      ! call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
       y_upwind(:, :, :) = 0.
-      call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
+      ! call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
       
       nm(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, h_tend, dt_trans, Idt, u_trans, v_trans, scale_constant, x_upwind, y_upwind, nm)

@@ -28,8 +28,8 @@ subroutine numerical_mixing(G, GV, Tr, h, h_tendency, dt, Idt, u_trans, v_trans,
   real,                    intent(in) :: u_trans(:, :, :)     !< Zonal transport
   real,                    intent(in) :: v_trans(:, :, :)     !< Meridional transport
   real,                    intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
-  real,                    intent(in) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
-  real,                    intent(in) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
+  real,                 intent(inout) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
+  real,                 intent(inout) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
   real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
 
   !< Local variables
@@ -86,7 +86,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, u_trans, G, GV, x_upwind, nm)
   real,                    intent(in) :: u_trans(:, :, :)   !< Zonal transport
   type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
-  real,                    intent(in) :: x_upwind(:, :, :)  !< Zonal upwind value for tracer
+  real,                 intent(inout) :: x_upwind(:, :, :)  !< Zonal upwind value for tracer
   real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
   !< Local variables
@@ -96,7 +96,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, u_trans, G, GV, x_upwind, nm)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  ! call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
+  call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 
   do k =1, nz
     do j = js, je ; do i = is, ie
@@ -146,7 +146,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, v_trans, Idt, G, GV, y_upw
   real,                    intent(in) :: Idt                !< Inverse model timestep
   type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
-  real,                    intent(in) :: y_upwind(:, :, :)  !< Meridional upwind tracer values
+  real,                 intent(inout) :: y_upwind(:, :, :)  !< Meridional upwind tracer values
   real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic to update
 
   !< Local variables
@@ -156,7 +156,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, v_trans, Idt, G, GV, y_upw
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  ! call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
+  call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
