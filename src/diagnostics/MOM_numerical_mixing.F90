@@ -68,10 +68,10 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn,
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  h_tend(:,:,:) = 0.
-  do k=1,nz ; do j=js,je ; do i=is,ie
-    h_tend(i,j,k) = (h(i,j,k) - diag_pre_dyn%h_state(i,j,k))*Idt
-  enddo ; enddo ; enddo
+  ! h_tend(:,:,:) = 0.
+  ! do k=1,nz ; do j=js,je ; do i=is,ie
+  !   h_tend(i,j,k) = (h(i,j,k) - diag_pre_dyn%h_state(i,j,k))*Idt
+  ! enddo ; enddo ; enddo
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
