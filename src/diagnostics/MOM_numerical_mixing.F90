@@ -18,30 +18,31 @@ contains
   subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
 
   implicit none
-  type(ocean_grid_type),   intent(in) :: G                    !< Ocean grid structure
-  type(verticalGrid_type), intent(in) :: GV                   !< Ocean vertical grid structure
-  type(tracer_type),       intent(in) :: Tr                   !< Tracer
-  real,                    intent(in) :: h(:, :, :)           !< Thickness
-  type(diag_grid_storage), intent(in) :: diag_pre_dyn         !< Stored grids from before dynamics
-  real,                    intent(in) :: dt                   !< Model timestep
-  real,                    intent(in) :: Idt                  !< Inverse model timestep
-  real,                    intent(in) :: uhtr(:, :, :)        !< Accumulated zonal transport
-  real,                    intent(in) :: vhtr(:, :, :)        !< Accumulated meridional transport
-  real,                    intent(in) :: scale_constant       !< Scaling for tracer e.g. Specific heat capacity for T
-  real,                 intent(inout) :: x_upwind(:, :, :)    !< Zonal upwind values for tracer
-  real,                 intent(inout) :: y_upwind(:, :, :)    !< Meridional upwind values for tracer
-  real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic
+  type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure
+  type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
+  type(tracer_type),       intent(in) :: Tr                 !< Tracer
+  real,                    intent(in) :: h(:, :, :)         !< Thickness
+  type(diag_grid_storage), intent(in) :: diag_pre_dyn       !< Stored grids from before dynamics
+  real,                    intent(in) :: dt                 !< Model timestep
+  real,                    intent(in) :: Idt                !< Inverse model timestep
+  real,                    intent(in) :: uhtr(:, :, :)      !< Accumulated zonal transport
+  real,                    intent(in) :: vhtr(:, :, :)      !< Accumulated meridional transport
+  real,                    intent(in) :: scale_constant     !< Scaling for tracer e.g. Specific heat capacity for T
+  real,                 intent(inout) :: x_upwind(:, :, :)  !< Zonal upwind values for tracer
+  real,                 intent(inout) :: y_upwind(:, :, :)  !< Meridional upwind values for tracer
+  real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic
 
   !< Local variables
-  real :: Tr_adv_scale  !< Scaling required for advection terms to ensure dimensions are correct
-                        ! e.g. for temperature need to divide by specific heat capacity * rho_ref
-  real :: mass_transport_scale !< Scaling required for transforming accumulated fluxes into m3 s-1.
+  real :: Tr_adv_scale          !< Scaling required for advection terms to ensure dimensions are correct
+                                !< e.g. for temperature need to divide by specific heat capacity * rho_ref
+  real :: mass_transport_scale  !< Scaling required for transforming accumulated fluxes into m3 s-1.
+  
   Tr_adv_scale = scale_constant * GV%Rho0
   mass_transport_scale =(Idt * GV%H_to_RZ) / GV%Rho0
 
   call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, nm)
-  ! call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
-  ! call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
+  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
 
 end subroutine numerical_mixing
 
@@ -49,15 +50,15 @@ end subroutine numerical_mixing
 subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, nm)
 
   implicit none
-  type(tracer_type),       intent(in) :: Tr                   !< Tracer
-  real,                    intent(in) :: Tr_adv_scale         !< Scaling for tracer advection
-  real,                    intent(in) :: h(:, :, :)           !< Thickness
-  type(diag_grid_storage), intent(in) :: diag_pre_dyn         !< Stored grids from before dynamics
-  real,                    intent(in) :: dt                   !< Model timestep
-  real,                    intent(in) :: Idt                  !< Inverse model timestep
-  type(ocean_grid_type),   intent(in) :: G                    !< Ocean grid structure
-  type(verticalGrid_type), intent(in) :: GV                   !< Ocean vertical grid structure
-  real,                 intent(inout) :: nm(:, :, :)          !< Numerical mixing diagnostic to update
+  type(tracer_type),       intent(in) :: Tr            !< Tracer
+  real,                    intent(in) :: Tr_adv_scale  !< Scaling for tracer advection
+  real,                    intent(in) :: h(:, :, :)    !< Thickness
+  type(diag_grid_storage), intent(in) :: diag_pre_dyn  !< Stored grids from before dynamics
+  real,                    intent(in) :: dt            !< Model timestep
+  real,                    intent(in) :: Idt           !< Inverse model timestep
+  type(ocean_grid_type),   intent(in) :: G             !< Ocean grid structure
+  type(verticalGrid_type), intent(in) :: GV            !< Ocean vertical grid structure
+  real,                 intent(inout) :: nm(:, :, :)   !< Numerical mixing diagnostic to update
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
