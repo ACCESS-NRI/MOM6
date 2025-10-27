@@ -1715,13 +1715,17 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
     Tr => Reg%Tr(m)
     if (Tr%id_numerical_mixing > 0) then
-      scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+      if (Tr%name == "T")
+        scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+      elseif (Tr%name == "S")
+        scale_constant = 1000 !< g -> kg
+      else
+        scale_constant = 1    !< any other tracer is unscaled
+      endif
       x_upwind(:, :, :) = 0.
       y_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
-      ! The call to numerical mixing requires other variables that may not be registered. Don't know what best practice is
-      ! but one option is to add another to condition to the loops so it is computed, then another condition to post?
       call post_data(Tr%id_numerical_mixing, nm, diag)
     endif
   endif; enddo
