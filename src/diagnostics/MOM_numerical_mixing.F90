@@ -14,7 +14,7 @@ public numerical_mixing
 
 contains
 
-!< Calculate the suprious ``numerical'' mixing of tracer C due to advection.
+!< Calculate the suprious ``numerical'' mixing of tracer Tr due to advection.
   subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
 
   implicit none
