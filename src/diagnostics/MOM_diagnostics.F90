@@ -1715,9 +1715,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
     Tr => Reg%Tr(m)
     if (Tr%id_numerical_mixing > 0) then
-      if (Tr%name == "T")
+      if (Tr%name == "T") then
         scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
-      elseif (Tr%name == "S")
+      elseif (Tr%name == "S") then
         scale_constant = 1000 !< g -> kg
       else
         scale_constant = 1    !< any other tracer is unscaled
