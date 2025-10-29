@@ -38,7 +38,7 @@ contains
   real :: mass_transport_scale  !< Scaling required for transforming accumulated fluxes into m3 s-1.
   
   Tr_adv_scale = scale_constant * GV%Rho0
-  mass_transport_scale =(Idt * GV%H_to_RZ) / GV%Rho0
+  mass_transport_scale = (Idt * GV%H_to_RZ) / GV%Rho0
 
   call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
@@ -70,10 +70,6 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn,
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
-      ! Should the previous state be used here? h is the updated thickness values so below might be what we want
-      ! h1 = diag_pre_dyn%h_state(i, j, k)
-      ! hadv = h(i, j, k)
-      ! C1 = Tr%t_prev(i, j, k)
       h1 = h(i, j, k)
       ! hadv = h1 + dt * h_tend(i, j, k)
       !      = h(i, j, k) + dt * Idt * (h(i, j, k) - diag_pre_dyn%h_state(i, j, k))
@@ -179,7 +175,6 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale
   enddo ; enddo ; enddo
 
   call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
-
 
   do k = 1, nz
     do j = js, je ; do i = is, ie
