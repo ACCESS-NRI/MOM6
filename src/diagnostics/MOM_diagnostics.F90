@@ -1726,7 +1726,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       y_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
-      call post_data(Tr%id_numerical_mixing, nm, diag)
+      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
     endif
   endif; enddo
 
