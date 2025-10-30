@@ -89,7 +89,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, 
   type(tracer_type),       intent(in) :: Tr                    !< Tracer
   real,                    intent(in) :: Tr_adv_scale          !< Scaling for tracer advection
   real,                    intent(in) :: uhtr(:, :, :)         !< Accumulated zonal transport
-  real,                    intent(in) :: mass_transport_scale  !< Inverse model timestep
+  real,                    intent(in) :: mass_transport_scale  !< Scaling for mass transport
   type(ocean_grid_type),   intent(in) :: G                     !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                    !< Ocean vertical grid structure
   real,                 intent(inout) :: x_upwind(:, :, :)     !< Zonal upwind value for tracer
@@ -114,7 +114,7 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, 
     do j = js, je ; do i = is, ie
       east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - u_trans(I, j, k)   * x_upwind(I, j, k)**2
       west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
-      nm(i, j, k) = nm(i, j, k) - ((east - west) * G%IareaT(i, j))
+      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
@@ -180,7 +180,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale
     do j = js, je ; do i = is, ie
       north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - v_trans(i, J, k)   * y_upwind(i, J, k)**2
       south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - v_trans(i, J-1, k) * y_upwind(i, J-1, k)**2
-      nm(i, j, k) = nm(i, j, k) - ((north - south) * G%IareaT(i, j))
+      nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
     enddo ; enddo
   enddo
 
