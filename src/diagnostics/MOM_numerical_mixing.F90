@@ -15,7 +15,7 @@ public numerical_mixing
 contains
 
 !< Calculate the suprious ``numerical'' mixing of tracer Tr due to advection.
-  subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
+subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
 
   implicit none
   type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure
@@ -36,7 +36,7 @@ contains
   real :: Tr_adv_scale          !< Scaling required for advection terms to ensure dimensions are correct
                                 !< e.g. for temperature need to divide by specific heat capacity * rho_ref
   real :: mass_transport_scale  !< Scaling required for transforming accumulated fluxes into m3 s-1.
-  
+
   Tr_adv_scale = scale_constant * GV%Rho0
   mass_transport_scale = (Idt * GV%H_to_RZ) / GV%Rho0
 
@@ -110,13 +110,11 @@ subroutine zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, 
 
   call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 
-  do k =1, nz
-    do j = js, je ; do i = is, ie
-      east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   - u_trans(I, j, k)   * x_upwind(I, j, k)**2
-      west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
-      nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
-    enddo ; enddo
-  enddo
+  do k = 1, nz ;  do j = js, je ; do i = is, ie
+    east = 2 * (Tr%ad_x(I, j, k)   / Tr_adv_scale) * x_upwind(I, j, k)   -u_trans(I, j, k)   * x_upwind(I, j, k)**2
+    west = 2 * (Tr%ad_x(I-1, j, k) / Tr_adv_scale) * x_upwind(I-1, j, k) - u_trans(I-1, j, k) * x_upwind(I-1, j, k)**2
+    nm(i, j, k) = nm(i, j, k) + ((east - west) * G%IareaT(i, j))
+  enddo ; enddo; enddo
 
 end subroutine zonal_upwind_fluxes
 
@@ -136,15 +134,13 @@ subroutine zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 
   Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
 
-  do k = 1, nz
-    do j = js, je ; do I = Is, Ie
-      if (u_trans(I, j, k) >= 0) then
-        x_upwind(I, j, k) = Tr%t(i, j, k)
-      elseif (u_trans(I, j, k) < 0) then
-        x_upwind(I, j, k) = Tr%t(i+1, j, k)
-      endif
-    enddo ; enddo
-  enddo
+  do k = 1, nz ;  do j = js, je ; do I = Is, Ie
+    if (u_trans(I, j, k) >= 0) then
+      x_upwind(I, j, k) = Tr%t(i, j, k)
+    elseif (u_trans(I, j, k) < 0) then
+      x_upwind(I, j, k) = Tr%t(i+1, j, k)
+    endif
+  enddo ; enddo ; enddo
 
 end subroutine zonal_upwind_values
 
@@ -166,7 +162,7 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale
   integer :: i, j, k                                     !< Counters
   real :: north, south                                   !< North and South positions for meridional derivative
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: v_trans  !< Meridional transport
-  
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   v_trans(:, :, :) = 0.
@@ -176,16 +172,15 @@ subroutine meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale
 
   call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
 
-  do k = 1, nz
-    do j = js, je ; do i = is, ie
-      north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - v_trans(i, J, k)   * y_upwind(i, J, k)**2
-      south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - v_trans(i, J-1, k) * y_upwind(i, J-1, k)**2
-      nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
-    enddo ; enddo
-  enddo
+  do k = 1, nz ; do j = js, je ; do i = is, ie
+    north = 2 * (Tr%ad_y(i, J, k)   / Tr_adv_scale) * y_upwind(i, J, k)   - v_trans(i, J, k)   * y_upwind(i, J, k)**2
+    south = 2 * (Tr%ad_y(i, J-1, k) / Tr_adv_scale) * y_upwind(i, J-1, k) - v_trans(i, J-1, k) * y_upwind(i, J-1, k)**2
+    nm(i, j, k) = nm(i, j, k) + ((north - south) * G%IareaT(i, j))
+  enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_fluxes
 
+!< Subroutine to calculate upwind value in the meridional direction
 subroutine meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
 
   implicit none
@@ -201,15 +196,13 @@ subroutine meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
 
   is = G%isc ; ie = G%iec ; Js = G%JscB ; Je = G%JecB
 
-  do k = 1, nz
-    do J = Js, Je ; do i = is, ie
-      if (v_trans(i, J, k) >= 0) then
-        y_upwind(i, J, k) = Tr%t(i, j, k)
-      elseif (v_trans(i, J, k) < 0) then
-        y_upwind(i, J, k) = Tr%t(i, j+1, k)
-      endif
-    enddo ; enddo
-  enddo
+  do k = 1, nz ; do J = Js, Je ; do i = is, ie
+    if (v_trans(i, J, k) >= 0) then
+      y_upwind(i, J, k) = Tr%t(i, j, k)
+    elseif (v_trans(i, J, k) < 0) then
+      y_upwind(i, J, k) = Tr%t(i, j+1, k)
+    endif
+  enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_values
 
