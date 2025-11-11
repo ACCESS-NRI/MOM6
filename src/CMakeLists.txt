@@ -92,6 +92,7 @@ target_sources(mom6shared PRIVATE
   diagnostics/MOM_diagnose_MLD.F90
   diagnostics/MOM_diagnostics.F90
   diagnostics/MOM_harmonic_analysis.F90
+  diagnostics/MOM_numerical_mixing.F90
   diagnostics/MOM_obsolete_diagnostics.F90
   diagnostics/MOM_obsolete_params.F90
   diagnostics/MOM_PointAccel.F90
