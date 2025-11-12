@@ -35,7 +35,7 @@ use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
 use MOM_verticalGrid,      only : verticalGrid_type, get_thickness_units, get_flux_units
 use MOM_wave_speed,        only : wave_speed, wave_speed_CS, wave_speed_init
-use MOM_numerical_mixing,  only : numerical_mixing
+use MOM_numerical_mixing,  only : numerical_mixing, variance_advection
 
 implicit none ; private
 
@@ -1727,12 +1727,15 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       x_upwind(:, :, :) = 0.
       y_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
-      va(:,:,:) = 0.
       ! vf(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            scale_constant, x_upwind, y_upwind, nm, va)!<, vf)
+                            scale_constant, x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(Tr%id_variance_adv, va, diag, alt_h=diag_pre_dyn%h_state)
+      if (Tr%id_variance_adv > 0)
+        va(:,:,:) = 0.
+        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt, Idt, scale_constant, va)
+        call post_data(Tr%id_variance_adv, va, diag, alt_h=diag_pre_dyn%h_state)
+      endif
       ! call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
     endif
   endif; enddo
