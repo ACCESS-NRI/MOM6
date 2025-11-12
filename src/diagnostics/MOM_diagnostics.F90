@@ -1733,7 +1733,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
       if (Tr%id_variance_adv > 0) then
         va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt, Idt, scale_constant, va)
+        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
         call post_data(Tr%id_variance_adv, va, diag, alt_h=diag_pre_dyn%h_state)
       endif
       ! call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
