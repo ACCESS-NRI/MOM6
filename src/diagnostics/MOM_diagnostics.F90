@@ -1654,8 +1654,8 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection (remove after nm sorted)
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance (remove after nm sorted)
+  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection (remove after nm sorted)
+  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance (remove after nm sorted)
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
@@ -1727,13 +1727,13 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       x_upwind(:, :, :) = 0.
       y_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
-      va(:,:,:) = 0.
-      vf(:,:,:) = 0.
+      ! va(:,:,:) = 0.
+      ! vf(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            scale_constant, x_upwind, y_upwind, nm, va, vf)
+                            scale_constant, x_upwind, y_upwind, nm)!<, va, vf)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(Tr%id_variance_adv, va, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+      ! call post_data(Tr%id_variance_adv, va, diag, alt_h=diag_pre_dyn%h_state)
+      ! call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
     endif
   endif; enddo
 
