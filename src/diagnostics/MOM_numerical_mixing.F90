@@ -15,7 +15,7 @@ public numerical_mixing
 contains
 
 !< Calculate the suprious ``numerical'' mixing of tracer Tr due to advection.
-subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm)
+subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, nm, va, vf)
 
   implicit none
   type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure
@@ -31,6 +31,8 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, sca
   real,                 intent(inout) :: x_upwind(:, :, :)  !< Zonal upwind values for tracer
   real,                 intent(inout) :: y_upwind(:, :, :)  !< Meridional upwind values for tracer
   real,                 intent(inout) :: nm(:, :, :)        !< Numerical mixing diagnostic
+  real,                 intent(inout) :: va(:, :, :)        !< Variance advection (removed after nm sorted)
+  real,                 intent(inout) :: vf(:, :, :)        !< Variance flux (remove after nm sorted)
 
   !< Local variables
   real :: Tr_adv_scale          !< Scaling required for advection terms to ensure dimensions are correct
@@ -43,6 +45,10 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, sca
   call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, nm)
   call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
   call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
+  !< Temporary for sorting out numerical mixing
+  call thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, va)
+  call zonal_upwind_fluxes(Tr, Tr_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, vf)
+  call meridional_upwind_fluxes(Tr, Tr_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, vf)
 
 end subroutine numerical_mixing
 
