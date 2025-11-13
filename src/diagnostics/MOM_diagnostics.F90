@@ -1655,7 +1655,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection (remove after nm sorted)
-  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance (remove after nm sorted)
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance (remove after nm sorted)
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
