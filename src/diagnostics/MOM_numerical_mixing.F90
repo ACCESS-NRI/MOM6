@@ -115,7 +115,7 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn,
   !< Local variables
   integer :: is, ie, js, je, nz       !< Grid cell centre and layer indexes
   integer :: i, j, k                  !< Counters
-  real :: h_prev, C_prve, hadv, Cadv  !< Thickness and tracer at previous timestep and the
+  real :: h_prev, C_prev, hadv, Cadv  !< Thickness and tracer at previous timestep and the
                                       !< changes in thickness and tracer after advection.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -127,8 +127,8 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn,
     !      = h(i, j, k)
     hadv = h(i, j, k)
     C_prev = Tr%t_prev(i, j, k)
-    Cadv = h1 * C1 +  dt * (Tr%advection_xy(i, j, k)  / Tr_adv_scale)
-    res(i, j, k) = ( (Cadv**2 / hadv) - (h1 * C1**2) ) * Idt
+    Cadv = h_prev * C_prev +  dt * (Tr%advection_xy(i, j, k)  / Tr_adv_scale)
+    res(i, j, k) = ( (Cadv**2 / hadv) - (h_prev * C_prev**2) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_change
