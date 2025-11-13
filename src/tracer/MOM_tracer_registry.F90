@@ -488,7 +488,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         'Net time tendency for '//trim(lowercase(longname)), &
         trim(units)//' s-1', conversion=Tr%conc_scale*US%s_to_T)
 
-    if (Tr%id_tendency > 0) then
+    if ((Tr%id_tendency > 0) .or. (Tr%id_numerical_mixing > 0)) then
       call safe_alloc_ptr(Tr%t_prev,isd,ied,jsd,jed,nz)
       do k=1,nz ; do j=js,je ; do i=is,ie
         Tr%t_prev(i,j,k) = Tr%t(i,j,k)

@@ -113,24 +113,23 @@ subroutine thickness_weighted_variance_change(Tr, Tr_adv_scale, h, diag_pre_dyn,
   real,                 intent(inout) :: res(:, :, :)  !< Array to store result in
 
   !< Local variables
-  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
-  integer :: i, j, k             !< Counters
-  real :: h1, C1, hadv, Cadv     !< Temporary variables for thickness and tracer at current timestep
-                                 !< and the changes in thickness and tracer due to advection.
+  integer :: is, ie, js, je, nz       !< Grid cell centre and layer indexes
+  integer :: i, j, k                  !< Counters
+  real :: h_prev, C_prve, hadv, Cadv  !< Thickness and tracer at previous timestep and the
+                                      !< changes in thickness and tracer after advection.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  do k = 1, nz
-    do j = js, je ; do i = is, ie
-      h1 = h(i, j, k)
-      ! hadv = h1 + dt * h_tend(i, j, k)
-      !      = h(i, j, k) + dt * Idt * (h(i, j, k) - diag_pre_dyn%h_state(i, j, k))
-      hadv = 2*h1 - diag_pre_dyn%h_state(i,j,k)
-      C1 = Tr%t(i, j, k)
-      Cadv = h1 * C1 +  dt * (Tr%advection_xy(i, j, k)  / Tr_adv_scale)
-      res(i, j, k) = ( (Cadv**2 / hadv) - (h1 * C1**2) ) * Idt
-    enddo ; enddo
-  enddo
+  do k = 1, nz ; do j = js, je ; do i = is, ie
+    h_prev = diag_pre_dyn%h_state(i, j, k)
+    ! hadv = h_prev + dt * (h_tend)
+    !      = h_prev + dt * (Idt * (h(i, j, k) - h_prev))
+    !      = h(i, j, k)
+    hadv = h(i, j, k)
+    C_prev = Tr%t_prev(i, j, k)
+    Cadv = h1 * C1 +  dt * (Tr%advection_xy(i, j, k)  / Tr_adv_scale)
+    res(i, j, k) = ( (Cadv**2 / hadv) - (h1 * C1**2) ) * Idt
+  enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_change
 
@@ -188,9 +187,9 @@ subroutine zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 
   do k = 1, nz ;  do j = js, je ; do I = Is, Ie
     if (u_trans(I, j, k) >= 0) then
-      x_upwind(I, j, k) = Tr%t(i, j, k)
+      x_upwind(I, j, k) = Tr%t_prev(i, j, k)
     elseif (u_trans(I, j, k) < 0) then
-      x_upwind(I, j, k) = Tr%t(i+1, j, k)
+      x_upwind(I, j, k) = Tr%t_prev(i+1, j, k)
     endif
   enddo ; enddo ; enddo
 
@@ -250,9 +249,9 @@ subroutine meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
 
   do k = 1, nz ; do J = Js, Je ; do i = is, ie
     if (v_trans(i, J, k) >= 0) then
-      y_upwind(i, J, k) = Tr%t(i, j, k)
+      y_upwind(i, J, k) = Tr%t_prev(i, j, k)
     elseif (v_trans(i, J, k) < 0) then
-      y_upwind(i, J, k) = Tr%t(i, j+1, k)
+      y_upwind(i, J, k) = Tr%t_prev(i, j+1, k)
     endif
   enddo ; enddo ; enddo
 
