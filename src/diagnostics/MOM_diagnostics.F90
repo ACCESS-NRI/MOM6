@@ -1741,7 +1741,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
         x_upwind(:, :, :) = 0.
         y_upwind(:, :, :) = 0.
         vf(:,:,:) = 0.
-        call variance_flux(G, GV, Tr, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+        call variance_flux(G, GV, Idt, Tr, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
         call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
       endif
     endif
