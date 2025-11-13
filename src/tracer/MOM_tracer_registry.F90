@@ -384,7 +384,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", trim(Tr%units)//"^2ms-1")
-      Tr%id_variance_adv = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
+      Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
           diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", trim(Tr%units)//"^2ms-1")
       Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
           diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", trim(Tr%units)//"^2ms-1")
@@ -415,7 +415,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           x_cell_method='sum')
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", trim(Tr%units)//"^2ms-1")
-      Tr%id_variance_adv = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
+      Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
           diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", trim(Tr%units)//"^2ms-1")
       Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
           diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", trim(Tr%units)//"^2ms-1")
