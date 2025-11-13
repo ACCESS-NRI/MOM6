@@ -71,12 +71,13 @@ subroutine variance_advection(G, GV, Tr, h, diag_pre_dyn, dt, Idt, scale_constan
 end subroutine variance_advection
 
 !< Subroutine for only the variance flux, likely will remove once numerical mixing is sorted out
-subroutine variance_flux(G, GV, Tr, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
 
   implicit none
   type(ocean_grid_type),   intent(in) :: G                  !< Ocean grid structure
   type(verticalGrid_type), intent(in) :: GV                 !< Ocean vertical grid structure
   type(tracer_type),       intent(in) :: Tr                 !< Tracer
+  real,                    intent(in) :: Idt                !< Inverse model timestep
   real,                    intent(in) :: uhtr(:, :, :)      !< Accumulated zonal transport
   real,                    intent(in) :: vhtr(:, :, :)      !< Accumulated meridional transport
   real,                    intent(in) :: scale_constant     !< Scaling for tracer e.g. Specific heat capacity for T
