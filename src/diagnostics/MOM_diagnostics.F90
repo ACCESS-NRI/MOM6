@@ -1736,7 +1736,14 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
         call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
         call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
       endif
-      ! call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+      if (Tr%id_variance_flux > 0) then
+        !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
+        x_upwind(:, :, :) = 0.
+        y_upwind(:, :, :) = 0.
+        vf(:,:,:) = 0.
+        call variance_flux(G, GV, Tr, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+        call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+      endif
     endif
   endif; enddo
 
