@@ -1724,7 +1724,9 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
       call hchksum(eta_PF, "BT eta_PF",CS%debug_BT_HI,haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(eta_PF_in, "BT eta_PF_in",G%HI,haloshift=0, unscale=GV%H_to_MKS)
     endif
+    !$omp target update from(Cor_ref_u, Cor_ref_v)
     call uvchksum("BT Cor_ref_[uv]", Cor_ref_u, Cor_ref_v, CS%debug_BT_HI, haloshift=0, unscale=US%L_T2_to_m_s2)
+    !$omp target update from(uhbt0, vhbt0)
     call uvchksum("BT [uv]hbt0", uhbt0, vhbt0, CS%debug_BT_HI, haloshift=0, &
                   unscale=US%L_to_m**2*US%s_to_T*GV%H_to_m)
     if (.not. use_BT_cont) then
@@ -1736,6 +1738,7 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     !$omp target update from(CS%frhatu, CS%frhatv)
     call uvchksum("BT frhat[uv]", CS%frhatu, CS%frhatv, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+    !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
     call uvchksum("BT bc_accel_[uv]", bc_accel_u, bc_accel_v, G%HI, haloshift=0, unscale=US%L_T2_to_m_s2)
@@ -4710,13 +4713,13 @@ subroutine btcalc(h, G, GV, CS, h_u, h_v, may_use_default, OBC)
 
   if (CS%debug) then
     !$omp target update from(CS%frhatu, CS%frhatv)
-    call uvchksum("btcalc frhat[uv]", CS%frhatu, CS%frhatv, G%HI, &
+    call uvchksum("xyzbtcalc frhat[uv]", CS%frhatu, CS%frhatv, G%HI, &
                   haloshift=0, symmetric=.true., omit_corners=.true., &
                   scalar_pair=.true.)
 
     if (present(h_u) .and. present(h_v)) then
       !$omp target update from(h_u, h_v)
-      call uvchksum("btcalc h_[uv]", h_u, h_v, G%HI, haloshift=0, &
+      call uvchksum("asdbtcalc h_[uv]", h_u, h_v, G%HI, haloshift=0, &
                     symmetric=.true., omit_corners=.true., unscale=GV%H_to_MKS, &
                     scalar_pair=.true.)
     endif
