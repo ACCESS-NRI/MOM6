@@ -1628,7 +1628,7 @@ end subroutine post_surface_thermo_diags
 !> This routine posts diagnostics of the transports, including the subgridscale
 !! contributions.
 subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dyn, &
-                                      diag, dt_trans, Reg)
+                                      diag, dt_trans, Reg, tv)
   type(ocean_grid_type),    intent(inout) :: G   !< ocean grid structure
   type(verticalGrid_type),  intent(in)    :: GV  !< ocean vertical grid structure
   type(unit_scale_type),    intent(in)    :: US  !< A dimensional unit scaling type
@@ -1643,6 +1643,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   type(diag_ctrl),          intent(inout) :: diag !< regulates diagnostic output
   real,                     intent(in)    :: dt_trans !< total time step associated with the transports [T ~> s].
   type(tracer_registry_type), pointer     :: Reg !< Pointer to the tracer registry
+  type(thermo_var_ptrs),    intent(in) :: tv  !< A structure pointing to various thermodynamic variables
 
   ! Local variables
   real, dimension(SZIB_(G),SZJ_(G)) :: umo2d ! Diagnostics of integrated mass transport [R Z L2 T-1 ~> kg s-1]
@@ -1718,7 +1719,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     Tr => Reg%Tr(m)
     if (Tr%id_numerical_mixing > 0) then
       if (Tr%name == "T") then
-        scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+        scale_constant = tv%C_p ! 3991.86795711963 !< hard coded (for now) specific heat capacity
       elseif (Tr%name == "S") then
         scale_constant = 1000 !< g -> kg
       else
@@ -1727,7 +1728,6 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
       x_upwind(:, :, :) = 0.
       y_upwind(:, :, :) = 0.
       nm(:,:,:) = 0.
-      ! vf(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
                             scale_constant, x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
