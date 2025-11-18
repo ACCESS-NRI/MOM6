@@ -1718,7 +1718,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     Tr => Reg%Tr(m)
     if (Tr%id_numerical_mixing > 0) then
       if (Tr%name == "T") then
-        scale_constant = tv%C_p ! 3991.86795711963 !< hard coded (for now) specific heat capacity
+        scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
       elseif (Tr%name == "S") then
         scale_constant = 1000 !< g -> kg
       else
