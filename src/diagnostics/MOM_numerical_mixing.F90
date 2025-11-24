@@ -84,7 +84,7 @@ subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y
   real,                 intent(inout) :: vf(:,:,:)        !< Variance fluxes
 
   !< Local variables
-  real :: ITR_adv_scale          !< Scaling required for advection terms to ensure dimensions are correct
+  real :: ITR_adv_scale         !< Scaling required for advection terms to ensure dimensions are correct
                                 !< e.g. for temperature need to divide by specific heat capacity * rho_ref
   real :: mass_transport_scale  !< Scaling required for transforming accumulated fluxes into m3 s-1.
 
