@@ -767,7 +767,7 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
 end subroutine post_tracer_diagnostics_at_sync
 
 !> Post the advective and diffusive tendencies
-subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, diag, uhtr, vhtr, dt_trans, Idt)
+subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, diag, uhtr, vhtr, h, dt_trans, Idt)
   type(ocean_grid_type),      intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type),    intent(in) :: GV   !< The ocean's vertical grid structure
   type(tracer_registry_type), pointer    :: Reg  !< pointer to the tracer registry
@@ -781,6 +781,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), & 
                               intent(in) :: vhtr !< Accumulated meridional thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                              intent(in) :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
   real,                       intent(in) :: dt_trans  ! The transport time interval [T ~> s]
   real,                       intent(in) :: Idt       ! The inverse of the time interval [T-1 ~> s-1]
 

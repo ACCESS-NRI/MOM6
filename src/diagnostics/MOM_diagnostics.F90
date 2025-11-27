@@ -1699,7 +1699,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   endif
 
   call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag_pre_dyn, &
-                                         diag, dt_trans, Idt, uhtr, vhtr)
+                                         diag, uhtr, vhtr, h, dt_trans, Idt)
 
   ! Once everything builds and works as it was previously did remove this section
   ! do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
