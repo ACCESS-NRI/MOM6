@@ -35,7 +35,6 @@ use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
 use MOM_verticalGrid,      only : verticalGrid_type, get_thickness_units, get_flux_units
 use MOM_wave_speed,        only : wave_speed, wave_speed_CS, wave_speed_init
-use MOM_numerical_mixing,  only : numerical_mixing, variance_advection, variance_flux
 
 implicit none ; private
 
@@ -1645,22 +1644,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   type(tracer_registry_type), pointer     :: Reg !< Pointer to the tracer registry
 
   ! Local variables
-  real, dimension(SZIB_(G),SZJ_(G)) :: umo2d ! Diagnostics of integrated mass transport [R Z L2 T-1 ~> kg s-1]
-  real, dimension(SZI_(G),SZJB_(G)) :: vmo2d ! Diagnostics of integrated mass transport [R Z L2 T-1 ~> kg s-1]
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: umo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
-                          ! [H T-1 ~> m s-1 or kg m-2 s-1].
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection (remove after nm sorted)
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance (remove after nm sorted)
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
-  type(tracer_type), pointer :: Tr                   !< Tracer type for numerical mixing
-  real :: scale_constant  !< Scale for numerical mixing e.g. specific heat capacity
   integer :: i, j, k, is, ie, js, je, nz, m
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -1712,39 +1698,41 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     call post_data(IDs%id_dynamics_h_tendency, h_tend, diag, alt_h=diag_pre_dyn%h_state)
   endif
 
-  call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag)
+  call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag_pre_dyn, &
+                                         diag, dt_trans, Idt, uhtr, vhtr)
 
-  do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
-    Tr => Reg%Tr(m)
-    if (Tr%id_numerical_mixing > 0) then
-      if (Tr%name == "T") then
-        scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
-      elseif (Tr%name == "S") then
-        scale_constant = 1000 !< g -> kg
-      else
-        scale_constant = 1    !< any other tracer is unscaled
-      endif
-      x_upwind(:, :, :) = 0.
-      y_upwind(:, :, :) = 0.
-      nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            scale_constant, x_upwind, y_upwind, nm)
-      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
-      if (Tr%id_variance_advection > 0) then
-        va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
-        call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
-      endif
-      if (Tr%id_variance_flux > 0) then
-        !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
-        x_upwind(:, :, :) = 0.
-        y_upwind(:, :, :) = 0.
-        vf(:,:,:) = 0.
-        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
-        call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
-      endif
-    endif
-  endif; enddo
+  ! Once everything builds and works as it was previously did remove this section
+  ! do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
+  !   Tr => Reg%Tr(m)
+  !   if (Tr%id_numerical_mixing > 0) then
+  !     if (Tr%name == "T") then
+  !       scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
+  !     elseif (Tr%name == "S") then
+  !       scale_constant = 1000 !< g -> kg
+  !     else
+  !       scale_constant = 1    !< any other tracer is unscaled
+  !     endif
+  !     x_upwind(:, :, :) = 0.
+  !     y_upwind(:, :, :) = 0.
+  !     nm(:,:,:) = 0.
+  !     call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
+  !                           scale_constant, x_upwind, y_upwind, nm)
+  !     call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
+  !     if (Tr%id_variance_advection > 0) then
+  !       va(:,:,:) = 0.
+  !       call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
+  !       call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
+  !     endif
+  !     if (Tr%id_variance_flux > 0) then
+  !       !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
+  !       x_upwind(:, :, :) = 0.
+  !       y_upwind(:, :, :) = 0.
+  !       vf(:,:,:) = 0.
+  !       call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+  !       call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+  !     endif
+  !   endif
+  ! endif; enddo
 
   call diag_restore_grids(diag)
 

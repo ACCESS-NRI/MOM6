@@ -92,7 +92,6 @@ target_sources(mom6shared PRIVATE
   diagnostics/MOM_diagnose_MLD.F90
   diagnostics/MOM_diagnostics.F90
   diagnostics/MOM_harmonic_analysis.F90
-  diagnostics/MOM_numerical_mixing.F90
   diagnostics/MOM_obsolete_diagnostics.F90
   diagnostics/MOM_obsolete_params.F90
   diagnostics/MOM_PointAccel.F90
@@ -275,6 +274,7 @@ target_sources(mom6shared PRIVATE
   tracer/MOM_tracer_diabatic.F90
   tracer/MOM_tracer_flow_control.F90
   tracer/MOM_tracer_hor_diff.F90
+  tracer/MOM_tracer_numerical_mixing.F90
   tracer/MOM_tracer_registry.F90
   tracer/MOM_tracer_types.F90
   tracer/MOM_tracer_Z_init.F90

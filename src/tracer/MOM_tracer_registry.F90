@@ -25,6 +25,7 @@ use MOM_time_manager,  only : time_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_tracer_types,  only : tracer_type, tracer_registry_type
+use MOM_tracer_numerical_mixing,  only : numerical_mixing, variance_advection, variance_flux
 
 implicit none ; private
 
@@ -766,13 +767,22 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
 end subroutine post_tracer_diagnostics_at_sync
 
 !> Post the advective and diffusive tendencies
-subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
+subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, diag, uhtr, vhtr, dt_trans, Idt)
   type(ocean_grid_type),      intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type),    intent(in) :: GV   !< The ocean's vertical grid structure
   type(tracer_registry_type), pointer    :: Reg  !< pointer to the tracer registry
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h_diag !< Layer thicknesses on which to post fields [H ~> m or kg m-2]
+  type(diag_grid_storage),    intent(in) :: diag_pre_dyn !< Stored grids from before dynamics
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
+                              intent(in) :: uhtr !< Accumulated zonal thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), & 
+                              intent(in) :: vhtr !< Accumulated meridional thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
+  real,                       intent(in) :: dt_trans  ! The transport time interval [T ~> s]
+  real,                       intent(in) :: Idt       ! The inverse of the time interval [T-1 ~> s-1]
 
   integer :: i, j, k, is, ie, js, je, nz, m, khi
   real    :: work2d(SZI_(G),SZJ_(G))      ! The vertically integrated convergence of lateral advective
@@ -780,9 +790,21 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
+  ! va and vf will be removed but are needed in the debugging process
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance [CU2 H T-1 ~> conc2 m s-1]
+  real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
+                          ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
+  real :: scale_constant  !< Scale for numerical mixing e.g. specific heat capacity.
+                          !! The dimensions are dependent on the tracer so they are specified
+                          !! where the value is defined.
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  H_to_RZ_dt = GV%H_to_RZ * Idt
 
   ! If any tracers are posting 100m vertical integrals, compute weights
   frac_under_100m(:,:,:) = 0.0
@@ -831,6 +853,38 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
         work2d(i,j) = work2d(i,j) + Tr%advection_xy(i,j,k)
       enddo ; enddo ; enddo
       call post_data(Tr%id_adv_xy_2d, work2d, diag)
+    endif
+
+    if (Tr%id_numerical_mixing > 0) then
+      if (Tr%name == "T") then
+        scale_constant = 3991.86795711963 !< specific heat capacity [Q C-1 ~> J degC-1 kg-1]
+      ! elseif (Tr%name == "S") then
+      !   scale_constant = 1000 !< I am not sure about this conversion when S is practical salintiy
+                                !< need to check with Jan what he had..
+      ! else
+      !   scale_constant = 1    !< any other tracer is unscaled
+      endif
+      x_upwind(:,:,:) = 0.
+      y_upwind(:,:,:) = 0.
+      nm(:,:,:) = 0.
+      call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
+                            scale_constant, x_upwind, y_upwind, nm)
+      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
+
+      !< The below is here while debuggin; to be removed once numerical mixing is all sorted
+      if (Tr%id_variance_advection > 0) then
+        va(:,:,:) = 0.
+        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
+        call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
+      endif
+      if (Tr%id_variance_flux > 0) then
+        !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
+        x_upwind(:,:,:) = 0.
+        y_upwind(:,:,:) = 0.
+        vf(:,:,:) = 0.
+        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+        call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+      endif
     endif
 
     ! A few diagnostics introduce with MARBL driver
