@@ -258,6 +258,7 @@ target_sources(mom6lib PRIVATE
   ${SRC}/equation_of_state/TEOS10/gsw_t_freezing_poly.f90
   ${SRC}/equation_of_state/TEOS10/gsw_t_from_ct.f90
 
+  ${SRC}/framework/MOM_ANN.F90
   ${SRC}/framework/MOM_array_transform.F90
   ${SRC}/framework/MOM_checksums.F90
   ${SRC}/framework/MOM_coms.F90
