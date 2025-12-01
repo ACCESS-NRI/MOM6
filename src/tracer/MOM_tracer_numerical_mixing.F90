@@ -41,8 +41,8 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt, Idt, uhtr, vhtr, sca
   mass_transport_scale = (Idt * GV%H_to_RZ) / GV%Rho0
 
   call thickness_weighted_variance_change(Tr, ITR_adv_scale, h, diag_pre_dyn, dt, Idt, G, GV, nm)
-  call zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, nm)
-  call meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, nm)
+  call zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, Idt, x_upwind, nm)
+  call meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
 
@@ -91,8 +91,8 @@ subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y
   ITR_adv_scale = 1 / (scale_constant * GV%Rho0)
   mass_transport_scale = (Idt * GV%H_to_RZ) / GV%Rho0
 
-  call zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, vf)
-  call meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, vf)
+  call zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, Idt, x_upwind, vf)
+  call meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, Idt, y_upwind, vf)
 
 end subroutine variance_flux
 
