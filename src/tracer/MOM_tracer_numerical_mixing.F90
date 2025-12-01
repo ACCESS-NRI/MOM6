@@ -112,20 +112,17 @@ subroutine thickness_weighted_variance_change(Tr, ITR_adv_scale, h, diag_pre_dyn
   !< Local variables
   integer :: is, ie, js, je, nz       !< Grid cell centre and layer indexes
   integer :: i, j, k                  !< Counters
-  real :: h_prev, C_prev, hadv, Cadv  !< Thickness and tracer at previous timestep and the
-                                      !< changes in thickness and tracer after advection.
+  real :: h_prev, C_prev, Ihadv, Cadv !< Thickness and tracer at previous timestep, inverse
+                                      !< updated thickness and non-invers tracer after advection.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   do k=1,nz ; do j=js,je ; do i=is,ie
     h_prev = diag_pre_dyn%h_state(i,j,k)
-    ! hadv = h_prev + dt * (h_tend)
-    !      = h_prev + dt * (Idt * (h(i, j, k) - h_prev))
-    !      = h(i, j, k)
-    hadv = h(i, j, k)
+    Ihadv = 1 / h(i,j,k)
     C_prev = Tr%t_prev(i,j,k)
-    Cadv = h_prev * C_prev +  dt * Tr%advection_xy(i,j,k)
-    res(i,j,k) = ( (Cadv**2 / hadv) - (h_prev * C_prev**2) ) * Idt
+    Cadv = h_prev * C_prev + dt * Tr%advection_xy(i,j,k)
+    res(i,j,k) = ( (Ihadv * Cadv**2) - (h_prev * C_prev**2) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_change
@@ -147,16 +144,16 @@ subroutine zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G,
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
   integer :: i, j, k                                     !< Counters
   real :: east, west                                     !< East and West positions for zonal derivative
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: u_trans  !< Zonal transport
+  ! real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: u_trans  !< Zonal transport
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  u_trans(:, :, :) = 0.
-  do k=1,nz ; do j=js,je ; do I=is-1,ie
-    u_trans(I,j,k) = uhtr(I,j,k) * mass_transport_scale
-  enddo ; enddo ; enddo
+  ! u_trans(:,:,:) = 0.
+  ! do k=1,nz ; do j=js,je ; do I=is-1,ie
+  !   u_trans(I,j,k) = uhtr(I,j,k) * mass_transport_scale
+  ! enddo ; enddo ; enddo
 
-  call zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
+  call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
     ! east = 2 * (Tr%ad_x(I,j,k)   * ITR_adv_scale) * x_upwind(I,j,k)   - u_trans(I,j,k)   * x_upwind(I,j,k)**2
@@ -212,16 +209,16 @@ end subroutine zonal_upwind_values
   integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
   integer :: i, j, k                                     !< Counters
   real :: north, south                                   !< North and South positions for meridional derivative
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: v_trans  !< Meridional transport
+  ! real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: v_trans  !< Meridional transport
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
-  v_trans(:, :, :) = 0.
-  do k=1,nz ; do J=js-1,je ; do i=is,ie
-    v_trans(i,J,k) = vhtr(i,J,k) * mass_transport_scale
-  enddo ; enddo ; enddo
+  ! v_trans(:, :, :) = 0.
+  ! do k=1,nz ; do J=js-1,je ; do i=is,ie
+  !   v_trans(i,J,k) = vhtr(i,J,k) * mass_transport_scale
+  ! enddo ; enddo ; enddo
 
-  call meridional_upwind_values(Tr, G, nz, v_trans, y_upwind)
+  call meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
   do k=1,nz ; do j=js,je ; do i=is,ie
     ! north = 2 * (Tr%ad_y(i,J,k)   * ITR_adv_scale) * y_upwind(i,J,k)   - v_trans(i,J,k)   * y_upwind(i,J,k)**2
