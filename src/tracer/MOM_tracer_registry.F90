@@ -802,7 +802,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
   ! va and vf will be removed but are needed in the debugging process
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection 
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection
                                                     ! [CU2 H T-1 ~> conc2 m s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
                                                     ! [CU2 H T-1 ~> conc2 m s-1]
