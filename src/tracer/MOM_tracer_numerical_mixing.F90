@@ -131,7 +131,7 @@ subroutine thickness_weighted_variance_change(Tr, ITR_adv_scale, h, diag_pre_dyn
 end subroutine thickness_weighted_variance_change
 
 !< Subroutine to calculate the zonal upwind fluxes
-subroutine zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, x_upwind, res)
+subroutine zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G, GV, Idt, x_upwind, res)
 
   type(tracer_type),       intent(in) :: Tr                    !< Tracer
   real,                    intent(in) :: ITR_adv_scale         !< Scaling for tracer advection
@@ -139,6 +139,7 @@ subroutine zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G,
   real,                    intent(in) :: mass_transport_scale  !< Scaling for mass transport
   type(ocean_grid_type),   intent(in) :: G                     !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                    !< Ocean vertical grid structure
+  real,                    intent(in) :: Idt            !< Inverse model timestep
   real,                 intent(inout) :: x_upwind(:,:,:)       !< Zonal upwind value for tracer
   real,                 intent(inout) :: res(:,:,:)            !< Array to store the result in
 
@@ -160,8 +161,8 @@ subroutine zonal_upwind_fluxes(Tr, ITR_adv_scale, uhtr, mass_transport_scale, G,
   do k=1,nz ;  do j=js,je ; do i=is,ie
     ! east = 2 * (Tr%ad_x(I,j,k)   * ITR_adv_scale) * x_upwind(I,j,k)   - u_trans(I,j,k)   * x_upwind(I,j,k)**2
     ! west = 2 * (Tr%ad_x(I-1,j,k) * ITR_adv_scale) * x_upwind(I-1,j,k) - u_trans(I-1,j,k) * x_upwind(I-1,j,k)**2
-    east = 2 * (Tr%ad_x(I,j,k)   * x_upwind(I,j,k))  - uhtr(I,j,k)   * x_upwind(I,j,k)**2
-    west = 2 * (Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - uhtr(I-1,j,k) * x_upwind(I-1,j,k)**2
+    east = 2 * (Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - Idt * uhtr(I,j,k)   * x_upwind(I,j,k)**2
+    west = 2 * (Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - Idt * uhtr(I-1,j,k) * x_upwind(I-1,j,k)**2
     res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
   enddo ; enddo; enddo
 
@@ -194,7 +195,7 @@ subroutine zonal_upwind_values(Tr, G, nz, u_trans, x_upwind)
 end subroutine zonal_upwind_values
 
 !< Subroutine to calculate the meriodional upwind flues
-subroutine meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, y_upwind, res)
+  subroutine meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scale, G, GV, Idt, y_upwind, res)
 
   implicit none
   type(tracer_type),       intent(in) :: Tr                    !< Tracer
@@ -203,6 +204,7 @@ subroutine meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scal
   real,                    intent(in) :: mass_transport_scale  !< Scaling for mass transport
   type(ocean_grid_type),   intent(in) :: G                     !< Ocean grid structure for inverse area
   type(verticalGrid_type), intent(in) :: GV                    !< Ocean vertical grid structure
+  real,                    intent(in) :: Idt            !< Inverse model timestep
   real,                 intent(inout) :: y_upwind(:,:,:)       !< Meridional upwind tracer values
   real,                 intent(inout) :: res(:,:,:)            !< Array to store the result in
 
@@ -224,8 +226,8 @@ subroutine meridional_upwind_fluxes(Tr, ITR_adv_scale, vhtr, mass_transport_scal
   do k=1,nz ; do j=js,je ; do i=is,ie
     ! north = 2 * (Tr%ad_y(i,J,k)   * ITR_adv_scale) * y_upwind(i,J,k)   - v_trans(i,J,k)   * y_upwind(i,J,k)**2
     ! south = 2 * (Tr%ad_y(i,J-1,k) * ITR_adv_scale) * y_upwind(i,J-1,k) - v_trans(i,J-1,k) * y_upwind(i,J-1,k)**2
-    north = 2 * (Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - vhtr(i,J,k)   * y_upwind(i,J,k)**2
-    south = 2 * (Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - vhtr(i,J-1,k) * y_upwind(i,J-1,k)**2
+    north = 2 * (Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - Idt * vhtr(i,J,k)   * y_upwind(i,J,k)**2
+    south = 2 * (Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - Idt * vhtr(i,J-1,k) * y_upwind(i,J-1,k)**2
     res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
   enddo ; enddo ; enddo
 
