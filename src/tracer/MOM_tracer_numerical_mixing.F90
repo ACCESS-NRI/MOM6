@@ -34,7 +34,7 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vht
 
   call thickness_weighted_variance_advection(Tr, h, diag_pre_dyn, dt_trans, Idt, G, GV, nm)
   call thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind, nm)
-  call thickness_weighted_meridional_variance_flux(Tr, G, GV, Idt, y_upwind, nm)
+  call thickness_weighted_meridional_variance_flux(Tr, vhtr G, GV, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
 
@@ -119,6 +119,11 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
   real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind tracer value [CU ~> conc]
   real,                 intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
 
+  !< Local variables
+  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
+  integer :: i, j, k             !< Counters
+  real :: east, west             !< East and West for zonal derivative [CU2 H T-1 ~> conc2 m s-1]
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
@@ -140,6 +145,10 @@ subroutine zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
   real,                     intent(in) :: uhtr(:,:,:)      !< Accumulated zonal transport
                                                            !! used to advect tracers [H L2 ~> m3 or kg]
   real,                  intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values [CU ~> conc]
+
+  !< Local variables
+  integer :: is, ie, js, je  !< Grid cell centre indexes
+  integer :: i, j, k         !< Counters
 
   Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
 
