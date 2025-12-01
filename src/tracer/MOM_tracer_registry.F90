@@ -864,26 +864,17 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     endif
 
     if (Tr%id_numerical_mixing > 0) then
-      scale_constant = 1
-      ! if (Tr%name == "T") then
-      !   scale_constant = 3991.86795711963 !< specific heat capacity [Q C-1 ~> J degC-1 kg-1]
-      ! elseif (Tr%name == "S") then
-      !   scale_constant = 1000 !< I am not sure about this conversion when S is practical salintiy
-                                !< need to check with Jan what he had..
-      ! else
-      !   scale_constant = 1    !< any other tracer is unscaled
-      ! endif
       x_upwind(:,:,:) = 0.
       y_upwind(:,:,:) = 0.
       nm(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            scale_constant, x_upwind, y_upwind, nm)
+                            x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
 
       !< The below is here while debuggin; to be removed once numerical mixing is all sorted
       if (Tr%id_variance_advection > 0) then
         va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
+        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, va)
         call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
       endif
       if (Tr%id_variance_flux > 0) then
@@ -891,7 +882,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
         x_upwind(:,:,:) = 0.
         y_upwind(:,:,:) = 0.
         vf(:,:,:) = 0.
-        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
+        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
         call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
       endif
     endif
