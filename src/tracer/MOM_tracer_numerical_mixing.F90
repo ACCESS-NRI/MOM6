@@ -34,7 +34,7 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vht
 
   call thickness_weighted_variance_advection(Tr, h, diag_pre_dyn, dt_trans, Idt, G, GV, nm)
   call thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind, nm)
-  call thickness_weighted_meridional_variance_flux(Tr, vhtr G, GV, Idt, y_upwind, nm)
+  call thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
 
