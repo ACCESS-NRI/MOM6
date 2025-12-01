@@ -789,8 +789,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
-  real,                       intent(in) :: dt_trans  ! The transport time interval [T ~> s]
-  real,                       intent(in) :: Idt       ! The inverse of the time interval [T-1 ~> s-1]
+  real,                       intent(in) :: dt_trans  !< The transport time interval [T ~> s]
+  real,                       intent(in) :: Idt       !< The inverse of the time interval [T-1 ~> s-1]
 
   integer :: i, j, k, is, ie, js, je, nz, m, khi
   real    :: work2d(SZI_(G),SZJ_(G))      ! The vertically integrated convergence of lateral advective
@@ -802,13 +802,12 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
   ! va and vf will be removed but are needed in the debugging process
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Variance advection [CU2 H T-1 ~> conc2 m s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Flux of variance [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection 
+                                                    ! [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
+                                                    ! [CU2 H T-1 ~> conc2 m s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
-  real :: scale_constant  !< Scale for numerical mixing e.g. specific heat capacity.
-                          !! The dimensions are dependent on the tracer so they are specified
-                          !! where the value is defined.
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
