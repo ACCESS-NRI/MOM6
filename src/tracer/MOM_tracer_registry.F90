@@ -864,14 +864,15 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     endif
 
     if (Tr%id_numerical_mixing > 0) then
-      if (Tr%name == "T") then
-        scale_constant = 3991.86795711963 !< specific heat capacity [Q C-1 ~> J degC-1 kg-1]
+      scale_constant = 1
+      ! if (Tr%name == "T") then
+      !   scale_constant = 3991.86795711963 !< specific heat capacity [Q C-1 ~> J degC-1 kg-1]
       ! elseif (Tr%name == "S") then
       !   scale_constant = 1000 !< I am not sure about this conversion when S is practical salintiy
                                 !< need to check with Jan what he had..
       ! else
       !   scale_constant = 1    !< any other tracer is unscaled
-      endif
+      ! endif
       x_upwind(:,:,:) = 0.
       y_upwind(:,:,:) = 0.
       nm(:,:,:) = 0.
