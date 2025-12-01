@@ -384,7 +384,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           v_extensive=.true., &
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
-          diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", & 
+          diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
           trim(Tr%units)//"^2ms-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
       Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
           diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", &
@@ -784,7 +784,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: uhtr !< Accumulated zonal thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), & 
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
                               intent(in) :: vhtr !< Accumulated meridional thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
