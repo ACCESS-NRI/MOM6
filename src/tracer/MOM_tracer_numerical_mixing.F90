@@ -150,9 +150,9 @@ subroutine zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
-  Is = G%IscB ; Ie = G%IecB ; js = G%jsc ; je = G%jec
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
-  do k=1,nz ;  do j=js,je ; do I=Is,Ie
+  do k=1,nz ;  do j=js,je ; do I=is-1,ie
     if (uhtr(I,j,k) >= 0) then
       x_upwind(I,j,k) = Tr%t(i,j,k)
     elseif (uhtr(I,j,k) < 0) then
@@ -206,9 +206,9 @@ subroutine meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
   integer :: is, ie, js, je  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
-  is = G%isc ; ie = G%iec ; Js = G%JscB ; Je = G%JecB
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
-  do k=1,nz ; do J=Js,Je ; do i=is,ie
+  do k=1,nz ; do J=js-1,je ; do i=is,ie
     if (vhtr(i,J,k) >= 0) then
       y_upwind(i,J,k) = Tr%t(i,j,k)
     elseif (vhtr(i,J,k) < 0) then
