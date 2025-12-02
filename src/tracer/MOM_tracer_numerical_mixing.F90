@@ -89,10 +89,10 @@ subroutine thickness_weighted_variance_advection(Tr, h, diag_pre_dyn, dt, Idt, G
   real,                 intent(inout) :: res(:,:,:)    !< Array to store result in [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
-  integer :: is, ie, js, je, nz       !< Grid cell centre and layer indexes
-  integer :: i, j, k                  !< Counters
-  real :: h_prev, C_prev, Ihadv, Cadv !< Thickness and tracer at previous timestep, inverse
-                                      !< updated thickness and non-invers tracer after advection.
+  integer :: is, ie, js, je, nz        !< Grid cell centre and layer indexes
+  integer :: i, j, k                   !< Counters
+  real :: h_prev, C_prev, Ihadv, Cadv  !< Thickness and tracer at previous timestep, inverse
+                                       !< updated thickness and non-invers tracer after advection.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -176,9 +176,9 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
   real,                 intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
-  integer :: is, ie, js, je, nz                          !< Grid cell centre and layer indexes
-  integer :: i, j, k                                     !< Counters
-  real :: north, south                                   !< North and South positions for meridional derivative
+  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
+  integer :: i, j, k             !< Counters
+  real :: north, south           !< North and South positions for meridional derivative
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
