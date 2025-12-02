@@ -154,9 +154,9 @@ subroutine zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do I=is-1,ie
     if (uhtr(I,j,k) >= 0) then
-      x_upwind(I,j,k) = Tr%t(i,j,k)
+      x_upwind(I,j,k) = Tr%t_prev(i,j,k)
     elseif (uhtr(I,j,k) < 0) then
-      x_upwind(I,j,k) = Tr%t(i+1,j,k)
+      x_upwind(I,j,k) = Tr%t_prev(i+1,j,k)
     endif
   enddo ; enddo ; enddo
 
@@ -210,9 +210,9 @@ subroutine meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
   do k=1,nz ; do J=js-1,je ; do i=is,ie
     if (vhtr(i,J,k) >= 0) then
-      y_upwind(i,J,k) = Tr%t(i,j,k)
+      y_upwind(i,J,k) = Tr%t_prev(i,j,k)
     elseif (vhtr(i,J,k) < 0) then
-      y_upwind(i,J,k) = Tr%t(i,j+1,k)
+      y_upwind(i,J,k) = Tr%t_prev(i,j+1,k)
     endif
   enddo ; enddo ; enddo
 
