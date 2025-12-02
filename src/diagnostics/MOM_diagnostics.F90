@@ -1707,39 +1707,6 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag_pre_dyn, &
                                          diag, uhtr, vhtr, h, dt_trans, Idt)
 
-  ! Once everything builds and works as it was previously did remove this section
-  ! do m=1,Reg%ntr ; if (Reg%Tr(m)%registry_diags) then
-  !   Tr => Reg%Tr(m)
-  !   if (Tr%id_numerical_mixing > 0) then
-  !     if (Tr%name == "T") then
-  !       scale_constant = 3991.86795711963 !< hard coded (for now) specific heat capacity
-  !     elseif (Tr%name == "S") then
-  !       scale_constant = 1000 !< g -> kg
-  !     else
-  !       scale_constant = 1    !< any other tracer is unscaled
-  !     endif
-  !     x_upwind(:, :, :) = 0.
-  !     y_upwind(:, :, :) = 0.
-  !     nm(:,:,:) = 0.
-  !     call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-  !                           scale_constant, x_upwind, y_upwind, nm)
-  !     call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
-  !     if (Tr%id_variance_advection > 0) then
-  !       va(:,:,:) = 0.
-  !       call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, scale_constant, va)
-  !       call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
-  !     endif
-  !     if (Tr%id_variance_flux > 0) then
-  !       !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
-  !       x_upwind(:, :, :) = 0.
-  !       y_upwind(:, :, :) = 0.
-  !       vf(:,:,:) = 0.
-  !       call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, scale_constant, x_upwind, y_upwind, vf)
-  !       call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
-  !     endif
-  !   endif
-  ! endif; enddo
-
   call diag_restore_grids(diag)
 
 end subroutine post_transport_diagnostics
