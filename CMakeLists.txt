@@ -101,25 +101,8 @@ endif()
 #                             Main definitions                                  #
 #]==============================================================================]
 
-# set paths for the source code and config source
-set(SRC "${CMAKE_SOURCE_DIR}/src")
-set(CONFIG_SRC "${CMAKE_SOURCE_DIR}/config_src")
-
-if(MOM6_ASYMMETRIC)
-  set(MOM_MEMORY_DIR $<BUILD_INTERFACE:${CONFIG_SRC}/memory/dynamic_nonsymmetric>)
-else()
-  set(MOM_MEMORY_DIR $<BUILD_INTERFACE:${CONFIG_SRC}/memory/dynamic_symmetric>)
-endif()
-
 ## Build MOM6 shared library
-add_subdirectory(cmake/shared shared)
+add_subdirectory(src)
 
-if(MOM6_ACCESS3)
-  ## Build MOM6 library for use in ACCESS3
-  add_subdirectory(cmake/access3 access3)
-endif()
-
-if(MOM6_SOLO)
-  ## Build MOM6 solo executable
-  add_subdirectory(cmake/solo solo)
-endif()
+## Build MOM6 ACCESS3 library and/or MOM6 solo executable
+add_subdirectory(config_src)

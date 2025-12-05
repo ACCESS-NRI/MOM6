@@ -14,14 +14,14 @@ target_link_libraries(mom6lib PRIVATE
 target_compile_definitions(mom6lib PRIVATE CESMCOUPLED)
 
 target_sources(mom6lib PRIVATE
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_time.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_surface_forcing_nuopc.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/ocn_comp_NUOPC.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/time_utils.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_methods.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_cap_gtracer_flux.F90
-  ${CONFIG_SRC}/drivers/nuopc_cap/mom_ocean_model_nuopc.F90
+  mom_cap_time.F90
+  mom_surface_forcing_nuopc.F90
+  ocn_comp_NUOPC.F90
+  time_utils.F90
+  mom_cap.F90
+  mom_cap_methods.F90
+  mom_cap_gtracer_flux.F90
+  mom_ocean_model_nuopc.F90
 )
 
 # Install and export
@@ -49,7 +49,7 @@ install(EXPORT Mom6libTargets
 )
 
 configure_package_config_file(
-  ../Mom6libConfig.cmake.in
+  cmake/Mom6libConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/Mom6libConfig.cmake"
   INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Mom6lib
 )

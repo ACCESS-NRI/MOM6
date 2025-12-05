@@ -7,10 +7,10 @@ target_link_libraries(MOM6 PRIVATE
 )
 
 target_sources(MOM6 PRIVATE
-  ${CONFIG_SRC}/drivers/solo_driver/MOM_surface_forcing.F90
-  ${CONFIG_SRC}/drivers/solo_driver/MESO_surface_forcing.F90
-  ${CONFIG_SRC}/drivers/solo_driver/user_surface_forcing.F90
-  ${CONFIG_SRC}/drivers/solo_driver/MOM_driver.F90
+  MOM_surface_forcing.F90
+  MESO_surface_forcing.F90
+  user_surface_forcing.F90
+  MOM_driver.F90
 )
 
 set_target_properties(MOM6 PROPERTIES
