@@ -497,7 +497,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
 
     if ((Tr%id_tendency > 0) .or. (Tr%id_numerical_mixing > 0)) then
       call safe_alloc_ptr(Tr%t_prev,isd,ied,jsd,jed,nz)
-      do k=1,nz ; do j=js,je ; do i=is,ie
+      do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
         Tr%t_prev(i,j,k) = Tr%t(i,j,k)
       enddo ; enddo ; enddo
     endif

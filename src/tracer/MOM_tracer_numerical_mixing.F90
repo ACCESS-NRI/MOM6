@@ -129,11 +129,12 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
   call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    ! east = (2 * Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - (Idt * uhtr(I+1,j,k) * x_upwind(I,j,k)**2)
-    ! west = (2 * Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - (Idt * uhtr(I,j,k)   * x_upwind(I-1,j,k)**2)
-    east = (2 * Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - (Idt * uhtr(I,j,k) * x_upwind(I,j,k)**2)
-    west = (2 * Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - (Idt * uhtr(I-1,j,k)   * x_upwind(I-1,j,k)**2)
+    east = (2 * Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - (Idt * uhtr(I+1,j,k) * x_upwind(I,j,k)**2)
+    west = (2 * Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - (Idt * uhtr(I,j,k)   * x_upwind(I-1,j,k)**2)
     res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
+    ! This code passes the thickness dimensional test but does not accurately calculate numerical mixing
+    ! east = (2 * Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - (Idt * uhtr(I,j,k) * x_upwind(I,j,k)**2)
+    ! west = (2 * Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - (Idt * uhtr(I-1,j,k)   * x_upwind(I-1,j,k)**2)
   enddo ; enddo; enddo
 
 end subroutine thickness_weighted_zonal_variance_flux
@@ -156,9 +157,9 @@ subroutine zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do I=is-1,ie
     if (uhtr(I,j,k) >= 0) then
-      x_upwind(I,j,k) = Tr%t(i,j,k)
+      x_upwind(I,j,k) = Tr%t_prev(i,j,k)
     elseif (uhtr(I,j,k) < 0) then
-      x_upwind(I,j,k) = Tr%t(i+1,j,k)
+      x_upwind(I,j,k) = Tr%t_prev(i+1,j,k)
     endif
   enddo ; enddo ; enddo
 
@@ -187,11 +188,12 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
   call meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
   do k=1,nz ; do j=js,je ; do i=is,ie
-    ! north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J+1,k) * y_upwind(i,J,k)**2)
-    ! south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J,k)   * y_upwind(i,J-1,k)**2)
-    north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J,k) * y_upwind(i,J,k)**2)
-    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J-1,k)   * y_upwind(i,J-1,k)**2)
+    north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J+1,k) * y_upwind(i,J,k)**2)
+    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J,k)   * y_upwind(i,J-1,k)**2)
     res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
+    ! This code passes the thickness dimensional test but is not correct for the numerical mixing diagnostic
+    ! north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J,k) * y_upwind(i,J,k)**2)
+    ! south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J-1,k)   * y_upwind(i,J-1,k)**2)
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_meridional_variance_flux
@@ -214,9 +216,9 @@ subroutine meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
   do k=1,nz ; do J=js-1,je ; do i=is,ie
     if (vhtr(i,J,k) >= 0) then
-      y_upwind(i,J,k) = Tr%t(i,j,k)
+      y_upwind(i,J,k) = Tr%t_prev(i,j,k)
     elseif (vhtr(i,J,k) < 0) then
-      y_upwind(i,J,k) = Tr%t(i,j+1,k)
+      y_upwind(i,J,k) = Tr%t_prev(i,j+1,k)
     endif
   enddo ; enddo ; enddo
 
