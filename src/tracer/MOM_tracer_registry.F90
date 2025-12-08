@@ -385,13 +385,13 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
       Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
           diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
       Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
           diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//" 2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//" 2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
           diag%axesCuL, Time, "Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
@@ -419,13 +419,13 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           x_cell_method='sum')
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
       Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
           diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
       Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
           diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_m*US%s_to_T)
     endif
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
