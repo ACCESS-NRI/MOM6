@@ -396,11 +396,13 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
   if (associated(OS%coupler_bcs_CSp)) then
     call allocate_surface_state(OS%sfc_state, OS%grid, use_temperature, &
                                 do_integrals=.true., gas_fields_ocn=OS%coupler_bcs_CSp%gas_fields_ocn, &
-                                use_meltpot=use_melt_pot, use_marbl_tracers=OS%use_MARBL)
+                                use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
+                                use_marbl_tracers=OS%use_MARBL)
   else
     call allocate_surface_state(OS%sfc_state, OS%grid, use_temperature, &
                                 do_integrals=.true., &
-                                use_meltpot=use_melt_pot, use_marbl_tracers=OS%use_MARBL)
+                                use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
+                                use_marbl_tracers=OS%use_MARBL)
   endif
 
   call surface_forcing_init(Time_in, OS%grid, OS%US, param_file, OS%diag, &
