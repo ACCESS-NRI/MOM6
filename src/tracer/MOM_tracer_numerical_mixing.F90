@@ -25,9 +25,9 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vht
   type(diag_grid_storage), intent(in) :: diag_pre_dyn     !< Stored grids from before dynamics
   real,                    intent(in) :: dt_trans         !< The transport time interval [T ~> s]
   real,                    intent(in) :: Idt              !< The inverse of the time interval [T-1 ~> s-1]
-  real,                    intent(in) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
+  real,                    intent(inout) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
+  real,                    intent(inout) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
@@ -63,9 +63,9 @@ subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
   type(verticalGrid_type), intent(in) :: GV               !< Ocean vertical grid structure
   type(tracer_type),       intent(in) :: Tr               !< Pointer to the tracer regsitry
   real,                    intent(in) :: Idt              !< The inverse of the time interval [T-1 ~> s-1]
-  real,                    intent(in) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
+  real,                    intent(inout) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
+  real,                    intent(inout) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
