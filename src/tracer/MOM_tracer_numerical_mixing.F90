@@ -5,6 +5,7 @@ use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
 use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
+use MOM_domains,       only : create_group_pass, do_group_pass, group_pass_type
 
 implicit none ; private
 
@@ -120,11 +121,17 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
   real,                 intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
-  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
-  integer :: i, j, k             !< Counters
-  real :: east, west             !< East and West for zonal derivative [CU2 H T-1 ~> conc2 m s-1]
+  integer :: is, ie, js, je, nz           !< Grid cell centre and layer indexes
+  integer :: i, j, k                      !< Counters
+  real :: east, west                      !< East and West for zonal derivative [CU2 H T-1 ~> conc2 m s-1]
+  type(group_pass_type) :: pass_uhtr_adx  !< A handle used for group halo passes
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+
+  if (.not.G%symmetric) then
+    call create_group_pass(pass_uhtr_adx, uhtr, Tr%ad_x, G%Domain, To_North+To_East)
+    call do_group_pass(pass_uhtr_adx, G%domain)
+  endif
 
   call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
@@ -179,11 +186,17 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
   real,                 intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
-  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
-  integer :: i, j, k             !< Counters
-  real :: north, south           !< North and South positions for meridional derivative
+  integer :: is, ie, js, je, nz           !< Grid cell centre and layer indexes
+  integer :: i, j, k                      !< Counters
+  real :: north, south                    !< North and South positions for meridional derivative
+  type(group_pass_type) :: pass_vhtr_ady  !< A handle used for group halo passes
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+
+  if (.not.G%symmetric) then
+    call create_group_pass(pass_vhtr_ady, vhtr, Tr%ad_y, G%Domain, To_North+To_East)
+    call do_group_pass(pass_vhtr_ady, G%domain)
+  endif
 
   call meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
