@@ -51,6 +51,8 @@ use MOM_verticalGrid,        only : verticalGrid_type
 use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
 use MOM_ice_shelf,           only : initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
+use MOM_ice_shelf,           only : ice_shelf_query
+use MOM_data_override,       only : data_override_init
 use MOM_coupler_types,       only : coupler_1d_bc_type, coupler_2d_bc_type
 use MOM_coupler_types,       only : coupler_type_spawn, coupler_type_write_chksums
 use MOM_coupler_types,       only : coupler_type_initialized, coupler_type_copy_data
@@ -211,6 +213,7 @@ type, public :: ocean_state_type
     Ice_shelf_CSp => NULL()   !< A pointer to the control structure for the
                               !! ice shelf model that couples with MOM6.  This
                               !! is null if there is no ice shelf.
+  logical         :: override_melt !< If true, override melt using data_override
   type(marine_ice_CS), pointer :: &
     marine_ice_CSp => NULL()  !< A pointer to the control structure for the
                               !! marine ice effects module.
@@ -401,6 +404,8 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
     call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%fluxes)
     call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%flux_tmp)
     call initialize_ice_shelf_forces(OS%ice_shelf_CSp, OS%grid, OS%US, OS%forces)
+    call ice_shelf_query(OS%ice_shelf_CSp, OS%grid, data_override_melt=OS%override_melt)
+    if (OS%override_melt) call data_override_init(Ocean_Domain_in=OS%grid%domain%mpp_domain)
   endif
   if (OS%icebergs_alter_ocean)  then
     call marine_ice_init(OS%Time, OS%grid, param_file, OS%diag, OS%marine_ice_CSp)
