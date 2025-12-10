@@ -128,6 +128,8 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
 
   call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
+  print *, "uhtr(0, 1, 1) = ", uhtr(0,1,1)
+  print *, "Tr%ad_x(0,1,1) = ", Tr%ad_x(0,1,1)
   do k=1,nz ;  do j=js,je ; do i=is,ie
     east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I+1,j,k)) * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
     west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I,j,k))   * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
