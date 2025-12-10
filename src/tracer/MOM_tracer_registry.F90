@@ -870,7 +870,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
       nm(:,:,:) = 0.
       call create_group_pass(pass_adx_ady, Tr%ad_x, G%Domain)
       call create_group_pass(pass_adx_ady, Tr%ad_y, G%Domain)
-      call do_group_pass(pass_adx_ady, Tr%ad_x, G%Domain)
+      call do_group_pass(pass_adx_ady, G%Domain)
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
                             x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
