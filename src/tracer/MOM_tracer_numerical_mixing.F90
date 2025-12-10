@@ -112,7 +112,7 @@ end subroutine thickness_weighted_variance_advection
 subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind, res)
 
   type(tracer_type),       intent(in) :: Tr               !< Pointer to the tracer registry
-  real,                    intent(in) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
+  real,                    intent(inout) :: uhtr(:,:,:)      !< Accumulated zonal thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   type(ocean_grid_type),   intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type), intent(in) :: GV               !< Ocean vertical grid structure
@@ -177,7 +177,7 @@ end subroutine zonal_upwind_values
 subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_upwind, res)
 
   type(tracer_type),       intent(in) :: Tr               !< Tracer
-  real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
+  real,                    intent(inout) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   type(ocean_grid_type),   intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type), intent(in) :: GV               !< Ocean vertical grid structure
