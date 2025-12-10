@@ -14,6 +14,7 @@ use MOM_debugging,     only : hchksum
 use MOM_diag_mediator, only : diag_ctrl, register_diag_field, post_data, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_grid_storage
 use MOM_diag_mediator, only : diag_copy_storage_to_diag, diag_save_grids, diag_restore_grids
+use MOM_domains,           only : create_group_pass, do_group_pass, group_pass_type
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, MOM_mesg, is_root_pe
 use MOM_file_parser,   only : get_param, log_version, param_file_type
 use MOM_hor_index,     only : hor_index_type
@@ -809,6 +810,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
+  type(group_pass_type) :: pass_adx_ady
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   H_to_RZ_dt = GV%H_to_RZ * Idt
@@ -866,6 +868,9 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
       x_upwind(:,:,:) = 0.
       y_upwind(:,:,:) = 0.
       nm(:,:,:) = 0.
+      call create_group_pass(pass_adx_ady, Tr%ad_x, G%Domain)
+      call create_group_pass(pass_adx_ady, Tr%ad_y, G%Domain)
+      call do_group_pass(pass_adx_ady, Tr%ad_x, G%Domain)
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
                             x_upwind, y_upwind, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
