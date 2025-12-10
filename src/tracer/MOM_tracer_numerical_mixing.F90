@@ -130,7 +130,7 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   if (.not.G%symmetric) then
-    call create_group_pass(pass_uhtr_adx, uhtr, Tr%ad_x, G%Domain, To_North+To_East)
+    call create_group_pass(pass_uhtr_adx, uhtr, G%Domain, To_North+To_East)
     call do_group_pass(pass_uhtr_adx, G%domain)
   endif
 
@@ -195,7 +195,7 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   if (.not.G%symmetric) then
-    call create_group_pass(pass_vhtr_ady, vhtr, Tr%ad_y, G%Domain, To_North+To_East)
+    call create_group_pass(pass_vhtr_ady, vhtr, G%Domain, To_North+To_East)
     call do_group_pass(pass_vhtr_ady, G%domain)
   endif
 
