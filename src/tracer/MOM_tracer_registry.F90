@@ -15,7 +15,7 @@ use MOM_diag_mediator, only : diag_ctrl, register_diag_field, post_data, safe_al
 use MOM_diag_mediator, only : diag_grid_storage
 use MOM_diag_mediator, only : diag_copy_storage_to_diag, diag_save_grids, diag_restore_grids
 use MOM_domains,       only : create_group_pass, do_group_pass, group_pass_type
-! use MOM_domains,       only : To_North, To_East
+! use MOM_domains,       only : To_South, To_West
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, MOM_mesg, is_root_pe
 use MOM_file_parser,   only : get_param, log_version, param_file_type
 use MOM_hor_index,     only : hor_index_type
@@ -784,10 +784,10 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   type(diag_grid_storage),    intent(in) :: diag_pre_dyn !< Stored grids from before dynamics
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
-                              intent(in) :: uhtr !< Accumulated zonal thickness fluxes
+                              intent(inout) :: uhtr !< Accumulated zonal thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
-                              intent(in) :: vhtr !< Accumulated meridional thickness fluxes
+                              intent(inout) :: vhtr !< Accumulated meridional thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
@@ -811,7 +811,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
-  type(group_pass_type) :: pass_adx_ady
+  type(group_pass_type) :: pass_uhtr_adx
+  type(group_pass_type) :: pass_vhtr_ady
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   H_to_RZ_dt = GV%H_to_RZ * Idt
@@ -870,9 +871,12 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
       y_upwind(:,:,:) = 0.
       nm(:,:,:) = 0.
       if (.not.G%symmetric) then
-        call create_group_pass(pass_adx_ady, Tr%ad_x, G%Domain)
-        call create_group_pass(pass_adx_ady, Tr%ad_y, G%Domain)
-        call do_group_pass(pass_adx_ady, G%Domain)
+        call create_group_pass(pass_uhtr_adx, uhtr, G%Domain) !To_South+To_West
+        call create_group_pass(pass_uhtr_adx, Tr%ad_x, G%Domain)
+        call do_group_pass(pass_uhtr_adx, G%Domain)
+        call create_group_pass(pass_vhtr_ady, vhtr, G%Domain) !To_South+To_West
+        call create_group_pass(pass_vhtr_ady, Tr%ad_y, G%Domain)
+        call do_group_pass(pass_vhtr_ady, G%Domain)
       endif
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
                             x_upwind, y_upwind, nm)
