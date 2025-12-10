@@ -6,7 +6,6 @@ use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_domains,       only : create_group_pass, do_group_pass, group_pass_type
-use MOM_domains,       only : To_North, To_East
 
 implicit none ; private
 
@@ -130,7 +129,7 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   if (.not.G%symmetric) then
-    call create_group_pass(pass_uhtr_adx, uhtr, G%Domain, To_North+To_East)
+    call create_group_pass(pass_uhtr_adx, uhtr, G%Domain)
     call do_group_pass(pass_uhtr_adx, G%domain)
   endif
 
@@ -195,7 +194,7 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   if (.not.G%symmetric) then
-    call create_group_pass(pass_vhtr_ady, vhtr, G%Domain, To_North+To_East)
+    call create_group_pass(pass_vhtr_ady, vhtr, G%Domain)
     call do_group_pass(pass_vhtr_ady, G%domain)
   endif
 
