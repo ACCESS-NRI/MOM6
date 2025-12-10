@@ -1631,9 +1631,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   type(ocean_grid_type),    intent(inout) :: G   !< ocean grid structure
   type(verticalGrid_type),  intent(in)    :: GV  !< ocean vertical grid structure
   type(unit_scale_type),    intent(in)    :: US  !< A dimensional unit scaling type
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: uhtr !< Accumulated zonal thickness fluxes
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr !< Accumulated zonal thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: vhtr !< Accumulated meridional thickness fluxes
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(in) :: vhtr !< Accumulated meridional thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                             intent(in)    :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
