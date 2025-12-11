@@ -782,10 +782,10 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   type(diag_grid_storage),    intent(in) :: diag_pre_dyn !< Stored grids from before dynamics
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
-                              intent(inout) :: uhtr !< Accumulated zonal thickness fluxes
+                              intent(in) :: uhtr !< Accumulated zonal thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
-                              intent(inout) :: vhtr !< Accumulated meridional thickness fluxes
+                              intent(in) :: vhtr !< Accumulated meridional thickness fluxes
                                                  !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
@@ -809,8 +809,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
-  type(group_pass_type) :: pass_uhtr_adx
-  type(group_pass_type) :: pass_vhtr_ady
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   H_to_RZ_dt = GV%H_to_RZ * Idt
