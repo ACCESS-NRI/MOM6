@@ -707,6 +707,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
 
       ! diagnostics
       if (associated(Tr(m)%ad_x)) then ; do I=is-1,ie ; if (do_i(i,j) .or. do_i(i+1,j)) then
+        print *, "I index for adx data = ", I
         Tr(m)%ad_x(I,j,k) = Tr(m)%ad_x(I,j,k) + flux_x(I,j,m)*Idt
       endif ; enddo ; endif
 
@@ -1137,6 +1138,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   do m=1,ntr ; if (associated(Tr(m)%ad_y)) then
     do J=js-1,je ; if (domore_v_initial(J)) then
       do i=is,ie ; if (do_i(i,j) .or. do_i(i,j+1)) then
+        print *, "J index for ady loop = ", J
         Tr(m)%ad_y(i,J,k) = Tr(m)%ad_y(i,J,k) + flux_y(i,m,J)*Idt
       endif ; enddo
     endif ; enddo
