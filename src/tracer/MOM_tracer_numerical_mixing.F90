@@ -128,18 +128,6 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind
 
   call zonal_upwind_values(Tr, G, nz, uhtr, x_upwind)
 
-  print *, "uhtr(is-1, js, 1) = ", uhtr(is-1,js,1)
-  print *, "uhtr(is+1, js, 1) = ", uhtr(is+1,js,1)
-  print *, "uhtr(ie-1, js, 1) = ", uhtr(ie-1,js,1)
-  print *, "uhtr(ie+1, js, 1) = ", uhtr(ie+1,js,1)
-  print *, "Tr%ad_x(is-1,js,1) = ", Tr%ad_x(is-1,js,1)
-  print *, "Tr%ad_x(is+1,js,1) = ", Tr%ad_x(is+1,js,1)
-  print *, "Tr%ad_x(ie-1,js,1) = ", Tr%ad_x(ie-1,js,1)
-  print *, "Tr%ad_x(ie+1,js,1) = ", Tr%ad_x(ie+1,js,1)
-  print *, "xupwind(is-1,js,1) = ", x_upwind(is-1,js,1)
-  print *, "xupwind(is+1,js,1) = ", x_upwind(is+1,js,1)
-  print *, "xupwind(ie-1,js,1) = ", x_upwind(ie-1,js,1)
-  print *, "xupwind(ie+1,js,1) = ", x_upwind(ie+1,js,1)
   do k=1,nz ;  do j=js,je ; do i=is,ie
     east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I+1,j,k)) * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
     west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I,j,k))   * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
@@ -199,18 +187,6 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_u
 
   call meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
 
-  print *, "vhtr(is, js, 1) = ", vhtr(is,js,1)
-  print *, "vhtr(is, js+1, 1) = ", vhtr(is,js+1,1)
-  print *, "vhtr(is, je, 1) = ", vhtr(is,je,1)
-  print *, "vhtr(is, je+1, 1) = ", vhtr(is,je+1,1)
-  print *, "Tr%ad_y(is,js-1,1) = ", Tr%ad_y(is,js-1,1)
-  print *, "Tr%ad_y(is,js+1,1) = ", Tr%ad_y(is,js+1,1)
-  print *, "Tr%ad_y(is,je-1,1) = ", Tr%ad_y(is,je-1,1)
-  print *, "Tr%ad_y(is,je+1,1) = ", Tr%ad_y(is,je+1,1)
-  print *, "yupwind(is-1,js,1) = ", y_upwind(is-1,js,1)
-  print *, "yupwind(is+1,js,1) = ", y_upwind(is+1,js,1)
-  print *, "yupwind(ie-1,js,1) = ", y_upwind(ie-1,js,1)
-  print *, "yupwind(ie+1,js,1) = ", y_upwind(ie+1,js,1)
   do k=1,nz ; do j=js,je ; do i=is,ie
     north = (2 * (Tr%ad_y(i,J,k)  * y_upwind(i,J,k)))   - ((Idt*vhtr(i,J+1,k)) * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
     south = (2 * (Tr%ad_y(i,J-1,k)* y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
