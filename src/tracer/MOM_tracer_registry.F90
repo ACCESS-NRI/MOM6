@@ -753,7 +753,7 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
       call post_data(Tr%id_tendency, work3d, diag, alt_h=diag_prev%h_state)
     endif
     if (Tr%id_numerical_mixing > 0) then
-      do k=1,nz ; do j=js-1,je-1 ; do i=is-1,ie-1
+      do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
         tr%t_prev(i,j,k) =  Tr%t(i,j,k)
       enddo ; enddo ; enddo
     endif
