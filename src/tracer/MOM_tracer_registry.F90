@@ -502,6 +502,8 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
       enddo ; enddo ; enddo
     endif
 
+    if (Tr%id_numerical_mixing > 0) call safe_alloc_ptr(TR%numerical_mixing,isd,ied,jsd,jed,nz)
+
     ! Neutral/Horizontal diffusion convergence tendencies
     if (Tr%diag_form == 1) then
       Tr%id_dfxy_cont = register_diag_field("ocean_model", trim(shortnm)//'_dfxy_cont_tendency', &
@@ -805,12 +807,12 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
-  ! va and vf will be removed but are needed in the debugging process
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection
-                                                    ! [CU2 H T-1 ~> conc2 m s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
-                                                    ! [CU2 H T-1 ~> conc2 m s-1]
+  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
+  ! ! va and vf will be removed but are needed in the debugging process
+  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection
+  !                                                   ! [CU2 H T-1 ~> conc2 m s-1]
+  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
+  !                                                   ! [CU2 H T-1 ~> conc2 m s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
@@ -870,25 +872,26 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     if (Tr%id_numerical_mixing > 0) then
       x_upwind(:,:,:) = 0.
       y_upwind(:,:,:) = 0.
-      nm(:,:,:) = 0.
+      ! nm(:,:,:) = 0.
+      Tr%numerical_mixing(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            x_upwind, y_upwind, nm)
-      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
+                            x_upwind, y_upwind)
+      call post_data(Tr%id_numerical_mixing, Tr%numerical_mixing, diag, alt_h=diag_pre_dyn%h_state)
 
-      !< The below is here while debuggin; to be removed once numerical mixing is all sorted
-      if (Tr%id_variance_advection > 0) then
-        va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, va)
-        call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
-      endif
-      if (Tr%id_variance_flux > 0) then
-        !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
-        x_upwind(:,:,:) = 0.
-        y_upwind(:,:,:) = 0.
-        vf(:,:,:) = 0.
-        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
-        call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
-      endif
+      ! !< The below is here while debuggin; to be removed once numerical mixing is all sorted
+      ! if (Tr%id_variance_advection > 0) then
+      !   va(:,:,:) = 0.
+      !   call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, va)
+      !   call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
+      ! endif
+      ! if (Tr%id_variance_flux > 0) then
+      !   !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
+      !   x_upwind(:,:,:) = 0.
+      !   y_upwind(:,:,:) = 0.
+      !   vf(:,:,:) = 0.
+      !   call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
+      !   call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+      ! endif
     endif
 
     ! A few diagnostics introduce with MARBL driver

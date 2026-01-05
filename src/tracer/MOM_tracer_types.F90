@@ -62,6 +62,9 @@ type, public :: tracer_type
   real, dimension(:,:,:), pointer :: Trxh_prev      => NULL() !< layer integrated tracer concentration array
                                                               !! at a previous timestep used for diagnostics
                                                               !! [CU H ~> conc m or conc kg m-2]
+  real, dimension(:,:,:), pointer :: numerical_mixing => NULL() !< numerical mixing of the tracer due to
+                                                              !! lateral advection
+                                                              !! [CU2 H T-1 ~> conc2 m s-1]
 
   character(len=32)               :: name                     !< tracer name used for diagnostics and error messages
   character(len=64)               :: units                    !< Physical dimensions of the tracer concentration
