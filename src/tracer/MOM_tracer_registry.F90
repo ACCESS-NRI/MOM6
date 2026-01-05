@@ -803,8 +803,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
-  ! real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
-  ! real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
   ! va and vf will be removed but are needed in the debugging process
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection
@@ -868,11 +866,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     endif
 
     if (Tr%id_numerical_mixing > 0) then
-      ! x_upwind(:,:,:) = 0.
-      ! y_upwind(:,:,:) = 0.
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, &
-                            nm)
+      call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
 
       !< The below is here while debuggin; to be removed once numerical mixing is all sorted
@@ -882,9 +877,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
         call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
       endif
       if (Tr%id_variance_flux > 0) then
-        !< Overkill to caclulate these again but I plan on removing once numerical mixing is sorted
-        ! x_upwind(:,:,:) = 0.
-        ! y_upwind(:,:,:) = 0.
         vf(:,:,:) = 0.
         call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
         call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)

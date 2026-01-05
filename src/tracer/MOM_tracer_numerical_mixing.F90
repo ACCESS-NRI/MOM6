@@ -28,11 +28,9 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vht
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  ! real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
-  ! real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: nm(:,:,:)        !< Numerical mixing diagnostic [CU2 H T-1 ~> conc2 m s-1]
 
-  ! Try with local variables
+  ! Upwind variables
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
 
@@ -73,8 +71,6 @@ subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  ! real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
-  ! real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: vf(:,:,:)        !< Horizontal thickness weighted variance flux
                                                           !! [CU2 H T-1 ~> conc2 m s-1]
   ! Try with local variables
