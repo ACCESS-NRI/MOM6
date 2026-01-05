@@ -15,7 +15,7 @@ public numerical_mixing, variance_advection, variance_flux
 contains
 
 !< Calculate the spurious ``numerical'' mixing of tracer due to advection.
-subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, x_upwind, y_upwind, nm)
+subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, nm)
 
   type(ocean_grid_type),   intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type), intent(in) :: GV               !< Ocean vertical grid structure
@@ -28,9 +28,16 @@ subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vht
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
-  real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
+  ! real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
+  ! real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: nm(:,:,:)        !< Numerical mixing diagnostic [CU2 H T-1 ~> conc2 m s-1]
+
+  ! Try with local variables
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
+
+  x_upwind(:,:,:) = 0.
+  y_upwind(:,:,:) = 0.
 
   call thickness_weighted_variance_advection(Tr, h, diag_pre_dyn, dt_trans, Idt, G, GV, nm)
   call thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind, nm)
@@ -56,7 +63,7 @@ subroutine variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, va)
 end subroutine variance_advection
 
 !< Subroutine for the horizontal variance flux, likely will remove once numerical mixing is sorted out
-subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
+subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
 
   type(ocean_grid_type),   intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type), intent(in) :: GV               !< Ocean vertical grid structure
@@ -66,10 +73,16 @@ subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, x_upwind, y_upwind, vf)
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
   real,                    intent(in) :: vhtr(:,:,:)      !< Accumulated meridional thickness fluxes
                                                           !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
-  real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
+  ! real,                 intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values for tracer [CU ~> conc]
+  ! real,                 intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values for tracer [CU ~> conc]
   real,                 intent(inout) :: vf(:,:,:)        !< Horizontal thickness weighted variance flux
                                                           !! [CU2 H T-1 ~> conc2 m s-1]
+  ! Try with local variables
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
+
+  x_upwind(:,:,:) = 0.
+  y_upwind(:,:,:) = 0.
 
   call thickness_weighted_zonal_variance_flux(Tr, uhtr, G, GV, Idt, x_upwind, vf)
   call thickness_weighted_meridional_variance_flux(Tr, vhtr, G, GV, Idt, y_upwind, vf)
