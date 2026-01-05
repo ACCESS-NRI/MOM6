@@ -25,7 +25,7 @@ use MOM_time_manager,  only : time_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_tracer_types,  only : tracer_type, tracer_registry_type
-use MOM_tracer_numerical_mixing,  only : numerical_mixing, variance_advection, variance_flux
+use MOM_tracer_numerical_mixing,  only : numerical_mixing!, variance_advection, variance_flux
 
 implicit none ; private
 
