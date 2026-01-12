@@ -1869,7 +1869,9 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
 
   call get_param(param_file, mdl, "READ_TIDEAMP", read_TIDEAMP, &
                  "If true, read a file (given by TIDEAMP_FILE) containing "//&
-                 "the tidal amplitude with INT_TIDE_DISSIPATION.", default=.false.)
+                 "the tidal amplitude with INT_TIDE_DISSIPATION. If true, "//&
+                 "also used as the tidal amplitude in the ice shelf melt "//&
+                 "parameterisation.", default=.false.)
   call get_param(param_file, mdl, "ICE_SHELF_LINEAR_SHELF_FRAC", CS%Zeta_N, &
                  "Ratio of HJ99 stability constant xi_N (ratio of maximum "//&
                  "mixing length to planetary boundary layer depth in "//&
@@ -1930,7 +1932,8 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
     endif
   else
     call get_param(param_file, mdl, "UTIDE", utide, &
-                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION.", &
+                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION "//&
+                 "and the ice shelf melt parameterisation.", &
                  units="m s-1", default=0.0 , scale=US%m_s_to_L_T)
     CS%utide(:,:) = utide
   endif

@@ -457,7 +457,8 @@ subroutine int_tide_input_init(Time, G, GV, US, param_file, diag, CS, itide)
                  units="m2 s-1", default=1.0e-6, scale=GV%m2_s_to_HZ_T)
 
   call get_param(param_file, mdl, "UTIDE", utide, &
-               "The constant tidal amplitude used with INT_TIDE_DISSIPATION.", &
+               "The constant tidal amplitude used with INT_TIDE_DISSIPATION "//&
+               "and the ice shelf melt parameterisation.", &
                units="m s-1", default=0.0, scale=US%m_s_to_L_T)
 
   call read_param(param_file, "INTERNAL_TIDE_FREQS", num_freq)
@@ -483,9 +484,11 @@ subroutine int_tide_input_init(Time, G, GV, US, param_file, diag, CS, itide)
                "above the bottom boundary layer with INT_TIDE_DISSIPATION.", &
                units="W m-2", default=1.0e3, scale=W_m2_to_HZ2_T3)
 
-  call get_param(param_file, mdl, "READ_TIDEAMP", read_tideamp, &
+  call get_param(param_file, mdl, "READ_TIDEAMP", read_TIDEAMP, &
                "If true, read a file (given by TIDEAMP_FILE) containing "//&
-               "the tidal amplitude with INT_TIDE_DISSIPATION.", default=.false.)
+               "the tidal amplitude with INT_TIDE_DISSIPATION. If true, "//&
+               "also used as the tidal amplitude in the ice shelf melt "//&
+               "parameterisation.", default=.false.)
   if (read_tideamp) then
     call get_param(param_file, mdl, "TIDEAMP_FILE", tideamp_file, &
                "The path to the file containing the spatially varying "//&
