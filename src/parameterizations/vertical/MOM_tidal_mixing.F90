@@ -455,7 +455,8 @@ logical function tidal_mixing_init(Time, G, GV, US, param_file, int_tide_CSp, di
                  units="m-1", default=8.e-4*atan(1.0), scale=US%Z_to_m)
 
     call get_param(param_file, mdl, "UTIDE", CS%utide, &
-                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION.", &
+                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION "//&
+                 "and the ice shelf melt parameterisation.", &
                  units="m s-1", default=0.0, scale=US%m_to_Z*US%T_to_s)
     allocate(CS%tideamp(is:ie,js:je), source=CS%utide)
 
@@ -469,7 +470,9 @@ logical function tidal_mixing_init(Time, G, GV, US, param_file, int_tide_CSp, di
 
     call get_param(param_file, mdl, "READ_TIDEAMP", read_tideamp, &
                  "If true, read a file (given by TIDEAMP_FILE) containing "//&
-                 "the tidal amplitude with INT_TIDE_DISSIPATION.", default=.false.)
+                 "the tidal amplitude with INT_TIDE_DISSIPATION. If true, "//&
+                 "also used as the tidal amplitude in the ice shelf melt "//&
+                 "parameterisation.", default=.false.)
     if (read_tideamp) then
       if (CS%use_CVMix_tidal) then
           call MOM_error(FATAL, "tidal_mixing_init: Tidal amplitude files are "// &
