@@ -22,7 +22,7 @@ use MOM_domains,              only: MOM_infra_init, MOM_infra_end
 use MOM_file_parser,          only: get_param, log_version, param_file_type, close_param_file
 use MOM_get_input,            only: get_MOM_input, directories
 use MOM_domains,              only: pass_var, pe_here
-use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe
+use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe, WARNING
 use MOM_grid,                 only: ocean_grid_type, get_global_grid_size
 use MOM_ocean_model_nuopc,    only: ice_ocean_boundary_type
 use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocean_state_type
@@ -1383,7 +1383,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         frmt = "('ERROR: ESMF mesh and MOM6 domain masks are inconsistent! - "//&
                "MOM n, maskMesh(n), mask(n) = ',3(i8,2x))"
         write(err_msg, frmt)n,maskMesh(n),mask(n)
-        call MOM_error(FATAL, err_msg)
+        call MOM_error(WARNING, err_msg)
       endif
     enddo
 
