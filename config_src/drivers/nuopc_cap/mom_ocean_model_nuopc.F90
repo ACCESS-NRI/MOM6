@@ -50,6 +50,7 @@ use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
 use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
+use MOM_ice_shelf,           only : initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
 use MOM_ice_shelf,           only : adjust_ice_sheet_frazil
 use MOM_coupler_types,       only : coupler_1d_bc_type, coupler_2d_bc_type
 use MOM_coupler_types,       only : coupler_type_spawn, coupler_type_write_chksums
@@ -137,7 +138,7 @@ end type ocean_public_type
 !> The ocean_state_type contains all information about the state of the ocean,
 !! with a format that is private so it can be readily changed without disrupting
 !! other coupled components.
-type, public :: ocean_state_type ; private
+type, public :: ocean_state_type
   ! This type is private, and can therefore vary between different ocean models.
   logical :: is_ocean_PE = .false.  !< True if this is an ocean PE.
   type(time_type) :: Time     !< The ocean model's time and master clock.
@@ -411,7 +412,9 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
 
   if (OS%use_ice_shelf)  then
     call initialize_ice_shelf(param_file, OS%grid, OS%Time, OS%ice_shelf_CSp, &
-                              OS%diag, Time_init, OS%dirs%output_directory, OS%forces, OS%fluxes)
+                              OS%diag, Time_init, OS%dirs%output_directory)
+    call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%fluxes)
+    call initialize_ice_shelf_forces(OS%ice_shelf_CSp, OS%grid, OS%US, OS%forces)
   endif
   if (OS%icebergs_alter_ocean)  then
     call marine_ice_init(OS%Time, OS%grid, param_file, OS%diag, OS%marine_ice_CSp)
