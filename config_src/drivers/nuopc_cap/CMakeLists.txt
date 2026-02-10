@@ -22,6 +22,9 @@ target_sources(mom6lib PRIVATE
   mom_cap_methods.F90
   mom_cap_gtracer_flux.F90
   mom_ocean_model_nuopc.F90
+  mom_cap_outputlog.F90
+  mom_inline_mod.F90
+  mom_ufs_trace_wrapper.F90
 )
 
 # Install and export
