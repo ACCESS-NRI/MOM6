@@ -279,6 +279,6 @@ subroutine Tr_east_west_upoints(Tr, G, nz, eu, wu)
     wu(i,j,k) = Tr%ad_x(i,j,k)
   enddo ; enddo; enddo
 
-end subroutine east_west_upoints
+end subroutine Tr_east_west_upoints
 
 end module MOM_tracer_numerical_mixing
