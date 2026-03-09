@@ -866,7 +866,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     Tr => Reg%Tr(m)
     if (Tr%id_tr_post_horzn> 0) call post_data(Tr%id_tr_post_horzn, Tr%t, diag)
     if (Tr%id_adx > 0) call post_data(Tr%id_adx, Tr%ad_x, diag, alt_h=h_diag)
-    if (Tr%id_adx_eu > 0 .or. Tr%id_adx_wu) then
+    if (Tr%id_adx_eu > 0 .or. Tr%id_adx_wu > 0) then
       adx_eu(:,:,:) = 0.
       adx_wu(:,:,:) = 0.
       call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
