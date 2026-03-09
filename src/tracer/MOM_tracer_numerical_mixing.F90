@@ -239,9 +239,9 @@ end subroutine meridional_upwind_values
 ! find the error in my ways!
 subroutine east_west_upoints(var, G, nz, eu, wu)
 
-  real,                  intent(in) :: var !< the variable to save the east faces of
-  type(ocean_grid_type), intent(in) :: G   !< Ocean grid structure for indexes
-  real,                  intent(in) :: nz  !< number of vertical levels
+  real,                  intent(in) :: var(:,:,:) !< the variable to save the east faces of
+  type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
+  integer,               intent(in) :: nz         !< number of vertical levels
 
   real,                  intent(inout) :: eu(:,:,:) !< The east u point value of `var`
   real,                  intent(inout) :: wu(:,:,:) !< The west u point value of `var`
