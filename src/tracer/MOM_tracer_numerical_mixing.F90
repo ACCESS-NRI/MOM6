@@ -10,7 +10,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public numerical_mixing, variance_advection, variance_flux, east_west_upoints
+public numerical_mixing, variance_advection, variance_flux, east_west_upoints, Tr_east_west_upoints
 
 contains
 
@@ -255,6 +255,28 @@ subroutine east_west_upoints(var, G, nz, eu, wu)
   do k=1,nz ;  do j=js,je ; do i=is,ie
     eu(i,j,k) = var(i-1,j,k)
     wu(i,j,k) = var(i,j,k)
+  enddo ; enddo; enddo
+
+end subroutine east_west_upoints
+
+subroutine Tr_east_west_upoints(Tr, G, nz, eu, wu)
+
+  type(tracer_type),     intent(in) :: Tr               !< Tracer
+  type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
+  integer,               intent(in) :: nz         !< number of vertical levels
+
+  real,                  intent(inout) :: eu(:,:,:) !< The east u point value of `var`
+  real,                  intent(inout) :: wu(:,:,:) !< The west u point value of `var`
+
+  !< Local variables
+  integer :: is, ie, js, je  !< Grid cell centre indexes
+  integer :: i, j, k         !< Counters
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+
+  do k=1,nz ;  do j=js,je ; do i=is,ie
+    eu(i,j,k) = Tr%ad_x(i-1,j,k)
+    wu(i,j,k) = Tr%ad_x(i,j,k)
   enddo ; enddo; enddo
 
 end subroutine east_west_upoints
