@@ -855,10 +855,10 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     Tr => Reg%Tr(m)
     if (Tr%id_tr_post_horzn> 0) call post_data(Tr%id_tr_post_horzn, Tr%t, diag)
     if (Tr%id_adx > 0) call post_data(Tr%id_adx, Tr%ad_x, diag, alt_h=h_diag)
-    if (IDs%id_adx_eu > 0)
+    if (Tr%id_adx_eu > 0)
       call east_west_u_points(Tr%ad_x, G, nz, adx_eu, adx_wu)
-      call post_data(IDS%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(IDS%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
+      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
+      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
     endif
     if (Tr%id_ady > 0) call post_data(Tr%id_ady, Tr%ad_y, diag, alt_h=h_diag)
     if (Tr%id_dfx > 0) call post_data(Tr%id_dfx, Tr%df_x, diag, alt_h=h_diag)
