@@ -866,13 +866,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     Tr => Reg%Tr(m)
     if (Tr%id_tr_post_horzn> 0) call post_data(Tr%id_tr_post_horzn, Tr%t, diag)
     if (Tr%id_adx > 0) call post_data(Tr%id_adx, Tr%ad_x, diag, alt_h=h_diag)
-    if (Tr%id_adx_eu > 0 .or. Tr%id_adx_wu > 0) then
-      adx_eu(:,:,:) = 0.
-      adx_wu(:,:,:) = 0.
-      call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
-      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
-    endif
     if (Tr%id_ady > 0) call post_data(Tr%id_ady, Tr%ad_y, diag, alt_h=h_diag)
     if (Tr%id_dfx > 0) call post_data(Tr%id_dfx, Tr%df_x, diag, alt_h=h_diag)
     if (Tr%id_dfy > 0) call post_data(Tr%id_dfy, Tr%df_y, diag, alt_h=h_diag)
@@ -905,6 +898,14 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
         call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
         call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
       endif
+    endif
+    ! My check for the indexing hack used in numiercal_mixing
+    if (Tr%id_adx_eu > 0 .or. Tr%id_adx_wu > 0) then
+      adx_eu(:,:,:) = 0.
+      adx_wu(:,:,:) = 0.
+      call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
+      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
+      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
     endif
 
     ! A few diagnostics introduce with MARBL driver
