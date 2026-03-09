@@ -362,6 +362,12 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           diag%axesCuL, Time, trim(flux_longname)//" advective zonal flux" , &
           trim(flux_units), v_extensive=.true., y_cell_method='sum', &
           conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T)
+      Tr%id_adx_eu = register_diag_field("ocean_model", trim(shortnm)//"_adx_eu", &
+          diag%axesTL, Time, "East upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
+          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
+      Tr%id_adx_wu = register_diag_field("ocean_model", trim(shortnm)//"_adx_wu", &
+          diag%axesTL, Time, "West upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
+          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
       Tr%id_ady = register_diag_field("ocean_model", trim(shortnm)//"_ady", &
           diag%axesCvL, Time, trim(flux_longname)//" advective meridional flux" , &
           trim(flux_units), v_extensive=.true., x_cell_method='sum', &
@@ -862,7 +868,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     if (Tr%id_tr_post_horzn> 0) call post_data(Tr%id_tr_post_horzn, Tr%t, diag)
     if (Tr%id_adx > 0) call post_data(Tr%id_adx, Tr%ad_x, diag, alt_h=h_diag)
     if (Tr%id_adx_eu > 0) then
-      call Tr_east_west_upoints(Tr%ad_x, G, nz, adx_eu, adx_wu)
+      call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
       call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
       call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
     endif
