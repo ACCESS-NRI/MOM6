@@ -1652,11 +1652,11 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
   ! Temporary variables for saving east and west u point uhtr values
-  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_eu !< East u point value of accumulated zonal thickness fluxes
-  !                                                !! used to advect tracers [H L2 ~> m3 or kg]
-  !
-  ! real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_wu !< West u point value of accumulated zonal thickness fluxes
-  !                                                !! used to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_eu !< East u point value of accumulated zonal thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
+
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_wu !< West u point value of accumulated zonal thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
 
                           ! [H T-1 ~> m s-1 or kg m-2 s-1].
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
@@ -1701,13 +1701,13 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   endif
 
   if (IDs%id_uhtr > 0) call post_data(IDs%id_uhtr, uhtr, diag, alt_h=diag_pre_dyn%h_state)
-  ! if (IDs%id_uhtr_eu > 0 .or. IDs%id_uhtr_wu > 0) then
-  !   uhtr_eu(:,:,:) = 0.
-  !   uhtr_wu(:,:,:) = 0.
-  !   call east_west_upoints(uhtr, G, nz, uhtr_eu, uhtr_wu)
-  !   call post_data(IDS%id_uhtr_eu, uhtr_eu, diag, alt_h=diag_pre_dyn%h_state)
-  !   call post_data(IDS%id_uhtr_wu, uhtr_wu, diag, alt_h=diag_pre_dyn%h_state)
-  ! endif
+  if (IDs%id_uhtr_eu > 0 .or. IDs%id_uhtr_wu > 0) then
+    uhtr_eu(:,:,:) = 0.
+    uhtr_wu(:,:,:) = 0.
+    call east_west_upoints(uhtr, G, nz, uhtr_eu, uhtr_wu)
+    call post_data(IDS%id_uhtr_eu, uhtr_eu, diag, alt_h=diag_pre_dyn%h_state)
+    call post_data(IDS%id_uhtr_wu, uhtr_wu, diag, alt_h=diag_pre_dyn%h_state)
+  endif
   if (IDs%id_vhtr > 0) call post_data(IDs%id_vhtr, vhtr, diag, alt_h=diag_pre_dyn%h_state)
   if (IDs%id_dynamics_h > 0) call post_data(IDs%id_dynamics_h, diag_pre_dyn%h_state, diag, &
                                             alt_h=diag_pre_dyn%h_state)
