@@ -237,14 +237,14 @@ end subroutine meridional_upwind_values
 ! indexed one value higher than `TR%ad_x`. I should then be able to compare this output to the equivalent
 ! saved variables and demonstrate that the index online and offline does not seem to match. Or in doing this I will
 ! find the error in my ways!
-subroutine east_west_upoints(var, G, nz, eu, wu)
+subroutine east_west_upoints(uhtr, G, nz, uhtr_eu, uhtr_wu)
 
-  real,                  intent(in) :: var(:,:,:) !< the variable to save the east faces of
+  real,                  intent(in) :: uhtr(:,:,:) !< the variable to save the east faces of
   type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
   integer,               intent(in) :: nz         !< number of vertical levels
 
-  real,                  intent(inout) :: eu(:,:,:) !< The east u point value of `var`
-  real,                  intent(inout) :: wu(:,:,:) !< The west u point value of `var`
+  real,                  intent(inout) :: uhtr_eu(:,:,:) !< The east u point value of `var`
+  real,                  intent(inout) :: uhtr_wu(:,:,:) !< The west u point value of `var`
 
   !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
@@ -253,20 +253,20 @@ subroutine east_west_upoints(var, G, nz, eu, wu)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    wu(i,j,k) = var(I-1,j,k)
-    eu(i,j,k) = var(I,j,k)
+    uhtr_wu(i,j,k) = uhtr(I-1,j,k)
+    uhtr_eu(i,j,k) = uhtr(I,j,k)
   enddo ; enddo; enddo
 
 end subroutine east_west_upoints
 
-subroutine Tr_east_west_upoints(Tr, G, nz, eu, wu)
+subroutine Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
 
   type(tracer_type),     intent(in) :: Tr               !< Tracer
   type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
   integer,               intent(in) :: nz         !< number of vertical levels
 
-  real,                  intent(inout) :: eu(:,:,:) !< The east u point value of `var`
-  real,                  intent(inout) :: wu(:,:,:) !< The west u point value of `var`
+  real,                  intent(inout) :: adx_eu(:,:,:) !< The east u point value of `var`
+  real,                  intent(inout) :: adx_wu(:,:,:) !< The west u point value of `var`
 
   !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
@@ -275,8 +275,8 @@ subroutine Tr_east_west_upoints(Tr, G, nz, eu, wu)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    wu(i,j,k) = Tr%ad_x(I-1,j,k)
-    eu(i,j,k) = Tr%ad_x(I,j,k)
+    adx_wu(i,j,k) = Tr%ad_x(I-1,j,k)
+    adx_eu(i,j,k) = Tr%ad_x(I,j,k)
   enddo ; enddo; enddo
 
 end subroutine Tr_east_west_upoints
