@@ -243,8 +243,8 @@ subroutine east_west_upoints(var, G, nz, eu, wu)
   type(ocean_grid_type), intent(in) :: G   !< Ocean grid structure for indexes
   real,                  intent(in) :: nz  !< number of vertical levels
 
-  real,                  intent(inout) :: eu !< The east u point value of `var`
-  real,                  intent(inout) :: wu !< The west u point value of `var`
+  real,                  intent(inout) :: eu(:,:,:) !< The east u point value of `var`
+  real,                  intent(inout) :: wu(:,:,:) !< The west u point value of `var`
 
   !< Local variables
   integer :: is, ie, js, je  !< Grid cell centre indexes
