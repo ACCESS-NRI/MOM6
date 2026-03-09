@@ -253,8 +253,8 @@ subroutine east_west_upoints(var, G, nz, eu, wu)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    eu(i,j,k) = var(i-1,j,k)
-    wu(i,j,k) = var(i,j,k)
+    wu(i,j,k) = var(I-1,j,k)
+    eu(i,j,k) = var(I,j,k)
   enddo ; enddo; enddo
 
 end subroutine east_west_upoints
@@ -275,8 +275,8 @@ subroutine Tr_east_west_upoints(Tr, G, nz, eu, wu)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    eu(i,j,k) = Tr%ad_x(i-1,j,k)
-    wu(i,j,k) = Tr%ad_x(i,j,k)
+    wu(i,j,k) = Tr%ad_x(I-1,j,k)
+    eu(i,j,k) = Tr%ad_x(I,j,k)
   enddo ; enddo; enddo
 
 end subroutine Tr_east_west_upoints
