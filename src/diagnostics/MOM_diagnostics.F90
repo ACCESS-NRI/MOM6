@@ -1701,7 +1701,9 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   endif
 
   if (IDs%id_uhtr > 0) call post_data(IDs%id_uhtr, uhtr, diag, alt_h=diag_pre_dyn%h_state)
-  if (IDs%id_uhtr_eu > 0) then
+  if (IDs%id_uhtr_eu > 0 .and. IDs%id_uhtr_wu > 0) then
+    uhtr_eu(:,:,:) = 0.
+    uhtr_wu(:,:,:) = 0.
     call east_west_upoints(uhtr, G, nz, uhtr_eu, uhtr_wu)
     call post_data(IDS%id_uhtr_eu, uhtr_eu, diag, alt_h=diag_pre_dyn%h_state)
     call post_data(IDS%id_uhtr_wu, uhtr_wu, diag, alt_h=diag_pre_dyn%h_state)

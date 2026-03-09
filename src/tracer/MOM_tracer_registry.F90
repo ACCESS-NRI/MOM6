@@ -821,15 +821,14 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
                                                     ! [CU2 H T-1 ~> conc2 m s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
                                                     ! [CU2 H T-1 ~> conc2 m s-1]
-  real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
-                          ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
-  type(tracer_type), pointer :: Tr=>NULL()
-
   ! Temporary local varaibles for saving east and west u point ad_x values
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: adx_eu         !< East u value of diagnostic x-advective flux
                                                                 !! [CU H L2 T-1 ~> conc m3 s-1 or conc kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: adx_wu         !< West u value of diagnostic x-advective flux
                                                                 !! [CU H L2 T-1 ~> conc m3 s-1 or conc kg s-1]
+  real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
+                          ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
+  type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   H_to_RZ_dt = GV%H_to_RZ * Idt
@@ -868,6 +867,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
     if (Tr%id_tr_post_horzn> 0) call post_data(Tr%id_tr_post_horzn, Tr%t, diag)
     if (Tr%id_adx > 0) call post_data(Tr%id_adx, Tr%ad_x, diag, alt_h=h_diag)
     if (Tr%id_adx_eu > 0) then
+      adx_eu(:,:,:) = 0.
+      adx_wu(:,:,:) = 0.
       call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
       call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
       call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
