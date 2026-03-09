@@ -10,7 +10,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public numerical_mixing, variance_advection, variance_flux
+public numerical_mixing, variance_advection, variance_flux, east_west_upoints
 
 contains
 
@@ -232,5 +232,31 @@ subroutine meridional_upwind_values(Tr, G, nz, vhtr, y_upwind)
   enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_values
+
+! Subroutine to construct a MWE that demonstrates the hack that I have above where I have the `uhtr` variable
+! indexed one value higher than `TR%ad_x`. I should then be able to compare this output to the equivalent
+! saved variables and demonstrate that the index online and offline does not seem to match. Or in doing this I will
+! find the error in my ways!
+subroutine east_west_upoints(var, G, nz, eu, wu)
+
+  real,                  intent(in) :: var !< the variable to save the east faces of
+  type(ocean_grid_type), intent(in) :: G   !< Ocean grid structure for indexes
+  real,                  intent(in) :: nz  !< number of vertical levels
+
+  real,                  intent(inout) :: eu !< The east u point value of `var`
+  real,                  intent(inout) :: wu !< The west u point value of `var`
+
+  !< Local variables
+  integer :: is, ie, js, je  !< Grid cell centre indexes
+  integer :: i, j, k         !< Counters
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+
+  do k=1,nz ;  do j=js,je ; do i=is,ie
+    eu(i,j,k) = var(i-1,j,k)
+    wu(i,j,k) = var(i,j,k)
+  enddo ; enddo; enddo
+
+end subroutine east_west_upoints
 
 end module MOM_tracer_numerical_mixing
