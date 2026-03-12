@@ -190,7 +190,7 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, G, GV, vhtr, Idt, y_u
                                                                               !! fluxes used to advect
                                                                               !! tracers [H L2 ~> m3 or kg]
   real,                                        intent(in) :: Idt              !< Inverse model timestep [T-1 ~> S-1]
-  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind 
+  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind
                                                                               !! tracer values [CU ~> conc]
   real,                                     intent(inout) :: res(:,:,:)       !< Result [CU2 H T-1 ~> conc2 m s-1]
 
@@ -221,7 +221,7 @@ subroutine meridional_upwind_values(Tr, G, GV, vhtr, y_upwind)
   type(tracer_type),                           intent(in) :: Tr               !< Pointer to tracer registry
   type(ocean_grid_type),                       intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV               !< Ocean vertical grid structure
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness 
+  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness
                                                                               !! fluxes used to
                                                                               !! advect tracers [H L2 ~> m3 or kg]
   real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values [CU ~> conc]
