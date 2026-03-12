@@ -207,7 +207,7 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_u
     ! res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
     ! This code passes the thickness dimensional test but is not correct for the numerical mixing diagnostic
     north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J,k)   * (y_upwind(i,J,k)**2))
-    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J-1,k) * (y_upwind(i,J-1,k)**2)
+    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J-1,k) * (y_upwind(i,J-1,k)**2))
     res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
   enddo ; enddo ; enddo
 
