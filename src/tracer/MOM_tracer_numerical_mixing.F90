@@ -1,4 +1,4 @@
-!> Functions and routines involved in calculating numerical mixing of tracers due to advection
+!> Functions and routines involved in calculating numerical mixing of tracers due to advection schemes.
 module MOM_tracer_numerical_mixing
 
 use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
@@ -14,21 +14,21 @@ public numerical_mixing, variance_advection, variance_flux, east_west_upoints, T
 
 contains
 
-!< Calculate the spurious ``numerical'' mixing of tracer due to advection.
+!< Calculate the spurious ``numerical'' mixing of tracer due to advection schemes.
 subroutine numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, nm)
 
   type(ocean_grid_type),                       intent(in) :: G             !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV            !< Ocean vertical grid structure
   type(tracer_type),                           intent(in) :: Tr            !< Pointer to the tracer regsitry
-  real,                                        intent(in) :: h(:,:,:)      !< The updated layer thicknesses [H ~> m or kg m-2]
+  real,                                        intent(in) :: h(:,:,:)      !< Updated layer thicknesses [H ~> m or kg m-2]
   type(diag_grid_storage),                     intent(in) :: diag_pre_dyn  !< Stored grids from before dynamics
   real,                                        intent(in) :: dt_trans      !< The transport time interval [T ~> s]
-  real,                                        intent(in) :: Idt           !< The inverse of the time interval [T-1 ~> s-1]
+  real,                                        intent(in) :: Idt           !< Inverse time interval [T-1 ~> s-1]
   real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr          !< Accumulated zonal thickness fluxes
                                                                            !! used to advect tracers [H L2 ~> m3 or kg]
   real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr          !< Accumulated meridional thickness fluxes
                                                                            !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                                    intent(inout)  :: nm(:,:,:)     !< Numerical mixing diagnostic [CU2 H T-1 ~> conc2 m s-1]
+  real,                                    intent(inout)  :: nm(:,:,:)     !< Numerical mixing [CU2 H T-1 ~> conc2 m s-1]
 
   ! Upwind variables
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
@@ -122,11 +122,11 @@ subroutine thickness_weighted_zonal_variance_flux(Tr, G, GV, uhtr, Idt, x_upwind
   type(tracer_type),                           intent(in) :: Tr               !< Pointer to the tracer registry
   type(ocean_grid_type),                       intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV               !< Ocean vertical grid structure
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr             !< Accumulated zonal thickness fluxes
-                                                                              !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                                        intent(in) :: Idt              !< Inverse transport time intervale [T-1 ~> s-1]
+  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr             !< Accumulated zonal thickness fluxes used
+                                                                              !! to advect tracers [H L2 ~> m3 or kg]
+  real,                                        intent(in) :: Idt              !< Inverse time interval [T-1 ~> s-1]
   real,                                     intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind tracer value [CU ~> conc]
-  real,                                     intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
+  real,                                     intent(inout) :: res(:,:,:)       !< Result [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
@@ -155,8 +155,8 @@ subroutine zonal_upwind_values(Tr, G, GV, uhtr, x_upwind)
   type(tracer_type),                           intent(in) :: Tr               !< Pointer to the tracer registry
   type(ocean_grid_type),                       intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV               !< Ocean vertical grid structure
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr             !< Accumulated zonal thickness fluxes
-                                                                              !! used to advect tracers [H L2 ~> m3 or kg]
+  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr             !< Accumulated zonal thickness fluxes used
+                                                                              !! to advect tracers [H L2 ~> m3 or kg]
   real,                                     intent(inout) :: x_upwind(:,:,:)  !< Zonal upwind values [CU ~> conc]
 
   !< Local variables
@@ -182,11 +182,13 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, G, GV, vhtr, Idt, y_u
   type(tracer_type),                           intent(in) :: Tr               !< Pointer to tracer registry
   type(ocean_grid_type),                       intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV               !< Ocean vertical grid structure
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness fluxes
-                                                                              !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                                        intent(in) :: Idt              !< Inverse model timestep
-  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind tracer values [CU ~> conc]
-  real,                                     intent(inout) :: res(:,:,:)       !< Array to store the result in [CU2 H T-1 ~> conc2 m s-1]
+  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness
+                                                                              !! fluxes used to advect
+                                                                              !! tracers [H L2 ~> m3 or kg]
+  real,                                        intent(in) :: Idt              !< Inverse model timestep [T-1 ~> S-1]
+  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind 
+                                                                              !! tracer values [CU ~> conc]
+  real,                                     intent(inout) :: res(:,:,:)       !< Result [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
@@ -198,8 +200,8 @@ subroutine thickness_weighted_meridional_variance_flux(Tr, G, GV, vhtr, Idt, y_u
   call meridional_upwind_values(Tr, G, GV, vhtr, y_upwind)
 
   do k=1,nz ; do j=js,je ; do i=is,ie
-    ! north = (2 * (Tr%ad_y(i,J,k)  * y_upwind(i,J,k)))   - ((Idt*vhtr(i,J+1,k)) * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
-    ! south = (2 * (Tr%ad_y(i,J-1,k)* y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
+    ! north = (2 * (Tr%ad_y(i,J,k)  * y_upwind(i,J,k)))   - ((Idt*vhtr(i,J+1,k)) * (y_upwind(i,J,k)  **2))
+    ! south = (2 * (Tr%ad_y(i,J-1,k)* y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J-1,k)**2))
     ! res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
     ! This code passes the thickness dimensional test but is not correct for the numerical mixing diagnostic
     north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J,k)   * y_upwind(i,J,k)**2)
@@ -215,9 +217,10 @@ subroutine meridional_upwind_values(Tr, G, GV, vhtr, y_upwind)
   type(tracer_type),                           intent(in) :: Tr               !< Pointer to tracer registry
   type(ocean_grid_type),                       intent(in) :: G                !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV               !< Ocean vertical grid structure
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness fluxes
-                                                                              !! used to advect tracers [H L2 ~> m3 or kg]
-  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values of C [CU ~> conc]
+  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: vhtr             !< Accumulated meridional thickness 
+                                                                              !! fluxes used to
+                                                                              !! advect tracers [H L2 ~> m3 or kg]
+  real,                                     intent(inout) :: y_upwind(:,:,:)  !< Meridional upwind values [CU ~> conc]
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre indexes
