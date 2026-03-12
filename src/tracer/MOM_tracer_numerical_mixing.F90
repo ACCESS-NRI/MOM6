@@ -246,10 +246,10 @@ subroutine east_west_upoints(uhtr, G, GV, uhtr_eu, uhtr_wu)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: uhtr_wu !< The west u point value of `var`
 
   !< Local variables
-  integer :: is, ie, js, je  !< Grid cell centre indexes
+  integer :: is, ie, js, je, nz  !< Grid cell centre indexes
   integer :: i, j, k         !< Counters
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
     uhtr_wu(i,j,k) = uhtr(I-1,j,k)
