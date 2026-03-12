@@ -145,8 +145,8 @@ subroutine thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind
     ! west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I,j,k))   * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     ! res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
     ! This code passes the thickness dimensional test but does not accurately calculate numerical mixing
-    east = (2 * Tr%ad_x(I,j,k)   * x_upwind(I,j,k))   - (Idt * uhtr(I,j,k)   * (x_upwind(I,j,k)**2))
-    west = (2 * Tr%ad_x(I-1,j,k) * x_upwind(I-1,j,k)) - (Idt * uhtr(I-1,j,k) * (x_upwind(I-1,j,k)**2))
+    east = (2 * (Tr%ad_x(I,j,k)*x_upwind(I,j,k)))     - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)*x_upwind(I,j,k)))
+    west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
   enddo ; enddo; enddo
 
@@ -206,8 +206,8 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_u
     ! south = (2 * (Tr%ad_y(i,J-1,k)* y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J-1,k)**2))
     ! res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
     ! This code passes the thickness dimensional test but is not correct for the numerical mixing diagnostic
-    north = (2 * Tr%ad_y(i,J,k)   * y_upwind(i,J,k))   - (Idt * vhtr(i,J,k)   * (y_upwind(i,J,k)**2))
-    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - (Idt * vhtr(i,J-1,k) * (y_upwind(i,J-1,k)**2))
+    north = (2 * (Tr%ad_y(i,J,k)*y_upwind(i,J,k)))     - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)*y_upwind(i,J,k)))
+    south = (2 * Tr%ad_y(i,J-1,k) * y_upwind(i,J-1,k)) - ((Idt*vhtr(i,J-1,k)) * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
     res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
   enddo ; enddo ; enddo
 
