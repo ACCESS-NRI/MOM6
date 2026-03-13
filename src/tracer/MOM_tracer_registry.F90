@@ -766,10 +766,11 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
 end subroutine post_tracer_diagnostics_at_sync
 
 !> Post the advective and diffusive tendencies
-subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vhtr, h, dt_trans, Idt)
+subroutine post_tracer_transport_diagnostics(G, GV, Reg, diag_prev, h_diag, diag, uhtr, vhtr, h, dt_trans, Idt)
   type(ocean_grid_type),      intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type),    intent(in) :: GV   !< The ocean's vertical grid structure
   type(tracer_registry_type), pointer    :: Reg  !< pointer to the tracer registry
+  type(diag_grid_storage),    intent(in) :: diag_prev !< Contains diagnostic grids from previous timestep
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h_diag !< Layer thicknesses on which to post fields [H ~> m or kg m-2]
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
