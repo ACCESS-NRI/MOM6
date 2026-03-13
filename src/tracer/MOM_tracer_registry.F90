@@ -790,13 +790,12 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
 end subroutine post_tracer_diagnostics_at_sync
 
 !> Post the advective and diffusive tendencies
-subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, diag, uhtr, vhtr, h, dt_trans, Idt)
+subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vhtr, h, dt_trans, Idt)
   type(ocean_grid_type),      intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type),    intent(in) :: GV   !< The ocean's vertical grid structure
   type(tracer_registry_type), pointer    :: Reg  !< pointer to the tracer registry
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h_diag !< Layer thicknesses on which to post fields [H ~> m or kg m-2]
-  type(diag_grid_storage),    intent(in) :: diag_pre_dyn !< Stored grids from before dynamics
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: uhtr !< Accumulated zonal thickness fluxes
@@ -884,19 +883,19 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
 
     if (Tr%id_numerical_mixing > 0) then
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, uhtr, vhtr, nm)
-      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=diag_pre_dyn%h_state)
+      call numerical_mixing(G, GV, Tr, h, h_diag, dt_trans, Idt, uhtr, vhtr, nm)
+      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=h_diag)
 
       !< The below is here while debuggin; to be removed once numerical mixing is all sorted
       if (Tr%id_variance_advection > 0) then
         va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, diag_pre_dyn, dt_trans, Idt, va)
-        call post_data(Tr%id_variance_advection, va, diag, alt_h=diag_pre_dyn%h_state)
+        call variance_advection(G, GV, Tr, h, h_diag, dt_trans, Idt, va)
+        call post_data(Tr%id_variance_advection, va, diag, alt_h=h_diag)
       endif
       if (Tr%id_variance_flux > 0) then
         vf(:,:,:) = 0.
         call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
-        call post_data(Tr%id_variance_flux, vf, diag, alt_h=diag_pre_dyn%h_state)
+        call post_data(Tr%id_variance_flux, vf, diag, alt_h=h_diag)
       endif
     endif
     ! My check for the indexing hack used in numiercal_mixing
@@ -904,8 +903,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag_pre_dyn, d
       adx_eu(:,:,:) = 0.
       adx_wu(:,:,:) = 0.
       call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
-      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=diag_pre_dyn%h_state)
-      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=diag_pre_dyn%h_state)
+      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=h_diag)
+      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=h_diag)
     endif
 
     ! A few diagnostics introduce with MARBL driver
