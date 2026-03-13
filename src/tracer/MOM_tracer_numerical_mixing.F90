@@ -1,7 +1,7 @@
 !> Functions and routines involved in calculating numerical mixing of tracers due to advection schemes.
 module MOM_tracer_numerical_mixing
 
-use MOM_diag_mediator, only : diag_grid_storage
+use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
 use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
@@ -47,15 +47,15 @@ end subroutine numerical_mixing
 !< Subroutine to calculate the thickness weighted variance advection over the transport timestep.
 subroutine thickness_weighted_variance_advection(G, GV, Tr, diag_prev, h, dt, Idt, res)
 
-  type(ocean_grid_type),                        intent(in) :: G       !< Ocean grid structure
-  type(verticalGrid_type),                      intent(in) :: GV      !< Ocean vertical grid structure
-  type(tracer_type),                            intent(in) :: Tr      !< Pointer to the tracer registry
-  type(diag_grid_storage),                      intent(in) :: diag_prev !< Diagnostic grids from previous timestep
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h       !< Updated thicknesses [H ~> m or kg m-2]
-  real,                                         intent(in) :: dt      !< Transport time interval [T ~> s]
-  real,                                         intent(in) :: Idt     !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: res     !< Array to store result in
-                                                                      !! [CU2 H T-1 ~> conc2 m s-1]
+  type(ocean_grid_type),                        intent(in) :: G          !< Ocean grid structure
+  type(verticalGrid_type),                      intent(in) :: GV         !< Ocean vertical grid structure
+  type(tracer_type),                            intent(in) :: Tr         !< Pointer to the tracer registry
+  type(diag_grid_storage),                      intent(in) :: diag_prev  !< Diagnostic grids from previous timestep
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h          !< Updated thicknesses [H ~> m or kg m-2]
+  real,                                         intent(in) :: dt         !< Transport time interval [T ~> s]
+  real,                                         intent(in) :: Idt        !< Inverse time interval [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: res        !< Array to store result in
+                                                                         !! [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz        !< Grid cell centre and layer indexes
@@ -139,12 +139,13 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_u
   type(ocean_grid_type),                         intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                       intent(in) :: GV        !< Ocean vertical grid structure
   type(tracer_type),                             intent(in) :: Tr        !< Pointer to tracer registry
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),    intent(in) :: vhtr      !< Accumulated meridional thickness fluxes used
-                                                                        !! to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),    intent(in) :: vhtr      !< Accumulated meridional thickness fluxes
+                                                                         !! used to advect tracers [H L2 ~> m3 or kg]
   real,                                          intent(in) :: Idt       !< Inverse timestep [T-1 ~> S-1]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: y_upwind  !< Meridional upwind tracer values [CU ~> conc]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: y_upwind  !< Meridional upwind tracer values
+                                                                         !! [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res       !< Array to store result in
-                                                                        !![CU2 H T-1 ~> conc2 m s-1]
+                                                                         !![CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
