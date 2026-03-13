@@ -35,7 +35,6 @@ use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
 use MOM_verticalGrid,      only : verticalGrid_type, get_thickness_units, get_flux_units
 use MOM_wave_speed,        only : wave_speed, wave_speed_CS, wave_speed_init
-use MOM_tracer_numerical_mixing, only : east_west_upoints
 
 implicit none ; private
 
@@ -160,7 +159,6 @@ end type surface_diag_IDs
 type, public :: transport_diag_IDs ; private
   !>@{  Diagnostics for tracer horizontal transport
   integer :: id_uhtr = -1, id_umo = -1, id_umo_2d = -1
-  integer :: id_uhtr_eu = -1, id_uhtr_wu = -1
   integer :: id_vhtr = -1, id_vmo = -1, id_vmo_2d = -1
   integer :: id_dynamics_h = -1, id_dynamics_h_tendency = -1
   !>@}
@@ -1651,13 +1649,6 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: umo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: vmo ! Diagnostics of layer mass transport [R Z L2 T-1 ~> kg s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: h_tend ! Change in layer thickness due to dynamics
-  ! Temporary variables for saving east and west u point uhtr values
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_eu !< East u point value of accumulated zonal thickness fluxes
-                                                 !! used to advect tracers [H L2 ~> m3 or kg]
-
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: uhtr_wu !< West u point value of accumulated zonal thickness fluxes
-                                                 !! used to advect tracers [H L2 ~> m3 or kg]
-
                           ! [H T-1 ~> m s-1 or kg m-2 s-1].
   real :: Idt             ! The inverse of the time interval [T-1 ~> s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
@@ -1701,13 +1692,6 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   endif
 
   if (IDs%id_uhtr > 0) call post_data(IDs%id_uhtr, uhtr, diag, alt_h=diag_pre_dyn%h_state)
-  if (IDs%id_uhtr_eu > 0 .or. IDs%id_uhtr_wu > 0) then
-    uhtr_eu(:,:,:) = 0.
-    uhtr_wu(:,:,:) = 0.
-    call east_west_upoints(uhtr, G, GV, uhtr_eu, uhtr_wu)
-    call post_data(IDS%id_uhtr_eu, uhtr_eu, diag, alt_h=diag_pre_dyn%h_state)
-    call post_data(IDS%id_uhtr_wu, uhtr_wu, diag, alt_h=diag_pre_dyn%h_state)
-  endif
   if (IDs%id_vhtr > 0) call post_data(IDs%id_vhtr, vhtr, diag, alt_h=diag_pre_dyn%h_state)
   if (IDs%id_dynamics_h > 0) call post_data(IDs%id_dynamics_h, diag_pre_dyn%h_state, diag, &
                                             alt_h=diag_pre_dyn%h_state)
@@ -2228,12 +2212,6 @@ subroutine register_transport_diags(Time, G, GV, US, IDs, diag)
   ! Diagnostics related to tracer and mass transport
   IDs%id_uhtr = register_diag_field('ocean_model', 'uhtr', diag%axesCuL, Time, &
       'Accumulated zonal thickness fluxes to advect tracers', &
-      accum_flux_units, y_cell_method='sum', v_extensive=.true., conversion=GV%H_to_MKS*US%L_to_m**2)
-  IDs%id_uhtr_eu = register_diag_field('ocean_model', 'uhtr_eu', diag%axesTL, Time, &
-      'East u point value of accumulated zonal thickness fluxes to advect tracers', &
-      accum_flux_units, y_cell_method='sum', v_extensive=.true., conversion=GV%H_to_MKS*US%L_to_m**2)
-  IDs%id_uhtr_wu = register_diag_field('ocean_model', 'uhtr_wu', diag%axesTL, Time, &
-      'West u point value of accumulated zonal thickness fluxes to advect tracers', &
       accum_flux_units, y_cell_method='sum', v_extensive=.true., conversion=GV%H_to_MKS*US%L_to_m**2)
   IDs%id_vhtr = register_diag_field('ocean_model', 'vhtr', diag%axesCvL, Time, &
       'Accumulated meridional thickness fluxes to advect tracers', &

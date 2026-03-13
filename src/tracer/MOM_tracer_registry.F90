@@ -25,7 +25,7 @@ use MOM_time_manager,  only : time_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_tracer_types,  only : tracer_type, tracer_registry_type
-use MOM_tracer_numerical_mixing,  only : numerical_mixing, variance_advection, variance_flux, Tr_east_west_upoints
+use MOM_tracer_numerical_mixing,  only : numerical_mixing
 
 implicit none ; private
 
@@ -362,12 +362,6 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           diag%axesCuL, Time, trim(flux_longname)//" advective zonal flux" , &
           trim(flux_units), v_extensive=.true., y_cell_method='sum', &
           conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T)
-      Tr%id_adx_eu = register_diag_field("ocean_model", trim(shortnm)//"_adx_eu", &
-          diag%axesTL, Time, "East upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
-          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
-      Tr%id_adx_wu = register_diag_field("ocean_model", trim(shortnm)//"_adx_wu", &
-          diag%axesTL, Time, "West upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
-          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
       Tr%id_ady = register_diag_field("ocean_model", trim(shortnm)//"_ady", &
           diag%axesCvL, Time, trim(flux_longname)//" advective meridional flux" , &
           trim(flux_units), v_extensive=.true., x_cell_method='sum', &
@@ -392,21 +386,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
           trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
-      Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
-          diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
-      Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
-          diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//" 2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
           diag%axesCuL, Time, "Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
-          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
-      Tr%id_adx_eu = register_diag_field("ocean_model", trim(shortnm)//"_adx_eu", &
-          diag%axesTL, Time, "East upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
-          flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
-      Tr%id_adx_wu = register_diag_field("ocean_model", trim(shortnm)//"_adx_wu", &
-          diag%axesTL, Time, "West upoint Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
           flux_units, v_extensive=.true., conversion=Tr%flux_scale*(US%L_to_m**2)*US%s_to_T, y_cell_method='sum')
       Tr%id_ady = register_diag_field("ocean_model", trim(shortnm)//"_ady", &
           diag%axesCvL, Time, "Advective (by residual mean) Meridional Flux of "//trim(flux_longname), &
@@ -431,12 +413,6 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           x_cell_method='sum')
       Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
           diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
-      Tr%id_variance_advection = register_diag_field("ocean_model", trim(shortnm)//"_variance_advection", &
-          diag%axesTL, Time, "Advection of "//trim(shortnm)//" variance", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
-      Tr%id_variance_flux = register_diag_field("ocean_model", trim(shortnm)//"_variance_flux", &
-          diag%axesTL, Time, "Flux of "//trim(shortnm)//" variance", &
           trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     endif
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
@@ -815,16 +791,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
-  ! va and vf will be removed but are needed in the debugging process
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: va ! Thickness weighted variance advection
-                                                    ! [CU2 H T-1 ~> conc2 m s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: vf ! Horizontal thickness weighted variance flux
-                                                    ! [CU2 H T-1 ~> conc2 m s-1]
-  ! Temporary local varaibles for saving east and west u point ad_x values
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: adx_eu         !< East u value of diagnostic x-advective flux
-                                                                !! [CU H L2 T-1 ~> conc m3 s-1 or conc kg s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: adx_wu         !< West u value of diagnostic x-advective flux
-                                                                !! [CU H L2 T-1 ~> conc m3 s-1 or conc kg s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
@@ -885,26 +851,6 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
       nm(:,:,:) = 0.
       call numerical_mixing(G, GV, Tr, h, h_diag, dt_trans, Idt, uhtr, vhtr, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=h_diag)
-
-      !< The below is here while debuggin; to be removed once numerical mixing is all sorted
-      if (Tr%id_variance_advection > 0) then
-        va(:,:,:) = 0.
-        call variance_advection(G, GV, Tr, h, h_diag, dt_trans, Idt, va)
-        call post_data(Tr%id_variance_advection, va, diag, alt_h=h_diag)
-      endif
-      if (Tr%id_variance_flux > 0) then
-        vf(:,:,:) = 0.
-        call variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
-        call post_data(Tr%id_variance_flux, vf, diag, alt_h=h_diag)
-      endif
-    endif
-    ! My check for the indexing hack used in numiercal_mixing
-    if (Tr%id_adx_eu > 0 .or. Tr%id_adx_wu > 0) then
-      adx_eu(:,:,:) = 0.
-      adx_wu(:,:,:) = 0.
-      call Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
-      call post_data(Tr%id_adx_eu, adx_eu, diag, alt_h=h_diag)
-      call post_data(Tr%id_adx_wu, adx_wu, diag, alt_h=h_diag)
     endif
 
     ! A few diagnostics introduce with MARBL driver

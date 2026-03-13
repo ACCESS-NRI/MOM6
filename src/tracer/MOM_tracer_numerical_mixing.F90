@@ -1,7 +1,7 @@
 !> Functions and routines involved in calculating numerical mixing of tracers due to advection schemes.
 module MOM_tracer_numerical_mixing
 
-use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
+use MOM_diag_mediator, only : diag_ctrl
 use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
@@ -10,7 +10,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public numerical_mixing, variance_advection, variance_flux, east_west_upoints, Tr_east_west_upoints
+public numerical_mixing
 
 contains
 
@@ -44,49 +44,6 @@ subroutine numerical_mixing(G, GV, Tr, h, h_diag, dt_trans, Idt, uhtr, vhtr, nm)
   call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
-
-!< Subroutine for the variance advection, likely will remove once numerical mixing is sorted out
-subroutine variance_advection(G, GV, Tr, h, h_diag, dt_trans, Idt, va)
-
-  type(ocean_grid_type),                        intent(in) :: G         !< Ocean grid structure
-  type(verticalGrid_type),                      intent(in) :: GV        !< Ocean vertical grid structure
-  type(tracer_type),                            intent(in) :: Tr        !< Pointer to the tracer regsitry
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h         !< Updated thicknesses [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h_diag    !< Layer thicknesses prior to
-                                                                        !! dynamics [H ~> m or kg m-2]
-  real,                                         intent(in) :: dt_trans  !< The transport time interval [T ~> s]
-  real,                                         intent(in) :: Idt       !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: va        !< Thickness weighted variance advection
-                                                                        !! [CU2 H T-1 ~> conc2 m s-1]
-
-  call thickness_weighted_variance_advection(G, GV, Tr, h, h_diag, dt_trans, Idt, va)
-
-end subroutine variance_advection
-
-!< Subroutine for the horizontal variance flux, likely will remove once numerical mixing is sorted out
-subroutine variance_flux(G, GV, Tr, Idt, uhtr, vhtr, vf)
-
-  type(ocean_grid_type),                        intent(in) :: G     !< Ocean grid structure
-  type(verticalGrid_type),                      intent(in) :: GV    !< Ocean vertical grid structure
-  type(tracer_type),                            intent(in) :: Tr    !< Pointer to the tracer regsitry
-  real,                                         intent(in) :: Idt   !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)),   intent(in) :: uhtr  !< Accumulated zonal thickness fluxes
-                                                                    !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),   intent(in) :: vhtr  !< Accumulated meridional thickness fluxes
-                                                                    !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: vf    !< Horizontal thickness weighted variance flux
-                                                                    !! [CU2 H T-1 ~> conc2 m s-1]
-  ! Try with local variables
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
-
-  x_upwind(:,:,:) = 0.
-  y_upwind(:,:,:) = 0.
-
-  call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, vf)
-  call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, vf)
-
-end subroutine variance_flux
 
 !< Subroutine to calculate the thickness weighted variance advection over the transport timestep.
 subroutine thickness_weighted_variance_advection(G, GV, Tr, h, h_diag, dt, Idt, res)
@@ -233,52 +190,5 @@ subroutine meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
   enddo ; enddo ; enddo
 
 end subroutine meridional_upwind_values
-
-! Subroutine to construct a MWE that demonstrates the hack that I have above where I have the `uhtr` variable
-! indexed one value higher than `TR%ad_x`. I should then be able to compare this output to the equivalent
-! saved variables and demonstrate that the index online and offline does not seem to match. Or in doing this I will
-! find the error in my ways!
-subroutine east_west_upoints(uhtr, G, GV, uhtr_eu, uhtr_wu)
-
-  type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
-  type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
-  real,  dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(in) :: uhtr !< the variable to save the east faces of
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: uhtr_eu !< The east u point value of `var`
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: uhtr_wu !< The west u point value of `var`
-
-  !< Local variables
-  integer :: is, ie, js, je, nz  !< Grid cell centre indexes
-  integer :: i, j, k         !< Counters
-
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
-
-  do k=1,nz ;  do j=js,je ; do i=is,ie
-    uhtr_wu(i,j,k) = uhtr(I-1,j,k)
-    uhtr_eu(i,j,k) = uhtr(I,j,k)
-  enddo ; enddo; enddo
-
-end subroutine east_west_upoints
-
-subroutine Tr_east_west_upoints(Tr, G, nz, adx_eu, adx_wu)
-
-  type(tracer_type),     intent(in) :: Tr               !< Tracer
-  type(ocean_grid_type), intent(in) :: G          !< Ocean grid structure for indexes
-  integer,               intent(in) :: nz         !< number of vertical levels
-
-  real,                  intent(inout) :: adx_eu(:,:,:) !< The east u point value of `var`
-  real,                  intent(inout) :: adx_wu(:,:,:) !< The west u point value of `var`
-
-  !< Local variables
-  integer :: is, ie, js, je  !< Grid cell centre indexes
-  integer :: i, j, k         !< Counters
-
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
-
-  do k=1,nz ;  do j=js,je ; do i=is,ie
-    adx_wu(i,j,k) = Tr%ad_x(I-1,j,k)
-    adx_eu(i,j,k) = Tr%ad_x(I,j,k)
-  enddo ; enddo; enddo
-
-end subroutine Tr_east_west_upoints
 
 end module MOM_tracer_numerical_mixing
