@@ -20,7 +20,7 @@ subroutine numerical_mixing(G, GV, Tr, h, h_diag, dt_trans, Idt, uhtr, vhtr, nm)
   type(ocean_grid_type),                       intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                     intent(in) :: GV        !< Ocean vertical grid structure
   type(tracer_type),                           intent(in) :: Tr        !< Pointer to the tracer regsitry
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in) :: h         !< Updated layer  thicknesses [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in) :: h         !< Updated layer thicknesses [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in) :: h_diag    !< Layer thicknesses prior to
                                                                        !! dynamics [H ~> m or kg m-2]
   real,                                        intent(in) :: dt_trans  !< The transport time interval [T ~> s]
@@ -128,11 +128,11 @@ subroutine thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind
   type(verticalGrid_type),                      intent(in) :: GV        !< Ocean vertical grid structure
   type(tracer_type),                            intent(in) :: Tr        !< Pointer to the tracer registry
   real,dimension(SZIB_(G),SZJ_(G),SZK_(GV)),    intent(in) :: uhtr      !< Accumulated zonal thickness fluxes
-                                                                       !! used to advect tracers [H L2 ~> m3 or kg]
+                                                                        !! used to advect tracers [H L2 ~> m3 or kg]
   real,                                         intent(in) :: Idt       !< Inverse time interval [T-1 ~> s-1]
   real,dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: x_upwind  !< Zonal upwind tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: res       !< Array to store result in
-                                                                       !![CU2 H T-1 ~> conc2 m s-1]
+                                                                        !![CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
@@ -144,11 +144,7 @@ subroutine thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind
   call zonal_upwind_values(G, GV, Tr, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    ! east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I+1,j,k)) * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
-    ! west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I,j,k))   * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
-    ! res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
-    ! This code passes the thickness dimensional test but does not accurately calculate numerical mixing
-    east = (2 * (Tr%ad_x(I,j,k)*x_upwind(I,j,k)))     - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)*x_upwind(I,j,k)))
+    east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
     west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
   enddo ; enddo; enddo
@@ -205,11 +201,7 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_u
   call meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
 
   do k=1,nz ; do j=js,je ; do i=is,ie
-    ! north = (2 * (Tr%ad_y(i,J,k)  * y_upwind(i,J,k)))   - ((Idt*vhtr(i,J+1,k)) * (y_upwind(i,J,k)  **2))
-    ! south = (2 * (Tr%ad_y(i,J-1,k)* y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J-1,k)**2))
-    ! res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
-    ! This code passes the thickness dimensional test but is not correct for the numerical mixing diagnostic
-    north = (2 * (Tr%ad_y(i,J,k)*y_upwind(i,J,k)))     - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)*y_upwind(i,J,k)))
+    north = (2 * (Tr%ad_y(i,J,k)  *y_upwind(i,J,k)))   - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
     south = (2 * (Tr%ad_y(i,J-1,k)*y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J-1,k)) * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
     res(i,j,k) = res(i,j,k) + ((north - south) * G%IareaT(i,j))
   enddo ; enddo ; enddo
