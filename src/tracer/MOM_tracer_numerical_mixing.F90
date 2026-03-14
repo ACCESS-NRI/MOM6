@@ -1,7 +1,7 @@
 !> Functions and routines involved in calculating numerical mixing of tracers due to advection schemes.
 module MOM_tracer_numerical_mixing
 
-use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
+! use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
 use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
