@@ -15,12 +15,12 @@ public numerical_mixing
 contains
 
 !< Calculate the spurious ``numerical'' mixing of tracer due to advection schemes.
-subroutine numerical_mixing(G, GV, Tr, diag_prev, h, dt_trans, Idt, uhtr, vhtr, nm)
+subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
 
   type(ocean_grid_type),                        intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                      intent(in) :: GV        !< Ocean vertical grid structure
   type(tracer_type),                            intent(in) :: Tr        !< Pointer to the tracer regsitry
-  type(diag_grid_storage),                      intent(in) :: diag_prev !< Diagnostic grids from previous timestep
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h_diag    !< Previous thicknesses [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h         !< Updated layer thicknesses [H ~> m or kg m-2]
   real,                                         intent(in) :: dt_trans  !< The transport time interval [T ~> s]
   real,                                         intent(in) :: Idt       !< Inverse time interval [T-1 ~> s-1]
@@ -38,19 +38,19 @@ subroutine numerical_mixing(G, GV, Tr, diag_prev, h, dt_trans, Idt, uhtr, vhtr, 
   x_upwind(:,:,:) = 0.
   y_upwind(:,:,:) = 0.
 
-  call thickness_weighted_variance_advection(G, GV, Tr, diag_prev, h, dt_trans, Idt, nm)
+  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
   call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, nm)
   call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
 
 !< Subroutine to calculate the thickness weighted variance advection over the transport timestep.
-subroutine thickness_weighted_variance_advection(G, GV, Tr, diag_prev, h, dt, Idt, res)
+subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, res)
 
   type(ocean_grid_type),                        intent(in) :: G          !< Ocean grid structure
   type(verticalGrid_type),                      intent(in) :: GV         !< Ocean vertical grid structure
   type(tracer_type),                            intent(in) :: Tr         !< Pointer to the tracer registry
-  type(diag_grid_storage),                      intent(in) :: diag_prev  !< Diagnostic grids from previous timestep
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h_diag     !< Previous thicknesses [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h          !< Updated thicknesses [H ~> m or kg m-2]
   real,                                         intent(in) :: dt         !< Transport time interval [T ~> s]
   real,                                         intent(in) :: Idt        !< Inverse time interval [T-1 ~> s-1]
@@ -66,7 +66,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, diag_prev, h, dt, Id
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   do k=1,nz ; do j=js,je ; do i=is,ie
-    h_prev = diag_prev%h_state(i,j,k)
+    h_prev = h_diag(i,j,k)
     Ihadv = 1 / h(i,j,k)
     C_prev = Tr%t_prev(i,j,k)
     Cadv = h_prev * C_prev + dt * Tr%advection_xy(i,j,k)

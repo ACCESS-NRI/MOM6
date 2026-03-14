@@ -850,7 +850,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, diag_prev, h_diag, diag
 
     if (Tr%id_numerical_mixing > 0) then
       nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, diag_prev, h, dt_trans, Idt, uhtr, vhtr, nm)
+      call numerical_mixing(G, GV, Tr, h, h_diag, dt_trans, Idt, uhtr, vhtr, nm)
       call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=h_diag)
     endif
 
