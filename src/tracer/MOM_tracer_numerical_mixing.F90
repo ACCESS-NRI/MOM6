@@ -98,8 +98,10 @@ subroutine thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind
   call zonal_upwind_values(G, GV, Tr, uhtr, x_upwind)
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   !- ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
-    west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) !- ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
+    ! east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
+    ! west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
+    east = - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
+    west = - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     res(i,j,k) = res(i,j,k) + ((east - west) * G%IareaT(i,j))
   enddo ; enddo; enddo
 
