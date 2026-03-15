@@ -1,7 +1,6 @@
 !> Functions and routines involved in calculating numerical mixing of tracers due to advection schemes.
 module MOM_tracer_numerical_mixing
 
-! use MOM_diag_mediator, only : diag_ctrl, diag_grid_storage
 use MOM_grid,          only : ocean_grid_type
 use MOM_tracer_types,  only : tracer_type
 use MOM_verticalGrid,  only : verticalGrid_type
@@ -39,8 +38,8 @@ subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
   y_upwind(:,:,:) = 0.
 
   call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
-  call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, nm)
-  call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
+  ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, nm)
+  ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
 
 end subroutine numerical_mixing
 
