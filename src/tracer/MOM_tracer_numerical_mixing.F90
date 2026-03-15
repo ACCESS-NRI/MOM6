@@ -60,17 +60,17 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
   integer :: i, j, k             !< Counters
-  real :: Ihadv                  !< Inverse updated thickness [H-1 ~> m-1]
+  real :: Ih                     !< Inverse updated thickness [H-1 ~> m-1]
   real :: ht_prev                !< Thickness weighted tracer prior to dynamics [CU H ~> conc m]
-  real :: t_adv                  !< Thickness weighted tracer after lateral advection [CU H ~> conc m]
+  real :: ht_adv                 !< Thickness weighted tracer after lateral advection [CU H ~> conc m]
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   do k=1,nz ; do j=js,je ; do i=is,ie
-    Ihadv = 1 / h(i,j,k)
+    Ih = 1 / h(i,j,k)
     ht_prev = h_diag(i,j,k) * Tr%t_prev(i,j,k)
-    Cadv = ht_prev + dt * Tr%advection_xy(i,j,k)
-    res(i,j,k) = ( (Ihadv * Cadv**2) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
+    ht_adv = ht_prev + dt * Tr%advection_xy(i,j,k)
+    res(i,j,k) = ( (Ih * ht_adv**2) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_advection
