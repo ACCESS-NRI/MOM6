@@ -91,7 +91,7 @@ subroutine thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
   integer :: i, j, k             !< Counters
-  real :: east, west             !< East and West for zonal derivative [CU2 H T-1 ~> conc2 m s-1]
+  real :: east, west             !< East and west faces of h point
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -149,7 +149,7 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_u
   !< Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
   integer :: i, j, k             !< Counters
-  real :: north, south           !< North and South positions for meridional derivative
+  real :: north, south           !< North and south faces of h point
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
