@@ -14,6 +14,7 @@ use MOM_debugging,     only : hchksum
 use MOM_diag_mediator, only : diag_ctrl, register_diag_field, post_data, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_grid_storage
 use MOM_diag_mediator, only : diag_copy_storage_to_diag, diag_save_grids, diag_restore_grids
+use MOM_domains,       only : pass_var
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, MOM_mesg, is_root_pe
 use MOM_file_parser,   only : get_param, log_version, param_file_type
 use MOM_hor_index,     only : hor_index_type
@@ -741,6 +742,7 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
       call post_data(Tr%id_tendency, work3d, diag, alt_h=diag_prev%h_state)
     endif
     if (Tr%id_numerical_mixing > 0) then
+      call pass_var(Tr%t, G%Domain, halo=2)
       do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
         tr%t_prev(i,j,k) =  Tr%t(i,j,k)
       enddo ; enddo ; enddo
