@@ -184,7 +184,7 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, res
   integer :: i, j, k                                      !< Counters
   real :: north, south                                    !< North and south faces of h point
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind  !< Meridional upwind values for tracer [CU ~> conc]
- 
+
   y_upwind(:,:,:) = 0.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
