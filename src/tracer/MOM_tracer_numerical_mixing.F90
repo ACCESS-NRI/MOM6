@@ -30,17 +30,18 @@ subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: nm        !< Numerical mixing diagnostic
                                                                         !! [CU2 H T-1 ~> conc2 m s-1]
 
-  ! Upwind variables
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
-
-  x_upwind(:,:,:) = 0.
-  y_upwind(:,:,:) = 0.
+  ! ! Upwind variables
+  ! real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
+  ! real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
+  !
+  ! x_upwind(:,:,:) = 0.
+  ! y_upwind(:,:,:) = 0.
 
   call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
   ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, nm)
   ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
-  call thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, nm)
+  ! call thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, nm)
+  call thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, nm)
 
 end subroutine numerical_mixing
 
@@ -75,7 +76,8 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
 
 end subroutine thickness_weighted_variance_advection
 
-subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, res)
+! subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, res)
+subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, res)
 
   type(ocean_grid_type),                         intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                       intent(in) :: GV        !< Ocean vertical grid structure
@@ -85,9 +87,9 @@ subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Id
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),    intent(in) :: vhtr      !< Accumulated meridional thickness fluxes
                                                                          !! used to advect tracers [H L2 ~> m3 or kg]
   real,                                          intent(in) :: Idt       !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: x_upwind  !< Zonal upwind tracer [CU ~> conc]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: y_upwind  !< Meridional upwind tracer values
-                                                                         !! [CU ~> conc]
+  ! real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: x_upwind  !< Zonal upwind tracer [CU ~> conc]
+  ! real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: y_upwind  !< Meridional upwind tracer values
+  !                                                                        !! [CU ~> conc]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res       !< Array to store result in
                                                                          !![CU2 H T-1 ~> conc2 m s-1]
 
@@ -95,6 +97,11 @@ subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Id
   integer :: is, ie, js, je, nz     !< Grid cell centre and layer indexes
   integer :: i, j, k                !< Counters
   real :: east, west, north, south  !< North and south faces of h point
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind ! zonal upwind values for tracer [CU ~> conc]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind ! meridional upwind values for tracer [CU ~> conc]
+
+  x_upwind(:,:,:) = 0.
+  y_upwind(:,:,:) = 0.
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -102,8 +109,8 @@ subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Id
   call meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
 
   do k=1,nz ;  do j=js,je ; do i=is,ie
-    east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
-    west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
+     east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
+     west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     north = (2 * (Tr%ad_y(i,J,k)  *y_upwind(i,J,k)))   - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
     south = (2 * (Tr%ad_y(i,J-1,k)*y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J-1,k)) * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
     res(i,j,k) = res(i,j,k) + (((east - west) + (north - south)) * G%IareaT(i,j))
