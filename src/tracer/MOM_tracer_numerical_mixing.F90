@@ -75,7 +75,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
 
 end subroutine thickness_weighted_variance_advection
 
-subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, nm)
+subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, res)
 
   type(ocean_grid_type),                         intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                       intent(in) :: GV        !< Ocean vertical grid structure
@@ -88,7 +88,7 @@ subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Id
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: x_upwind  !< Zonal upwind tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: y_upwind  !< Meridional upwind tracer values
                                                                          !! [CU ~> conc]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: nm        !< Array to store result in
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res       !< Array to store result in
                                                                          !![CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
