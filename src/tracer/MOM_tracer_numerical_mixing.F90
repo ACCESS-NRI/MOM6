@@ -40,8 +40,8 @@ subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
   call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
   ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, x_upwind, nm)
   ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, y_upwind, nm)
-  ! call thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, nm)
-  call thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, nm)
+  ! call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, nm)
+  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, nm)
 
 end subroutine numerical_mixing
 
@@ -77,7 +77,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
 end subroutine thickness_weighted_variance_advection
 
 ! subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, x_upwind, y_upwind, res)
-subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Idt, res)
+subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, res)
 
   type(ocean_grid_type),                         intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                       intent(in) :: GV        !< Ocean vertical grid structure
@@ -116,7 +116,7 @@ subroutine thickness_weighted_variance_flux_divergance(G, Gv, Tr, uhtr, vhtr, Id
     res(i,j,k) = res(i,j,k) + (((east - west) + (north - south)) * G%IareaT(i,j))
   enddo ; enddo; enddo
 
-end subroutine thickness_weighted_variance_flux_divergance
+end subroutine thickness_weighted_variance_flux_divergence
 
 !< Subroutine to calculate the thickness weigthed zonal variance flux. The spatial derivatives are calucated
 !! from upwind values.
