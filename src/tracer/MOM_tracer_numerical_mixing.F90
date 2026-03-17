@@ -31,9 +31,9 @@ subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
                                                                         !! [CU2 H T-1 ~> conc2 m s-1]
 
   call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
-  call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, nm)
-  call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, nm)
-  ! call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, nm)
+  ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, nm)
+  ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, nm)
+  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, nm)
 
 end subroutine numerical_mixing
 
@@ -176,7 +176,7 @@ subroutine thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, res
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),    intent(in) :: vhtr  !< Accumulated meridional thickness fluxes
                                                                      !! used to advect tracers [H L2 ~> m3 or kg]
   real,                                          intent(in) :: Idt   !< Inverse timestep [T-1 ~> S-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res   !< Array to store result in 
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res   !< Array to store result in
                                                                      !![CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
