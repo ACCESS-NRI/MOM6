@@ -9,12 +9,12 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public numerical_mixing
+public advection_scheme_variance_production
 
 contains
 
-!< Calculate the spurious ``numerical'' mixing of tracer due to advection schemes.
-subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
+!< Calculate the spurious variance production of tracer `Tr` due to the advection schemes.
+subroutine advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, asvp)
 
   type(ocean_grid_type),                        intent(in) :: G         !< Ocean grid structure
   type(verticalGrid_type),                      intent(in) :: GV        !< Ocean vertical grid structure
@@ -27,15 +27,15 @@ subroutine numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
                                                                         !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),   intent(in) :: vhtr      !< Accumulated meridional thickness fluxes
                                                                         !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: nm        !< Numerical mixing diagnostic
-                                                                        !! [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp      !< Advection scheme varianve production
+                                                                        !! diagnostic [CU2 H T-1 ~> conc2 m s-1]
 
-  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, nm)
-  ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, nm)
-  ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, nm)
-  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, nm)
+  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
+  ! call thickness_weighted_zonal_variance_flux(G, GV, Tr, uhtr, Idt, asvp)
+  ! call thickness_weighted_meridional_variance_flux(G, GV, Tr, vhtr, Idt, asvp)
+  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
 
-end subroutine numerical_mixing
+end subroutine advection_scheme_variance_production
 
 !< Subroutine to calculate the thickness weighted variance advection over the transport timestep.
 subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, res)

@@ -120,7 +120,7 @@ type, public :: tracer_type
   integer :: id_tr_vardec = -1
   integer :: id_zint = -1, id_zint_100m = -1, id_surf = -1
   integer :: id_net_surfflux = -1, id_NLT_tendency = -1, id_NLT_budget = -1
-  integer :: id_numerical_mixing = -1
+  integer :: id_advection_scheme_variance_production = -1
   !>@}
 end type tracer_type
 
