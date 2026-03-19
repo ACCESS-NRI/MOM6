@@ -26,7 +26,7 @@ use MOM_time_manager,  only : time_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_tracer_types,  only : tracer_type, tracer_registry_type
-use MOM_tracer_numerical_mixing,  only : numerical_mixing
+use MOM_tracer_numerical_mixing,  only : advection_scheme_variance_production
 
 implicit none ; private
 
@@ -384,8 +384,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           "flux from the horizontal boundary diffusion scheme", trim(flux_units), &
           v_extensive=.true., &
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
-      Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
-          diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
+      Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
+          trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
+          "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
           trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
@@ -412,8 +413,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           "Horizontal Boundary Diffusive Meridional Flux of "//trim(flux_longname), &
           flux_units, v_extensive=.true., conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T, &
           x_cell_method='sum')
-      Tr%id_numerical_mixing = register_diag_field("ocean_model", trim(shortnm)//"_numerical_mixing", &
-          diag%axesTL, Time, "Spurious mixing of "//trim(shortnm)//" due to advection", &
+      Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
+          trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
+          "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
           trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     endif
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
@@ -426,8 +428,10 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         trim(units) // " m")
     Tr%id_surf = register_diag_field("ocean_model", trim(shortnm)//"_SURF", &
         diag%axesT1, Time, "Surface values of "// trim(longname), trim(units))
-    if ((Tr%id_adx > 0) .or. (Tr%id_numerical_mixing > 0)) call safe_alloc_ptr(Tr%ad_x,IsdB,IedB,jsd,jed,nz)
-    if ((Tr%id_ady > 0) .or. (Tr%id_numerical_mixing > 0)) call safe_alloc_ptr(Tr%ad_y,isd,ied,JsdB,JedB,nz)
+    if ((Tr%id_adx > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+      call safe_alloc_ptr(Tr%ad_x,IsdB,IedB,jsd,jed,nz)
+    if ((Tr%id_ady > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+      call safe_alloc_ptr(Tr%ad_y,isd,ied,JsdB,JedB,nz)
     if (Tr%id_dfx > 0) call safe_alloc_ptr(Tr%df_x,IsdB,IedB,jsd,jed,nz)
     if (Tr%id_dfy > 0) call safe_alloc_ptr(Tr%df_y,isd,ied,JsdB,JedB,nz)
     if (Tr%id_hbd_dfx > 0) call safe_alloc_ptr(Tr%hbd_dfx,IsdB,IedB,jsd,jed,nz)
@@ -476,7 +480,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         diag%axesT1, Time, &
         'Vertical sum of horizontal convergence of residual mean advective fluxes of '//&
         trim(lowercase(flux_longname)), conv_units, conversion=Tr%conv_scale*US%s_to_T)
-    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0) .or. (Tr%id_numerical_mixing > 0)) &
+    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
       call safe_alloc_ptr(Tr%advection_xy,isd,ied,jsd,jed,nz)
 
     Tr%id_tendency = register_diag_field('ocean_model', trim(shortnm)//'_tendency', &
@@ -484,7 +488,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         'Net time tendency for '//trim(lowercase(longname)), &
         trim(units)//' s-1', conversion=Tr%conc_scale*US%s_to_T)
 
-    if ((Tr%id_tendency > 0) .or. (Tr%id_numerical_mixing > 0)) then
+    if ((Tr%id_tendency > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) then
       call safe_alloc_ptr(Tr%t_prev,isd,ied,jsd,jed,nz)
       do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
         Tr%t_prev(i,j,k) = Tr%t(i,j,k)
@@ -741,7 +745,7 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
       enddo ; enddo ; enddo
       call post_data(Tr%id_tendency, work3d, diag, alt_h=diag_prev%h_state)
     endif
-    if (Tr%id_numerical_mixing > 0) then
+    if (Tr%id_advection_scheme_variance_production > 0) then
       call pass_var(Tr%t, G%Domain, halo=2)
       do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
         tr%t_prev(i,j,k) =  Tr%t(i,j,k)
@@ -792,7 +796,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: nm ! Numerical mixing of a tracer [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme varianve production of a
+                                                      ! tracer [CU2 H T-1 ~> conc2 m s-1]
   real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
                           ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
@@ -849,10 +854,10 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
       call post_data(Tr%id_adv_xy_2d, work2d, diag)
     endif
 
-    if (Tr%id_numerical_mixing > 0) then
-      nm(:,:,:) = 0.
-      call numerical_mixing(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, nm)
-      call post_data(Tr%id_numerical_mixing, nm, diag, alt_h=h_diag)
+    if (Tr%id_advection_scheme_variance_production > 0) then
+      asvp(:,:,:) = 0.
+      call advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, asvp)
+      call post_data(Tr%id_advection_scheme_variance_production, asvp, diag, alt_h=h_diag)
     endif
 
     ! A few diagnostics introduce with MARBL driver
