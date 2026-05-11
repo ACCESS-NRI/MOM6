@@ -493,6 +493,18 @@ subroutine neutral_diffusion_calc_coeffs(G, GV, US, h, T, S, visc, CS, p_surf)
         if (CS%ref_pres<0) ref_pres(:) = CS%Pint(:,j,k)
         call calculate_density_derivs(CS%Tint(:,j,k), CS%Sint(:,j,k), ref_pres, CS%dRdT(:,j,k), &
                                       CS%dRdS(:,j,k), CS%EOS, EOSdom)
+        ! DEBUG: detect NaN in EOS derivatives; print T/S/P and layer thickness to
+        ! confirm whether the affected interface belongs to a collapsed sub-bottom layer.
+        do i = G%isc-1, G%iec+1
+          if (CS%dRdT(i,j,k) /= CS%dRdT(i,j,k) .or. CS%dRdS(i,j,k) /= CS%dRdS(i,j,k)) then
+            write(stderr,'(A,3I5,A,5ES16.6)') 'DEBUG NaN dRdT/dRdS i,j,k=', i, j, k, &
+                ' Tint,Sint,Pint,dRdT,dRdS=', CS%Tint(i,j,k), CS%Sint(i,j,k), CS%Pint(i,j,k), &
+                CS%dRdT(i,j,k), CS%dRdS(i,j,k)
+            write(stderr,'(A,3I5,A,4ES16.6)') 'DEBUG layer T/S/h i,j,k=', i, j, k, &
+                ' T(k-1),S(k-1),h(k-1),h(k)=', T(i,j,max(k-1,1)), S(i,j,max(k-1,1)), &
+                GV%H_to_m*h(i,j,max(k-1,1)), GV%H_to_m*h(i,j,min(k,GV%ke))
+          endif
+        enddo
       enddo
     else ! Discontinuous reconstruction
       do k = 1, GV%ke
@@ -1457,6 +1469,16 @@ subroutine find_neutral_surface_positions_continuous(nk, Pl, Tl, Sl, dRdTl, dRdS
       ! Potential density difference, rho(kl) - rho(kr) (will be positive)
       dRhoBot = 0.5 * ( ( dRdTl(klm1+1) + dRdTr(kr) ) * ( Tl(klm1+1) - Tr(kr) ) &
                       + ( dRdSl(klm1+1) + dRdSr(kr) ) * ( Sl(klm1+1) - Sr(kr) ) )
+      ! DEBUG: decompose NaN in dRhoBot (left-column path)
+      if (dRhoBot /= dRhoBot) then
+        write(stderr,'(A,2I5)') 'DEBUG NaN dRhoBot (left): klm1,kr=', klm1, kr
+        write(stderr,'(A,4ES16.6)') '  dRdTl(klm1+1),dRdTr(kr),Tl(klm1+1),Tr(kr)=', &
+            dRdTl(klm1+1), dRdTr(kr), Tl(klm1+1), Tr(kr)
+        write(stderr,'(A,4ES16.6)') '  dRdSl(klm1+1),dRdSr(kr),Sl(klm1+1),Sr(kr)=', &
+            dRdSl(klm1+1), dRdSr(kr), Sl(klm1+1), Sr(kr)
+        write(stderr,'(A,4ES16.6)') '  Pl(klm1),Pl(klm1+1),Pr(kr),Pr(kr+1)=', &
+            Pl(klm1), Pl(klm1+1), Pr(kr), Pr(min(kr+1,nk+1))
+      endif
 
       ! Because we are looking left, the right surface, kr, is lighter than klm1+1 and should be denser than klm1
       ! unless we are still at the top of the left column (kl=1)
@@ -1500,6 +1522,16 @@ subroutine find_neutral_surface_positions_continuous(nk, Pl, Tl, Sl, dRdTl, dRdS
       ! Potential density difference, rho(kr) - rho(kl) (will be positive)
       dRhoBot = 0.5 * ( ( dRdTr(krm1+1) + dRdTl(kl) ) * ( Tr(krm1+1) - Tl(kl) ) + &
                         ( dRdSr(krm1+1) + dRdSl(kl) ) * ( Sr(krm1+1) - Sl(kl) ) )
+      ! DEBUG: decompose NaN in dRhoBot (right-column path)
+      if (dRhoBot /= dRhoBot) then
+        write(stderr,'(A,2I5)') 'DEBUG NaN dRhoBot (right): krm1,kl=', krm1, kl
+        write(stderr,'(A,4ES16.6)') '  dRdTr(krm1+1),dRdTl(kl),Tr(krm1+1),Tl(kl)=', &
+            dRdTr(krm1+1), dRdTl(kl), Tr(krm1+1), Tl(kl)
+        write(stderr,'(A,4ES16.6)') '  dRdSr(krm1+1),dRdSl(kl),Sr(krm1+1),Sl(kl)=', &
+            dRdSr(krm1+1), dRdSl(kl), Sr(krm1+1), Sl(kl)
+        write(stderr,'(A,4ES16.6)') '  Pr(krm1),Pr(krm1+1),Pl(kl),Pl(kl+1)=', &
+            Pr(krm1), Pr(krm1+1), Pl(kl), Pl(min(kl+1,nk+1))
+      endif
 
       ! Because we are looking right, the left surface, kl, is lighter than krm1+1 and should be denser than krm1
       ! unless we are still at the top of the right column (kr=1)
