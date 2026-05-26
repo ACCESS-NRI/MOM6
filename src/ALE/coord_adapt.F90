@@ -180,8 +180,9 @@ end subroutine end_coord_adapt
 
 !> This subtroutine can be used to set the parameters for coord_adapt module
 subroutine set_adapt_params(CS, alpha_rho, alpha_p, adaptivity_timescale, use_mean_h, &
-     use_twin_gradient, slope_cutoff, min_smooth, use_physical_slope, restoring_timescale, do_restore_mean, &
-     adjustment_scale)
+                            use_twin_gradient, slope_cutoff, min_smooth, use_physical_slope, &
+                            restoring_timescale, do_restore_mean, &
+                            adjustment_scale)
 
   type(adapt_CS),    pointer    :: CS  !< The control structure for this module
   real,    optional, intent(in) :: alpha_rho !< Density adaptivity coefficient
@@ -236,7 +237,7 @@ end function get_adapt_diag_CS
 !! be calculated in the i- or j-direction, depending on the
 !! value of di/dj.
 subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
-     di, dj, dk_sig_int, alpha, beta, Idx, mask, hd_sig, hd_sig_phys)
+                       di, dj, dk_sig_int, alpha, beta, Idx, mask, hd_sig, hd_sig_phys)
   type(ocean_grid_type), intent(in) :: G
   type(verticalGrid_type), intent(in) :: GV
   type(adapt_CS), intent(in) :: CS
@@ -256,9 +257,9 @@ subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
 
   if (CS%use_twin_gradient) then
     d_sig_up = alpha * (tv%t(i+di,j+dj,k-1) - tv%t(i,j,k-1)) &
-         + beta * (tv%s(i+di,j+dj,k-1) - tv%s(i,j,k-1))
+               + beta * (tv%s(i+di,j+dj,k-1) - tv%s(i,j,k-1))
     d_sig_dn = alpha * (tv%t(i+di,j+dj,k) - tv%t(i,j,k)) &
-         + beta * (tv%s(i+di,j+dj,k) - tv%s(i,j,k))
+               + beta * (tv%s(i+di,j+dj,k) - tv%s(i,j,k))
 
     if (d_sig_up * d_sig_dn <= 0.) then
       d_sig = 0.
@@ -276,7 +277,7 @@ subroutine calc_derivs(G, GV, CS, US, h, z_int, tv, i, j, k, &
   end if
 
   if (CS%use_mean_h) &
-       h_interp = 0.25 * ((h(i,j,k-1) + h(i+di,j,k)) + (h(i,j,k) + h(i+di,j,k-1)))
+    h_interp = 0.25 * ((h(i,j,k-1) + h(i+di,j,k)) + (h(i,j,k) + h(i+di,j,k-1)))
 
   hd_sig = h_interp * d_sig * Idx * H_to_L * mask
   hd_sig_phys = hd_sig - Idx * dk_sig * (z_int(i+di,j+dj,K) - z_int(i,j,K)) * H_to_L * mask
@@ -384,11 +385,11 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     ! calculate geometric mean of thicknesses on interfaces
     ! we only need to do this in our own domain because this
     ! is a global sum
-    z_new(:,:,:) = 0. ;  h_int(:,:,:) = 0.
+    z_new(:,:,:) = 0. ; h_int(:,:,:) = 0.
     do j = G%jsc,G%jec
       do i = G%isc,G%iec
         h_int(i,j,2:nz) = (h(i,j,2:nz) * h(i,j,1:nz-1)) / &
-             (h(i,j,2:nz) + h(i,j,1:nz-1) + GV%H_subroundoff)
+                          (h(i,j,2:nz) + h(i,j,1:nz-1) + GV%H_subroundoff)
         ! we don't really want to volume-weight this, we just want to discount vanished layers
         ! this way, we won't bias towards thick layers
         h_int(i,j,2:nz) = max(GV%H_to_m * h_int(i,j,2:nz), 1.0)
@@ -457,510 +458,523 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
     allocate(weight_adapt_i(SZIB_(G),SZJ_(G)), weight_smooth_i(SZIB_(G),SZJ_(G)))
     allocate(weight_adapt_j(SZI_(G),SZJB_(G)), weight_smooth_j(SZI_(G),SZJB_(G)))
 
-  !$omp do
-  do K = 2,nz
-    dz_s_i(:,:) = 0. ; dz_s_j(:,:) = 0.
-    dz_p_i(:,:) = 0. ; dz_p_j(:,:) = 0.
-    dz_i(:,:) = 0. ; dz_j(:,:) = 0.
-    weight_adapt_i(:,:) = 0. ; weight_smooth_i(:,:) = 0.
-    weight_adapt_j(:,:) = 0. ; weight_smooth_j(:,:) = 0.
+    !$omp do
+    do K = 2,nz
+      dz_s_i(:,:) = 0. ; dz_s_j(:,:) = 0.
+      dz_p_i(:,:) = 0. ; dz_p_j(:,:) = 0.
+      dz_i(:,:) = 0. ; dz_j(:,:) = 0.
+      weight_adapt_i(:,:) = 0. ; weight_smooth_i(:,:) = 0.
+      weight_adapt_j(:,:) = 0. ; weight_smooth_j(:,:) = 0.
 
-    do j = G%jsc-2,G%jec+2
-      do i = G%isc-2,G%iec+2
-        t_int(i,j) = ( &
-             tv%t(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
-             tv%t(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
-             (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
-        s_int(i,j) = ( &
-             tv%s(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
-             tv%s(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
-             (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
+      do j = G%jsc-2,G%jec+2
+        do i = G%isc-2,G%iec+2
+          t_int(i,j) = ( &
+                       tv%t(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
+                       tv%t(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
+                       (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
+          s_int(i,j) = ( &
+                       tv%s(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
+                       tv%s(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
+                       (h(i,j,k-1) + h(i,j,k) + 2*GV%H_subroundoff)
+        enddo
+
+        call calculate_density_derivs(t_int(:,j), s_int(:,j), -z_int(:,j,K) * GV%H_to_Pa, &
+                                      alpha_int(:,j,K), beta_int(:,j,K), &
+                                      G%isc-2, G%iec+2 - (G%isc-2) + 1, tv%eqn_of_state)
+
+        do i = G%isc-2,G%iec+2
+          dk_sig_int(i,j) = alpha_int(i,j,K) * (tv%t(i,j,k) - tv%t(i,j,k-1)) + &
+                            beta_int(i,j,K) * (tv%s(i,j,k) - tv%s(i,j,k-1))
+        enddo
       enddo
 
-      call calculate_density_derivs(t_int(:,j), s_int(:,j), -z_int(:,j,K) * GV%H_to_Pa, &
-           alpha_int(:,j,K), beta_int(:,j,K), G%isc-2, G%iec+2 - (G%isc-2) + 1, tv%eqn_of_state)
+      ! calculate horizontal derivatives on i-points
+      ! reduce I-halo 2 -> 1
+      do j = G%jsc-2,G%jec+2
+        do I = G%IscB-1,G%IecB+1
+          alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
+          beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
-      do i = G%isc-2,G%iec+2
-        dk_sig_int(i,j) = alpha_int(i,j,K) * (tv%t(i,j,k) - tv%t(i,j,k-1)) + &
-             beta_int(i,j,K) * (tv%s(i,j,k) - tv%s(i,j,k-1))
-     enddo
-    enddo
-
-    ! calculate horizontal derivatives on i-points
-    ! reduce I-halo 2 -> 1
-    do j = G%jsc-2,G%jec+2
-      do I = G%IscB-1,G%IecB+1
-        alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
-        beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
-
-        call calc_derivs(G, GV, CS, US, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
-             G%mask2dCu(I,j), hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
+          call calc_derivs(G, GV, CS, US, h, z_int, tv, I, j, k, 1, 0, dk_sig_int, alpha, beta, G%IdxCu(I,j), &
+                           G%mask2dCu(I,j), hdi_sig(I,j,K), hdi_sig_phys(I,j,K))
+        enddo
       enddo
-    enddo
 
-    ! calculate horizontal derivatives on j-points
-    ! reduce J-halo 2 -> 1
-    do J = G%JscB-1,G%JecB+1
-      do i = G%isc-2,G%iec+2
-        alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
-        beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
+      ! calculate horizontal derivatives on j-points
+      ! reduce J-halo 2 -> 1
+      do J = G%JscB-1,G%JecB+1
+        do i = G%isc-2,G%iec+2
+          alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
+          beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
 
-        call calc_derivs(G, GV, CS, US, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
-             G%mask2dCv(i,J), hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
+          call calc_derivs(G, GV, CS, US, h, z_int, tv, i, J, k, 0, 1, dk_sig_int, alpha, beta, G%IdyCv(i,J), &
+                           G%mask2dCv(i,J), hdj_sig(i,J,K), hdj_sig_phys(i,J,K))
+        enddo
       enddo
-    enddo
 
-    ! u-points
-    do j = G%jsc-1,G%jec+1
-      do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) == 0) then
-          dz_i(I,j) = 0.
-          dz_s_i(I,j) = 0.
-          dz_p_i(I,j) = 0.
-          cycle
-        endif
-
-        ! interpolate terms in the denominator onto the u-point
-        hdi_sig_u = hdi_sig(I,j,K)**2
-        hdj_sig_u = 0.25 * ((hdj_sig(i,J,K)**2 + hdj_sig(i+1,J-1,K)**2) + &
-             (hdj_sig(i+1,J,K)**2 + hdj_sig(i,J-1,K)**2))
-        dk_sig_u = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i+1,j)**2)
-
-        i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
-        if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
-          ! if gradients in all directions are exactly zero, we don't want any flux
-          dz_s_i(I,j) = 0.
-        else
-          dz_s_i(I,j) = hdi_sig(I,j,K) / sign(sqrt(i_denom), dk_sig_u)
-        end if
-
-        if (do_diag) then
-          ! DIAG: slope_u
-          if (allocated(CS%diag_CS%slope_u)) CS%diag_CS%slope_u(I,j,K) = dz_s_i(I,j)
-          ! DIAG: denom_u
-          if (allocated(CS%diag_CS%denom_u)) CS%diag_CS%denom_u(I,j,K) = sqrt(i_denom)
-        end if
-
-        ! to convert from the density gradient to the flux, flip the sign and multiply by
-        ! kappa*dt
-        dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio * L_to_H**2
-
-        dz_p_unlim = dz_s_i(I,j)
-
-        ! limit slope based on adjacent layers
-        ! dz_s_i has opposite sign to hdi_sig
-        if (dz_s_i(I,j) < 0.) then
-          ! hdi_sig positive -- left down, right up
-          dz_s_i(I,j) = max(dz_s_i(I,j), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        else
-          ! hdi_sig negative -- left up, right down
-          dz_s_i(I,j) = min(dz_s_i(I,j), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        end if
-
-        if (do_diag) then
-          ! DIAG: limiting_density
-          ! difference between the unlimited slope flux and the limited, across the participating adjacent cells
-          if (allocated(CS%diag_CS%limiting_density)) then
-            CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + (dz_s_i(I,j) - dz_p_unlim)
-            CS%diag_CS%limiting_density(i+1,j,K) = CS%diag_CS%limiting_density(i+1,j,K) + (dz_s_i(I,j) - dz_p_unlim)
-          end if
-        end if
-
-        ! we also calculate the difference in pressure (interface position)
-        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
-        dz_p_unlim = dz_p_i(I,j)
-        ! dz_p_i positive => left is further down than right
-        ! => move left up, right down
-
-        if (dz_p_i(I,j) < 0.) then
-          ! dz_p_i negative -- right up, left down
-          dz_p_i(I,j) = max(dz_p_i(I,j), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        else
-          ! dz_p_i positive -- left up, right down
-          dz_p_i(I,j) = min(dz_p_i(I,j), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        end if
-
-        if (do_diag) then
-          ! DIAG: limiting_smoothing
-          ! similar to limiting_density, but applied on the pressure (smoothing) term
-          if (allocated(CS%diag_CS%limiting_smoothing)) then
-            CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + (dz_p_i(I,j) - dz_p_unlim)
-            CS%diag_CS%limiting_smoothing(i+1,j,K) = CS%diag_CS%limiting_smoothing(i+1,j,K) + (dz_p_i(I,j) - dz_p_unlim)
-          end if
-        end if
-
-        ! calculate and diagnose along-coordinate slope
-        if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
-          slope = 1.0
-        else
-          slope = (hdi_sig_u + hdj_sig_u) / i_denom
-        endif
-
-        ! calculate physical slope
-        hdi_sig_u = hdi_sig_phys(I,j,K)**2
-        hdj_sig_u = 0.25 * ((hdj_sig_phys(i,J,K)**2 + hdj_sig_phys(i+1,J-1,K)**2) + &
-             (hdj_sig_phys(i+1,J,K)**2 + hdj_sig_phys(i,J-1,K)**2))
-        i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
-
-        if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
-          ! unstratified limit
-          phys_slope = 1.0
-        else
-          phys_slope = (hdi_sig_u + hdj_sig_u) / i_denom
-        endif
-
-        if (do_diag) then
-          ! DIAG: coord_u
-          if (allocated(CS%diag_CS%coord_u)) CS%diag_CS%coord_u(I,j,K) = slope
-          ! DIAG: phys_u
-          if (allocated(CS%diag_CS%phys_u)) CS%diag_CS%phys_u(I,j,K) = phys_slope
-        end if
-
-        ! use physical slope or not?
-        if (CS%use_physical_slope) slope = phys_slope
-
-        ! calculate weighting between density and pressure terms
-        ! by a cutoff value on the local normalised stratification
-        if (slope <= CS%slope_cutoff**2 .and. k > 2) then
-          weight = 1.0 - CS%min_smooth ; weight2 = 0.
-        else
-          weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
-        endif
-
-        ! override weights if required
-        if (CS%alpha_rho >= 0.) then
-          weight = CS%alpha_rho
-
-          if (CS%alpha_p < 0.) then
-            weight2 = 1.0 - CS%alpha_rho
-          else
-            weight2 = CS%alpha_p
+      ! u-points
+      do j = G%jsc-1,G%jec+1
+        do I = G%IscB-1,G%IecB+1
+          if (G%mask2dCu(I,j) == 0) then
+            dz_i(I,j) = 0.
+            dz_s_i(I,j) = 0.
+            dz_p_i(I,j) = 0.
+            cycle
           endif
-        else if (CS%alpha_p >= 0.) then
-          weight2 = CS%alpha_p
-          weight = 1.0 - CS%alpha_p
-        endif
 
-        weight_adapt_i(I,j) = weight
-        weight_smooth_i(I,j) = weight2
-      end do
-    end do
+          ! interpolate terms in the denominator onto the u-point
+          hdi_sig_u = hdi_sig(I,j,K)**2
+          hdj_sig_u = 0.25 * ((hdj_sig(i,J,K)**2 + hdj_sig(i+1,J-1,K)**2) + &
+                              (hdj_sig(i+1,J,K)**2 + hdj_sig(i,J-1,K)**2))
+          dk_sig_u = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i+1,j)**2)
 
-    ! v-points
-    do J = G%JscB-1,G%JecB+1
-      do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) == 0) then
-          dz_j(i,J) = 0.
-          dz_s_j(i,J) = 0.
-          dz_p_j(i,J) = 0.
-          cycle
-        endif
-
-        hdj_sig_v = hdj_sig(i,J,K)**2
-        hdi_sig_v = 0.25 * ((hdi_sig(I,j,K)**2 + hdi_sig(I-1,j+1,K)**2) + &
-             (hdi_sig(I,j+1,K)**2 + hdi_sig(I-1,j,K)**2))
-        dk_sig_v = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i,j+1)**2)
-
-        j_denom = hdj_sig_v + hdi_sig_v + dk_sig_v
-        if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
-          dz_s_j(i,J) = 0.
-        else
-          dz_s_j(i,J) = hdj_sig(i,J,K) / sign(sqrt(j_denom), dk_sig_v)
-        end if
-
-        if (do_diag) then
-          ! DIAG: slope_v
-          if (allocated(CS%diag_CS%slope_v)) CS%diag_CS%slope_v(i,J,K) = dz_s_j(i,J)
-          ! DIAG: denom_v
-          if (allocated(CS%diag_CS%denom_v)) CS%diag_CS%denom_v(i,J,K) = sqrt(j_denom)
-        end if
-
-        ! dz_s_j beforehand is unitless (ratio of densities)
-        dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio * L_to_H**2
-        ! dz_s_j is now [m2]
-
-        dz_p_unlim = dz_s_j(i,J)
-
-        ! density limiter
-        ! dz_s_j [m2]
-        if (dz_s_j(i,J) < 0.) then
-          ! hdj_sig positive -- left down, right up
-          dz_s_j(i,J) = max(dz_s_j(i,J), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        else
-          ! hdj_sig negative -- left up, right down
-          dz_s_j(i,J) = min(dz_s_j(i,J), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        end if
-
-        if (do_diag) then
-          ! DIAG: limiting_density
-          ! see u-point loop for explanation
-          if (allocated(CS%diag_CS%limiting_density)) then
-            CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + (dz_s_j(i,J) - dz_p_unlim)
-            CS%diag_CS%limiting_density(i,j+1,K) = CS%diag_CS%limiting_density(i,j+1,K) + (dz_s_j(i,J) - dz_p_unlim)
-          end if
-        end if
-
-        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
-        dz_p_unlim = dz_p_j(i,J)
-
-        if (dz_p_j(i,J) < 0.) then
-          dz_p_j(i,J) = max(dz_p_j(i,J), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        else
-          dz_p_j(i,J) = min(dz_p_j(i,J), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        end if
-
-        if (do_diag) then
-          ! DIAG: limiting_smoothing
-          if (allocated(CS%diag_CS%limiting_smoothing)) then
-            CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + (dz_p_j(i,J) - dz_p_unlim)
-            CS%diag_CS%limiting_smoothing(i,j+1,K) = CS%diag_CS%limiting_smoothing(i,j+1,K) + (dz_p_j(i,J) - dz_p_unlim)
-          end if
-        end if
-
-        ! diagnose along-coordinate slope
-        if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
-          slope = 1.0
-        else
-          slope = (hdi_sig_v + hdj_sig_v) / j_denom
-        endif
-
-        hdj_sig_v = hdj_sig_phys(i,J,K)**2
-        hdi_sig_v = 0.25 * ((hdi_sig_phys(I,j,K)**2 + hdi_sig_phys(I-1,j+1,K)**2) + &
-             (hdi_sig_phys(I,j+1,K)**2 + hdi_sig_phys(I-1,j,K)**2))
-        j_denom = hdi_sig_v + hdj_sig_v + dk_sig_v
-
-        if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
-          phys_slope = 1.0
-        else
-          phys_slope = (hdi_sig_v + hdj_sig_v) / j_denom
-        endif
-
-        if (do_diag) then
-          ! DIAG: coord_v
-          if (allocated(CS%diag_CS%coord_v)) CS%diag_CS%coord_v(i,J,K) = slope
-          ! DIAG: phys_v
-          if (allocated(CS%diag_CS%phys_v)) CS%diag_CS%phys_v(i,J,K) = phys_slope
-        end if
-
-        if (CS%use_physical_slope) slope = phys_slope
-
-        if (slope <= CS%slope_cutoff**2 .and. k > 2) then
-          weight = 1.0 - CS%min_smooth ; weight2 = 0.
-        else
-          weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
-        endif
-
-        ! override weights if required
-        if (CS%alpha_rho >= 0.) then
-          weight = CS%alpha_rho
-
-          if (CS%alpha_p < 0.) then
-            weight2 = 1.0 - CS%alpha_rho
+          i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
+          if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
+            ! if gradients in all directions are exactly zero, we don't want any flux
+            dz_s_i(I,j) = 0.
           else
-            weight2 = CS%alpha_p
+            dz_s_i(I,j) = hdi_sig(I,j,K) / sign(sqrt(i_denom), dk_sig_u)
+          end if
+
+          if (do_diag) then
+            ! DIAG: slope_u
+            if (allocated(CS%diag_CS%slope_u)) CS%diag_CS%slope_u(I,j,K) = dz_s_i(I,j)
+            ! DIAG: denom_u
+            if (allocated(CS%diag_CS%denom_u)) CS%diag_CS%denom_u(I,j,K) = sqrt(i_denom)
+          end if
+
+          ! to convert from the density gradient to the flux, flip the sign and multiply by
+          ! kappa*dt
+          dz_s_i(I,j) = -dz_s_i(I,j) * G%dxCu(I,j)**2 * ts_ratio * L_to_H**2
+
+          dz_p_unlim = dz_s_i(I,j)
+
+          ! limit slope based on adjacent layers
+          ! dz_s_i has opposite sign to hdi_sig
+          if (dz_s_i(I,j) < 0.) then
+            ! hdi_sig positive -- left down, right up
+            dz_s_i(I,j) = max(dz_s_i(I,j), -0.125 * min( &
+                              h(i,j,k) * G%areaT(i,j), &
+                              h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          else
+            ! hdi_sig negative -- left up, right down
+            dz_s_i(I,j) = min(dz_s_i(I,j), 0.125 * min( &
+                              h(i,j,k-1) * G%areaT(i,j), &
+                              h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          end if
+
+          if (do_diag) then
+            ! DIAG: limiting_density
+            ! difference between the unlimited slope flux and the limited, across the participating adjacent cells
+            if (allocated(CS%diag_CS%limiting_density)) then
+              CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + &
+                                                   (dz_s_i(I,j) - dz_p_unlim)
+              CS%diag_CS%limiting_density(i+1,j,K) = CS%diag_CS%limiting_density(i+1,j,K) + &
+                                                     (dz_s_i(I,j) - dz_p_unlim)
+            end if
+          end if
+
+          ! we also calculate the difference in pressure (interface position)
+          dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
+          dz_p_unlim = dz_p_i(I,j)
+          ! dz_p_i positive => left is further down than right
+          ! => move left up, right down
+
+          if (dz_p_i(I,j) < 0.) then
+            ! dz_p_i negative -- right up, left down
+            dz_p_i(I,j) = max(dz_p_i(I,j), -0.125 * min( &
+                              h(i,j,k) * G%areaT(i,j), &
+                              h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          else
+            ! dz_p_i positive -- left up, right down
+            dz_p_i(I,j) = min(dz_p_i(I,j), 0.125 * min( &
+                              h(i,j,k-1) * G%areaT(i,j), &
+                              h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          end if
+
+          if (do_diag) then
+            ! DIAG: limiting_smoothing
+            ! similar to limiting_density, but applied on the pressure (smoothing) term
+            if (allocated(CS%diag_CS%limiting_smoothing)) then
+              CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + &
+                                                     (dz_p_i(I,j) - dz_p_unlim)
+              CS%diag_CS%limiting_smoothing(i+1,j,K) = CS%diag_CS%limiting_smoothing(i+1,j,K) + &
+                                                       (dz_p_i(I,j) - dz_p_unlim)
+            end if
+          end if
+
+          ! calculate and diagnose along-coordinate slope
+          if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
+            slope = 1.0
+          else
+            slope = (hdi_sig_u + hdj_sig_u) / i_denom
           endif
-        else if (CS%alpha_p >= 0.) then
-          weight2 = CS%alpha_p
-          weight = 1.0 - CS%alpha_p
-        endif
 
-        weight_adapt_j(i,J) = weight
-        weight_smooth_j(i,J) = weight2
-      end do
-    end do
+          ! calculate physical slope
+          hdi_sig_u = hdi_sig_phys(I,j,K)**2
+          hdj_sig_u = 0.25 * ((hdj_sig_phys(i,J,K)**2 + hdj_sig_phys(i+1,J-1,K)**2) + &
+                              (hdj_sig_phys(i+1,J,K)**2 + hdj_sig_phys(i,J-1,K)**2))
+          i_denom = hdi_sig_u + hdj_sig_u + dk_sig_u
 
-    call pass_var(weight_adapt_i, G%Domain, position=EAST_FACE)
-    call pass_var(weight_smooth_i, G%Domain, position=EAST_FACE)
-    call pass_var(weight_adapt_j, G%Domain, position=NORTH_FACE)
-    call pass_var(weight_smooth_j, G%Domain, position=NORTH_FACE)
+          if (abs(i_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i+1,j) < 0.0) then
+            ! unstratified limit
+            phys_slope = 1.0
+          else
+            phys_slope = (hdi_sig_u + hdj_sig_u) / i_denom
+          endif
 
-    do j = G%jsc-1,G%jec+1
-      do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) == 0) cycle
+          if (do_diag) then
+            ! DIAG: coord_u
+            if (allocated(CS%diag_CS%coord_u)) CS%diag_CS%coord_u(I,j,K) = slope
+            ! DIAG: phys_u
+            if (allocated(CS%diag_CS%phys_u)) CS%diag_CS%phys_u(I,j,K) = phys_slope
+          end if
 
-        weight = 0 ; weight2 = 0 ; np = 0
+          ! use physical slope or not?
+          if (CS%use_physical_slope) slope = phys_slope
 
-        do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
-          ! filter point is oob or masked: don't add it to our stencil average
-          if (i+ni < G%IsdB .or. i+ni > G%IedB .or. j+nj < G%jsd .or. j+nj > G%jed .or. G%mask2dCu(I+ni,j+nj) == 0) cycle
-          weight = weight + weight_adapt_i(I+ni,j+nj)
-          weight2 = weight2 + weight_smooth_i(I+ni,j+nj)
-          np = np + 1
-        end do; end do
+          ! calculate weighting between density and pressure terms
+          ! by a cutoff value on the local normalised stratification
+          if (slope <= CS%slope_cutoff**2 .and. k > 2) then
+            weight = 1.0 - CS%min_smooth ; weight2 = 0.
+          else
+            weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
+          endif
 
-        dz_s_i(I,j) = dz_s_i(I,j) * weight / np
-        dz_p_i(I,j) = dz_p_i(I,j) * weight2 / np
+          ! override weights if required
+          if (CS%alpha_rho >= 0.) then
+            weight = CS%alpha_rho
 
-        ! combining density and pressure fluxes
-        ! and re-apply limiter -- with a full cut-off this isn't necessary
-        dz_i(I,j) = dz_s_i(I,j) + dz_p_i(I,j)
-        if (dz_i(I,j) < 0.) then
-          ! hdi_sig positive -- left down, right up
-          dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        else
-          ! hdi_sig negative -- left up, right down
-          dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        end if
-      end do
-    end do
+            if (CS%alpha_p < 0.) then
+              weight2 = 1.0 - CS%alpha_rho
+            else
+              weight2 = CS%alpha_p
+            endif
+          else if (CS%alpha_p >= 0.) then
+            weight2 = CS%alpha_p
+            weight = 1.0 - CS%alpha_p
+          endif
 
-    do J = G%JscB-1,G%JecB+1
-      do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) == 0) cycle
-
-        weight = 0 ; weight2 = 0 ; np = 0
-
-        do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
-          if (i+ni < G%isd .or. i+ni > G%ied .or. j+nj < G%JsdB .or. j+nj > G%JedB .or. G%mask2dCv(i+ni,J+nj) == 0) cycle
-          weight = weight + weight_adapt_j(i+ni,J+nj)
-          weight2 = weight2 + weight_smooth_j(i+ni,J+nj)
-          np = np + 1
-        end do; end do
-
-        dz_s_j(i,J) = dz_s_j(i,J) * weight / np
-        dz_p_j(i,J) = dz_p_j(i,J) * weight2 / np
-
-        dz_j(i,J) = dz_s_j(i,J) + dz_p_j(i,J)
-        if (dz_j(i,J) < 0.) then
-          ! hdj_sig positive -- left down, right up
-          dz_j(i,J) = max(dz_j(i,J), -0.125 * min( &
-               h(i,j,k) * G%areaT(i,j), &
-               h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        else
-          ! hdj_sig negative -- left up, right down
-          dz_j(i,J) = min(dz_j(i,J), 0.125 * min( &
-               h(i,j,k-1) * G%areaT(i,j), &
-               h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        end if
-      end do
-    end do
-
-    do j = G%jsc-1,G%jec+1
-      do i = G%isc-1,G%iec+1
-        ! prior to this point, dz_a and dz_p should be limited such that they
-        ! can't cause any tangling. however, they may still lead to some grid-scale
-        ! checkerboarding, so we reduce by another factor of 2
-        dz_a(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
-             * ((G%dyCu(I,j) * dz_i(I,j) - G%dyCu(I-1,j) * dz_i(I-1,j)) &
-              + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
-
-        ! apply the change in interface position due to this flux immediately
-        z_int(i,j,K) = z_int(i,j,K) + dz_a(i,j,K)
-      end do
-    end do
-
-    if (do_diag) then
-      ! DIAG: disp_density
-      if (allocated(CS%diag_CS%disp_density)) then
-        do j = G%jsc-1,G%jec+1
-          do i = G%isc-1,G%iec+1
-            CS%diag_CS%disp_density(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
-                 * ((G%dyCu(I,j) * dz_s_i(I,j) - G%dyCu(I-1,j) * dz_s_i(I-1,j)) &
-                 +  (G%dxCv(i,J) * dz_s_j(i,J) - G%dxCv(i,J-1) * dz_s_j(i,J-1)))
-          end do
+          weight_adapt_i(I,j) = weight
+          weight_smooth_i(I,j) = weight2
         end do
-      end if
-      ! DIAG: disp_smoothing
-      if (allocated(CS%diag_CS%disp_smoothing)) then
-        do j = G%jsc-1,G%jec+1
-          do i = G%isc-1,G%iec+1
-            CS%diag_CS%disp_smoothing(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
-                 * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
-                 +  (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
-          end do
+      end do
+
+      ! v-points
+      do J = G%JscB-1,G%JecB+1
+        do i = G%isc-1,G%iec+1
+          if (G%mask2dCv(i,J) == 0) then
+            dz_j(i,J) = 0.
+            dz_s_j(i,J) = 0.
+            dz_p_j(i,J) = 0.
+            cycle
+          endif
+
+          hdj_sig_v = hdj_sig(i,J,K)**2
+          hdi_sig_v = 0.25 * ((hdi_sig(I,j,K)**2 + hdi_sig(I-1,j+1,K)**2) + &
+                              (hdi_sig(I,j+1,K)**2 + hdi_sig(I-1,j,K)**2))
+          dk_sig_v = 0.5 * (dk_sig_int(i,j)**2 + dk_sig_int(i,j+1)**2)
+
+          j_denom = hdj_sig_v + hdi_sig_v + dk_sig_v
+          if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
+            dz_s_j(i,J) = 0.
+          else
+            dz_s_j(i,J) = hdj_sig(i,J,K) / sign(sqrt(j_denom), dk_sig_v)
+          end if
+
+          if (do_diag) then
+            ! DIAG: slope_v
+            if (allocated(CS%diag_CS%slope_v)) CS%diag_CS%slope_v(i,J,K) = dz_s_j(i,J)
+            ! DIAG: denom_v
+            if (allocated(CS%diag_CS%denom_v)) CS%diag_CS%denom_v(i,J,K) = sqrt(j_denom)
+          end if
+
+          ! dz_s_j beforehand is unitless (ratio of densities)
+          dz_s_j(i,J) = -dz_s_j(i,J) * G%dyCv(i,J)**2 * ts_ratio * L_to_H**2
+          ! dz_s_j is now [m2]
+
+          dz_p_unlim = dz_s_j(i,J)
+
+          ! density limiter
+          ! dz_s_j [m2]
+          if (dz_s_j(i,J) < 0.) then
+            ! hdj_sig positive -- left down, right up
+            dz_s_j(i,J) = max(dz_s_j(i,J), -0.125 * min( &
+                              h(i,j,k) * G%areaT(i,j), &
+                              h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          else
+            ! hdj_sig negative -- left up, right down
+            dz_s_j(i,J) = min(dz_s_j(i,J), 0.125 * min( &
+                              h(i,j,k-1) * G%areaT(i,j), &
+                              h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          end if
+
+          if (do_diag) then
+            ! DIAG: limiting_density
+            ! see u-point loop for explanation
+            if (allocated(CS%diag_CS%limiting_density)) then
+              CS%diag_CS%limiting_density(i,j,K) = CS%diag_CS%limiting_density(i,j,K) + &
+                                                   (dz_s_j(i,J) - dz_p_unlim)
+              CS%diag_CS%limiting_density(i,j+1,K) = CS%diag_CS%limiting_density(i,j+1,K) + &
+                                                     (dz_s_j(i,J) - dz_p_unlim)
+            end if
+          end if
+
+          dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
+          dz_p_unlim = dz_p_j(i,J)
+
+          if (dz_p_j(i,J) < 0.) then
+            dz_p_j(i,J) = max(dz_p_j(i,J), -0.125 * min( &
+                              h(i,j,k) * G%areaT(i,j), &
+                              h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          else
+            dz_p_j(i,J) = min(dz_p_j(i,J), 0.125 * min( &
+                              h(i,j,k-1) * G%areaT(i,j), &
+                              h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          end if
+
+          if (do_diag) then
+            ! DIAG: limiting_smoothing
+            if (allocated(CS%diag_CS%limiting_smoothing)) then
+              CS%diag_CS%limiting_smoothing(i,j,K) = CS%diag_CS%limiting_smoothing(i,j,K) + &
+                                                     (dz_p_j(i,J) - dz_p_unlim)
+              CS%diag_CS%limiting_smoothing(i,j+1,K) = CS%diag_CS%limiting_smoothing(i,j+1,K) + &
+                                                       (dz_p_j(i,J) - dz_p_unlim)
+            end if
+          end if
+
+          ! diagnose along-coordinate slope
+          if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
+            slope = 1.0
+          else
+            slope = (hdi_sig_v + hdj_sig_v) / j_denom
+          endif
+
+          hdj_sig_v = hdj_sig_phys(i,J,K)**2
+          hdi_sig_v = 0.25 * ((hdi_sig_phys(I,j,K)**2 + hdi_sig_phys(I-1,j+1,K)**2) + &
+                              (hdi_sig_phys(I,j+1,K)**2 + hdi_sig_phys(I-1,j,K)**2))
+          j_denom = hdi_sig_v + hdj_sig_v + dk_sig_v
+
+          if (abs(j_denom) < eps .or. dk_sig_int(i,j) < 0.0 .or. dk_sig_int(i,j+1) < 0.0) then
+            phys_slope = 1.0
+          else
+            phys_slope = (hdi_sig_v + hdj_sig_v) / j_denom
+          endif
+
+          if (do_diag) then
+            ! DIAG: coord_v
+            if (allocated(CS%diag_CS%coord_v)) CS%diag_CS%coord_v(i,J,K) = slope
+            ! DIAG: phys_v
+            if (allocated(CS%diag_CS%phys_v)) CS%diag_CS%phys_v(i,J,K) = phys_slope
+          end if
+
+          if (CS%use_physical_slope) slope = phys_slope
+
+          if (slope <= CS%slope_cutoff**2 .and. k > 2) then
+            weight = 1.0 - CS%min_smooth ; weight2 = 0.
+          else
+            weight = 0.0 ; weight2 = 1.0 - CS%min_smooth
+          endif
+
+          ! override weights if required
+          if (CS%alpha_rho >= 0.) then
+            weight = CS%alpha_rho
+
+            if (CS%alpha_p < 0.) then
+              weight2 = 1.0 - CS%alpha_rho
+            else
+              weight2 = CS%alpha_p
+            endif
+          else if (CS%alpha_p >= 0.) then
+            weight2 = CS%alpha_p
+            weight = 1.0 - CS%alpha_p
+          endif
+
+          weight_adapt_j(i,J) = weight
+          weight_smooth_j(i,J) = weight2
         end do
+      end do
+
+      call pass_var(weight_adapt_i, G%Domain, position=EAST_FACE)
+      call pass_var(weight_smooth_i, G%Domain, position=EAST_FACE)
+      call pass_var(weight_adapt_j, G%Domain, position=NORTH_FACE)
+      call pass_var(weight_smooth_j, G%Domain, position=NORTH_FACE)
+
+      do j = G%jsc-1,G%jec+1
+        do I = G%IscB-1,G%IecB+1
+          if (G%mask2dCu(I,j) == 0) cycle
+
+          weight = 0 ; weight2 = 0 ; np = 0
+
+          do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
+              ! filter point is oob or masked: don't add it to our stencil average
+              if (i+ni < G%IsdB .or. i+ni > G%IedB .or. &
+                  j+nj < G%jsd .or. j+nj > G%jed .or. &
+                  G%mask2dCu(I+ni,j+nj) == 0) cycle
+              weight = weight + weight_adapt_i(I+ni,j+nj)
+              weight2 = weight2 + weight_smooth_i(I+ni,j+nj)
+              np = np + 1
+            end do; end do
+
+          dz_s_i(I,j) = dz_s_i(I,j) * weight / np
+          dz_p_i(I,j) = dz_p_i(I,j) * weight2 / np
+
+          ! combining density and pressure fluxes
+          ! and re-apply limiter -- with a full cut-off this isn't necessary
+          dz_i(I,j) = dz_s_i(I,j) + dz_p_i(I,j)
+          if (dz_i(I,j) < 0.) then
+            ! hdi_sig positive -- left down, right up
+            dz_i(I,j) = max(dz_i(I,j), -0.125 * min( &
+                            h(i,j,k) * G%areaT(i,j), &
+                            h(i+1,j,k-1) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          else
+            ! hdi_sig negative -- left up, right down
+            dz_i(I,j) = min(dz_i(I,j), 0.125 * min( &
+                            h(i,j,k-1) * G%areaT(i,j), &
+                            h(i+1,j,k) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          end if
+        end do
+      end do
+
+      do J = G%JscB-1,G%JecB+1
+        do i = G%isc-1,G%iec+1
+          if (G%mask2dCv(i,J) == 0) cycle
+
+          weight = 0 ; weight2 = 0 ; np = 0
+
+          do nj = -filter_width,filter_width ; do ni = -filter_width,filter_width
+              if (i+ni < G%isd .or. i+ni > G%ied .or. &
+                  j+nj < G%JsdB .or. j+nj > G%JedB .or. &
+                  G%mask2dCv(i+ni,J+nj) == 0) cycle
+              weight = weight + weight_adapt_j(i+ni,J+nj)
+              weight2 = weight2 + weight_smooth_j(i+ni,J+nj)
+              np = np + 1
+            end do; end do
+
+          dz_s_j(i,J) = dz_s_j(i,J) * weight / np
+          dz_p_j(i,J) = dz_p_j(i,J) * weight2 / np
+
+          dz_j(i,J) = dz_s_j(i,J) + dz_p_j(i,J)
+          if (dz_j(i,J) < 0.) then
+            ! hdj_sig positive -- left down, right up
+            dz_j(i,J) = max(dz_j(i,J), -0.125 * min( &
+                            h(i,j,k) * G%areaT(i,j), &
+                            h(i,j+1,k-1) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          else
+            ! hdj_sig negative -- left up, right down
+            dz_j(i,J) = min(dz_j(i,J), 0.125 * min( &
+                            h(i,j,k-1) * G%areaT(i,j), &
+                            h(i,j+1,k) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          end if
+        end do
+      end do
+
+      do j = G%jsc-1,G%jec+1
+        do i = G%isc-1,G%iec+1
+          ! prior to this point, dz_a and dz_p should be limited such that they
+          ! can't cause any tangling. however, they may still lead to some grid-scale
+          ! checkerboarding, so we reduce by another factor of 2
+          dz_a(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
+                        * ((G%dyCu(I,j) * dz_i(I,j) - G%dyCu(I-1,j) * dz_i(I-1,j)) &
+                           + (G%dxCv(i,J) * dz_j(i,J) - G%dxCv(i,J-1) * dz_j(i,J-1)))
+
+          ! apply the change in interface position due to this flux immediately
+          z_int(i,j,K) = z_int(i,j,K) + dz_a(i,j,K)
+        end do
+      end do
+
+      if (do_diag) then
+        ! DIAG: disp_density
+        if (allocated(CS%diag_CS%disp_density)) then
+          do j = G%jsc-1,G%jec+1
+            do i = G%isc-1,G%iec+1
+              CS%diag_CS%disp_density(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
+                                               * ((G%dyCu(I,j) * dz_s_i(I,j) - G%dyCu(I-1,j) * dz_s_i(I-1,j)) &
+                                                  +  (G%dxCv(i,J) * dz_s_j(i,J) - G%dxCv(i,J-1) * dz_s_j(i,J-1)))
+            end do
+          end do
+        end if
+        ! DIAG: disp_smoothing
+        if (allocated(CS%diag_CS%disp_smoothing)) then
+          do j = G%jsc-1,G%jec+1
+            do i = G%isc-1,G%iec+1
+              CS%diag_CS%disp_smoothing(i,j,K) = 0.25 * G%IareaT(i,j) / L_to_H &
+                                                 * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
+                                                    +  (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
+            end do
+          end do
+        end if
       end if
-    end if
 
-    ! calculate the z-smoothing fluxes and apply in a second step
-    ! this lets us use a "barotropic" limiter, which should be much less
-    ! restrictive than the layer-based one
-    do j = G%jsc-1,G%jec+1
-      do I = G%IscB-1,G%IecB+1
-        if (G%mask2dCu(I,j) == 0) then
-          dz_p_i(I,j) = 0.
-          cycle
-        endif
+      ! calculate the z-smoothing fluxes and apply in a second step
+      ! this lets us use a "barotropic" limiter, which should be much less
+      ! restrictive than the layer-based one
+      do j = G%jsc-1,G%jec+1
+        do I = G%IscB-1,G%IecB+1
+          if (G%mask2dCu(I,j) == 0) then
+            dz_p_i(I,j) = 0.
+            cycle
+          endif
 
-        dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
-        ! dz_p_i positive => left is further down than right
-        ! => move left up, right down
+          dz_p_i(I,j) = (z_int(i+1,j,K) - z_int(i,j,K)) * G%dxCu(I,j) * ts_ratio * L_to_H
+          ! dz_p_i positive => left is further down than right
+          ! => move left up, right down
 
-        ! XXX this becomes a barotropic limiter
-        if (dz_p_i(I,j) < 0.) then
-          ! dz_p_i negative -- right up, left down
-          dz_p_i(I,j) = max(dz_p_i(I,j), -min( &
-               (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
-               (z_int(i+1,j,1) - z_int(i+1,j,K)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        else
-          ! dz_p_i positive -- left up, right down
-          dz_p_i(I,j) = min(dz_p_i(I,j), min( &
-               (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
-               (z_int(i+1,j,K) - z_int(i+1,j,nz+1)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
-        end if
-        dz_p_i(I,j) = dz_p_i(I,j) * CS%min_smooth
+          ! XXX this becomes a barotropic limiter
+          if (dz_p_i(I,j) < 0.) then
+            ! dz_p_i negative -- right up, left down
+            dz_p_i(I,j) = max(dz_p_i(I,j), -min( &
+                              (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
+                              (z_int(i+1,j,1) - z_int(i+1,j,K)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          else
+            ! dz_p_i positive -- left up, right down
+            dz_p_i(I,j) = min(dz_p_i(I,j), min( &
+                              (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
+                              (z_int(i+1,j,K) - z_int(i+1,j,nz+1)) * G%areaT(i+1,j)) * G%IdyCu(I,j) * L_to_H)
+          end if
+          dz_p_i(I,j) = dz_p_i(I,j) * CS%min_smooth
+        end do
+      end do
+
+      do J = G%JscB-1,G%JecB+1
+        do i = G%isc-1,G%iec+1
+          if (G%mask2dCv(i,J) == 0) then
+            dz_p_j(i,J) = 0.
+            cycle
+          endif
+
+          dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
+
+          if (dz_p_j(i,J) < 0.) then
+            dz_p_j(i,J) = max(dz_p_j(i,J), -min( &
+                              (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
+                              (z_int(i,j+1,1) - z_int(i,j+1,K)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          else
+            dz_p_j(i,J) = min(dz_p_j(i,J), min( &
+                              (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
+                              (z_int(i,j+1,K) - z_int(i,j+1,nz+1)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
+          end if
+          dz_p_j(i,J) = dz_p_j(i,J) * CS%min_smooth
+        end do
+      end do
+
+      ! calculate flux due to barotropically-limited smoothing term
+      do j = G%jsc-1,G%jec+1
+        do i = G%isc-1,G%iec+1
+          dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) / L_to_H &
+                        * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
+                           + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
+        end do
       end do
     end do
-
-    do J = G%JscB-1,G%JecB+1
-      do i = G%isc-1,G%iec+1
-        if (G%mask2dCv(i,J) == 0) then
-          dz_p_j(i,J) = 0.
-          cycle
-        endif
-
-        dz_p_j(i,J) = (z_int(i,j+1,K) - z_int(i,j,K)) * G%dyCv(i,J) * ts_ratio * L_to_H
-
-        if (dz_p_j(i,J) < 0.) then
-          dz_p_j(i,J) = max(dz_p_j(i,J), -min( &
-               (z_int(i,j,K) - z_int(i,j,nz+1)) * G%areaT(i,j), &
-               (z_int(i,j+1,1) - z_int(i,j+1,K)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        else
-          dz_p_j(i,J) = min(dz_p_j(i,J), min( &
-               (z_int(i,j,1) - z_int(i,j,K)) * G%areaT(i,j), &
-               (z_int(i,j+1,K) - z_int(i,j+1,nz+1)) * G%areaT(i,j+1)) * G%IdxCv(i,J) * L_to_H)
-        end if
-        dz_p_j(i,J) = dz_p_j(i,J) * CS%min_smooth
-      end do
-    end do
-
-    ! calculate flux due to barotropically-limited smoothing term
-    do j = G%jsc-1,G%jec+1
-      do i = G%isc-1,G%iec+1
-        dz_p(i,j,K) = 0.5 * 0.25 * G%IareaT(i,j) / L_to_H &
-             * ((G%dyCu(I,j) * dz_p_i(I,j) - G%dyCu(I-1,j) * dz_p_i(I-1,j)) &
-              + (G%dxCv(i,J) * dz_p_j(i,J) - G%dxCv(i,J-1) * dz_p_j(i,J-1)))
-      end do
-    end do
-  end do
-  !$omp end do
+    !$omp end do
   end block
   !$omp end parallel
 
   if (do_diag) then
     ! DIAG: disp_unlimited
     if (allocated(CS%diag_CS%disp_unlimited)) &
-         CS%diag_CS%disp_unlimited(:,:,:) = dz_p(:,:,:)
+      CS%diag_CS%disp_unlimited(:,:,:) = dz_p(:,:,:)
   end if
 
   ts_ratio = dt / CS%restoring_timescale
@@ -992,7 +1006,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       else
         do K = 2,nz
           dz_r(i,j,K) = ts_ratio * (max(min(z_mean(K), z_upd(1)), z_upd(nz+1)) - z_upd(K)) &
-               / (1.0 + ts_ratio)
+                        / (1.0 + ts_ratio)
 
           ! using filtered_grid_motion to obtain our dzInterface leads to a loss of precision:
           ! we effectively add the depth of the ocean and immediately subtract it out, losing
@@ -1002,7 +1016,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
           dzInterface(i,j,K) = dz_a(i,j,K) + dz_p(i,j,K)
 
           if (CS%restoring_timescale > 0.) &
-               dzInterface(i,j,K) = dzInterface(i,j,K) + dz_r(i,j,K)
+            dzInterface(i,j,K) = dzInterface(i,j,K) + dz_r(i,j,K)
         enddo
       endif
 
