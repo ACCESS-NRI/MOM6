@@ -433,7 +433,10 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
   !$omp          shared(hdi_sig, hdj_sig, hdi_sig_phys, hdj_sig_phys) &
   !$omp          shared(L_to_H, ts_ratio, dz_a, dz_p, do_diag, eps, nz) &
   !$omp          private(i, j, k, dk_sig_int, alpha, beta) &
-  !$omp          private(hdi_sig_u, hdj_sig_u, dk_sig_u, hdi_sig_v, hdj_sig_v, dk_sig_v, i_denom, j_denom, dz_p_unlim, slope, phys_slope, weight, weight2)
+  !$omp          private(hdi_sig_u, hdj_sig_u, dk_sig_u) &
+  !$omp          private(hdi_sig_v, hdj_sig_v, dk_sig_v) &
+  !$omp          private(i_denom, j_denom, dz_p_unlim, slope, phys_slope) &
+  !$omp          private(weight, weight2)
   block
     use MOM_domains, only : pass_var, EAST_FACE, NORTH_FACE
 
