@@ -33,7 +33,6 @@ type, public :: file_dye_tracer_CS ; private
   integer :: ntr !< The number of tracers that are actually used
   character(len=200) :: tracer_file !< Path to the tracer IC file
   character(len=200) :: inputdir !< Input directory
-  integer, allocatable :: ind_tr(:) !< Tracer indices for the coupler
   type(vardesc), allocatable :: tr_desc(:) !< Descriptions and metadata for tracers
   real, pointer :: tr(:,:,:,:) => NULL() !< Array of tracers
   real, pointer :: tr_source(:,:,:,:) => NULL() !< Array of tracer source fields
@@ -68,7 +67,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
  register_file_dye_tracer = .false.
 
  if (associated(CS)) then
-    call MOM_error(FATAL, "registr_file_dye_tracer called with an "// &
+    call MOM_error(FATAL, "register_file_dye_tracer called with an "// &
          "associated control structure.")
  end if
  allocate(CS)
@@ -87,7 +86,6 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
  call get_param(param_file, mdl, "INPUTDIR", CS%inputdir, default=".")
  CS%inputdir = slasher(CS%inputdir)
 
- allocate(CS%ind_tr(CS%ntr))
  allocate(CS%tr_desc(CS%ntr))
 
  allocate(CS%tr(isd:ied,jsd:jed,nz,CS%ntr), source=0.0)
@@ -111,7 +109,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
 end function register_file_dye_tracer
 
 !> This subroutine initializes the NTR tracer fields in tr(:,:,:,:)
-! !! and it sets up the tracer output.
+!! and it sets up the tracer output.
 subroutine initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, sponge_CSp)
  logical, intent(in) :: restart                             !< fields already read from a restart file
  type(time_type), target, intent(in) :: day                 !< Time of start of run
@@ -132,7 +130,7 @@ subroutine initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, spo
  CS%diag => diag
 
  if (.not. file_exists(trim(CS%inputdir)//trim(CS%tracer_file), G%Domain)) then
-    call MOM_error(FATAL, "initial_file_dye_tracer: Unable to open " // &
+    call MOM_error(FATAL, "initialize_file_dye_tracer: Unable to open " // &
          CS%tracer_file)
  end if
 
@@ -245,7 +243,7 @@ function file_dye_stock(h, stocks, G, GV, CS, names, units, stock_index)
 
  do m = 1, CS%ntr
     call query_vardesc(CS%tr_desc(m), name=names(m), units=units(m), caller="file_dye_stock")
-    units(m) = trim(units(m)) // "kg"
+    units(m) = trim(units(m)) // " kg"
     stocks(m) = global_mass_int_EFP(h, G, GV, CS%tr(:,:,:,m), on_PE_only=.true.)
  end do
 
@@ -258,6 +256,7 @@ subroutine file_dyes_end(CS)
 
  if (associated(CS)) then
     if (associated(CS%tr)) deallocate(CS%tr)
+    if (associated(CS%tr_source)) deallocate(CS%tr_source)
     deallocate(CS)
  end if
 end subroutine file_dyes_end
