@@ -466,8 +466,8 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       weight_adapt_i(:,:) = 0. ; weight_smooth_i(:,:) = 0.
       weight_adapt_j(:,:) = 0. ; weight_smooth_j(:,:) = 0.
 
-      do j = G%jsc-2,G%jec+2
-        do i = G%isc-2,G%iec+2
+      do j = G%jsc-3,G%jec+3
+        do i = G%isc-3,G%iec+3
           t_int(i,j) = ( &
                        tv%t(i,j,k-1) * (h(i,j,k) + GV%H_subroundoff) + &
                        tv%t(i,j,k) * (h(i,j,k-1) + GV%H_subroundoff)) / &
@@ -480,9 +480,9 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
         call calculate_density_derivs(t_int(:,j), s_int(:,j), -z_int(:,j,K) * GV%H_to_Pa, &
                                       alpha_int(:,j,K), beta_int(:,j,K), &
-                                      G%isc-2, G%iec+2 - (G%isc-2) + 1, tv%eqn_of_state)
+                                      G%isc-3, G%iec+3 - (G%isc-3) + 1, tv%eqn_of_state)
 
-        do i = G%isc-2,G%iec+2
+        do i = G%isc-3,G%iec+3
           dk_sig_int(i,j) = alpha_int(i,j,K) * (tv%t(i,j,k) - tv%t(i,j,k-1)) + &
                             beta_int(i,j,K) * (tv%s(i,j,k) - tv%s(i,j,k-1))
         enddo
@@ -491,7 +491,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
       ! calculate horizontal derivatives on i-points
       ! reduce I-halo 2 -> 1
       do j = G%jsc-2,G%jec+2
-        do I = G%IscB-1,G%IecB+1
+        do I = G%IscB-2,G%IecB+2
           alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i+1,j,K))
           beta = 0.5 * (beta_int(i,j,K) + beta_int(i+1,j,K))
 
@@ -502,7 +502,7 @@ subroutine build_adapt_grid(G, GV, US, h, tv, dzInterface, CS, fCS, min_thicknes
 
       ! calculate horizontal derivatives on j-points
       ! reduce J-halo 2 -> 1
-      do J = G%JscB-1,G%JecB+1
+      do J = G%JscB-2,G%JecB+2
         do i = G%isc-2,G%iec+2
           alpha = 0.5 * (alpha_int(i,j,K) + alpha_int(i,j+1,K))
           beta = 0.5 * (beta_int(i,j,K) + beta_int(i,j+1,K))
