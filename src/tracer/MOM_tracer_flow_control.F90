@@ -213,8 +213,8 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
                  "If true, use the regional_dyes tracer package.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_FILE_DYES", CS%use_file_dyes, &
-       "If true, use the file dyes tracer package.", &
-       default=.false.)
+                 "If true, use the file dyes tracer package.", &
+                 default=.false.)
   call get_param(param_file, mdl, "USE_OIL_TRACER", CS%use_oil, &
                  "If true, use the oil_tracer tracer package.", &
                  default=.false.)
@@ -267,10 +267,10 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
                         tr_Reg, restart_CS, CS%get_chl_from_MARBL)
   if (CS%use_regional_dyes) CS%use_regional_dyes = &
     register_dye_tracer(G%HI, GV, US, param_file, CS%dye_tracer_CSp, &
-    tr_Reg, restart_CS)
+                        tr_Reg, restart_CS)
   if (CS%use_file_dyes) CS%use_file_dyes = &
-       register_file_dye_tracer(G%HI, GV, US, param_file, CS%file_dye_tracer_CSp, &
-       tr_Reg, restart_CS)
+    register_file_dye_tracer(G%HI, GV, US, param_file, CS%file_dye_tracer_CSp, &
+                             tr_Reg, restart_CS)
   if (CS%use_oil) CS%use_oil = &
     register_oil_tracer(G%HI, GV, US, param_file,  CS%oil_tracer_CSp, &
                         tr_Reg, restart_CS)
@@ -356,9 +356,10 @@ subroutine tracer_flow_control_init(restart, day, G, GV, US, h, param_file, diag
     call initialize_MARBL_tracers(restart, day, G, GV, US, h, param_file, diag, OBC, CS%MARBL_tracers_CSp, &
                                 sponge_CSp)
   if (CS%use_regional_dyes) &
-       call initialize_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%dye_tracer_CSp, sponge_CSp, tv)
+    call initialize_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%dye_tracer_CSp, sponge_CSp, tv)
   if (CS%use_file_dyes) &
-       call initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%file_dye_tracer_CSp, sponge_CSp)
+    call initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%file_dye_tracer_CSp, &
+                                    sponge_CSp)
   if (CS%use_oil) &
     call initialize_oil_tracer(restart, day, G, GV, US, h, diag, OBC, CS%oil_tracer_CSp, sponge_CSp)
   if (CS%use_advection_test_tracer) &
@@ -553,9 +554,10 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
                                      evap_CFL_limit=evap_CFL_limit, &
                                      minimum_forcing_depth=minimum_forcing_depth)
     if (CS%use_file_dyes) &
-         call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-         G, GV, US, CS%file_dye_tracer_CSp, &
-         evap_CFL_limit=evap_CFL_limit, minimum_forcing_depth=minimum_forcing_depth)
+      call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
+                                          G, GV, US, CS%file_dye_tracer_CSp, &
+                                          evap_CFL_limit=evap_CFL_limit, &
+                                          minimum_forcing_depth=minimum_forcing_depth)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv, &
@@ -643,8 +645,8 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
       call dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                            G, GV, US, tv, CS%dye_tracer_CSp)
     if (CS%use_file_dyes) &
-         call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-         G, GV, US, CS%file_dye_tracer_CSp)
+      call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
+                                          G, GV, US, CS%file_dye_tracer_CSp)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv)
@@ -773,12 +775,12 @@ subroutine call_tracer_stocks(h, stock_values, G, GV, US, CS, stock_names, stock
     ns = dye_stock(h, values_EFP, G, GV, CS%dye_tracer_CSp, names, units, stock_index)
     call store_stocks("regional_dyes", ns, names, units, values_EFP, index, stock_val_EFP, &
                       set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
- endif
- if (CS%use_file_dyes) then
+  endif
+  if (CS%use_file_dyes) then
     ns = file_dye_stock(h, values_EFP, G, GV, CS%file_dye_tracer_CSp, names, units, stock_index)
     call store_stocks("file_dyes", ns, names, units, values_EFP, index, stock_val_EFP, &
-         set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
- end if
+                      set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
+  endif
   if (CS%use_oil) then
     ns = oil_stock(h, values_EFP, G, GV, CS%oil_tracer_CSp, names, units, stock_index)
     call store_stocks("oil_tracer", ns, names, units, values_EFP, index, stock_val_EFP, &
@@ -931,9 +933,9 @@ subroutine call_tracer_surface_state(sfc_state, h, G, GV, US, CS)
   if (CS%use_MARBL_tracers) &
     call MARBL_tracers_surface_state(sfc_state, G, US, CS%MARBL_tracers_CSp)
   if (CS%use_regional_dyes) &
-       call dye_tracer_surface_state(sfc_state, h, G, GV, CS%dye_tracer_CSp)
+    call dye_tracer_surface_state(sfc_state, h, G, GV, CS%dye_tracer_CSp)
   if (CS%use_file_dyes) &
-       call file_dye_tracer_surface_state(sfc_state, h, G, GV, CS%file_dye_tracer_CSp)
+    call file_dye_tracer_surface_state(sfc_state, h, G, GV, CS%file_dye_tracer_CSp)
   if (CS%use_oil) &
     call oil_tracer_surface_state(sfc_state, h, G, GV, CS%oil_tracer_CSp)
   if (CS%use_advection_test_tracer) &
