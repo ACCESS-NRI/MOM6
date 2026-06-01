@@ -30,13 +30,14 @@ subroutine advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp      !< Advection scheme varianve production
                                                                         !! diagnostic [CU2 H T-1 ~> conc2 m s-1]
 
-  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
   call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
+  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
+  ! call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
 
 end subroutine advection_scheme_variance_production
 
 !< Subroutine to calculate the thickness weighted variance advection over the transport timestep.
-subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, res)
+subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, asvp)
 
   type(ocean_grid_type),                        intent(in) :: G       !< Ocean grid structure
   type(verticalGrid_type),                      intent(in) :: GV      !< Ocean vertical grid structure
@@ -45,7 +46,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h       !< Updated thicknesses [H ~> m or kg m-2]
   real,                                         intent(in) :: dt      !< Transport time interval [T ~> s]
   real,                                         intent(in) :: Idt     !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: res     !< Array to store result in 
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp     !< Array to store asvp in
                                                                       !! [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
@@ -61,13 +62,13 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
     Ih = 1 / h(i,j,k)
     ht_prev = h_diag(i,j,k) * Tr%t_prev(i,j,k)
     ht_adv = ht_prev + dt * Tr%advection_xy(i,j,k)
-    res(i,j,k) = ( (Ih * ht_adv**2) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
+    asvp(i,j,k) = ( (Ih * ht_adv*ht_adv) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_advection
 
 !< Subroutine to calculate the divergence of the variance flux due to the advection scheme
-subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, res)
+subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
 
   type(ocean_grid_type),                         intent(in) :: G     !< Ocean grid structure
   type(verticalGrid_type),                       intent(in) :: GV    !< Ocean vertical grid structure
@@ -77,13 +78,13 @@ subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Id
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),    intent(in) :: vhtr  !< Accumulated meridional thickness fluxes
                                                                      !! used to advect tracers [H L2 ~> m3 or kg]
   real,                                          intent(in) :: Idt   !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: res   !< Array to store result in
-                                                                     !![CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: asvp  !< Array to store asvp in
+                                                                     !! [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
   integer :: is, ie, js, je, nz                           !< Grid cell centre and layer indexes
   integer :: i, j, k                                      !< Counters
-  real :: east, west, north, south                        !< North and south faces of h point
+  real :: east, west, north, south                        !< east, west, north and south faces of h point
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: x_upwind  !< Zonal upwind values for tracer [CU ~> conc]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: y_upwind  !< Meridional upwind values for tracer [CU ~> conc]
 
@@ -100,7 +101,7 @@ subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Id
      west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     north = (2 * (Tr%ad_y(i,J,k)  *y_upwind(i,J,k)))   - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
     south = (2 * (Tr%ad_y(i,J-1,k)*y_upwind(i,J-1,k))) - ((Idt*vhtr(i,J-1,k)) * (y_upwind(i,J-1,k)*y_upwind(i,J-1,k)))
-    res(i,j,k) = res(i,j,k) + (((east - west) + (north - south)) * G%IareaT(i,j))
+    asvp(i,j,k) = asvp(i,j,k) + (((east - west) + (north - south)) * G%IareaT(i,j))
   enddo ; enddo; enddo
 
 end subroutine thickness_weighted_variance_flux_divergence
