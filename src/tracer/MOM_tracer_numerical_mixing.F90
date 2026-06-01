@@ -46,7 +46,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in) :: h       !< Updated thicknesses [H ~> m or kg m-2]
   real,                                         intent(in) :: dt      !< Transport time interval [T ~> s]
   real,                                         intent(in) :: Idt     !< Inverse time interval [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp     !< Array to store asvp in
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp    !< Array to store asvp in
                                                                       !! [CU2 H T-1 ~> conc2 m s-1]
 
   !< Local variables
@@ -62,7 +62,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
     Ih = 1 / h(i,j,k)
     ht_prev = h_diag(i,j,k) * Tr%t_prev(i,j,k)
     ht_adv = ht_prev + dt * Tr%advection_xy(i,j,k)
-    asvp(i,j,k) = ( (Ih * ht_adv*ht_adv) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
+    asvp(i,j,k) = asvp(i,j,k) + ( (Ih * (ht_adv*ht_adv)) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_advection
