@@ -30,8 +30,8 @@ subroutine advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp      !< Advection scheme varianve production
                                                                         !! diagnostic [CU2 H T-1 ~> conc2 m s-1]
 
-  ! call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
-  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
+  call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
+  ! call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
 
 end subroutine advection_scheme_variance_production
 
