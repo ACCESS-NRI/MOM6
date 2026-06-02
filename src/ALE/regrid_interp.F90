@@ -414,6 +414,14 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
     return  ! return because there is no need to look further
   endif
 
+  ! If the target value is outside the range of all values, we
+  ! force the target coordinate to be equal to the lowest or
+  ! largest value, depending on which bound is overtaken
+  if ( target_value >= edge_values(N,2) ) then
+    x_tgt = x_g(N+1)
+    return  ! return because there is no need to look further
+  endif
+
   ! Since discontinuous edge values are allowed, we check whether the target
   ! value lies between two discontinuous edge values at interior interfaces
   do k = 2,N
@@ -422,14 +430,6 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
       return   ! return because there is no need to look further
     endif
   enddo
-
-  ! If the target value is outside the range of all values, we
-  ! force the target coordinate to be equal to the lowest or
-  ! largest value, depending on which bound is overtaken
-  if ( target_value >= edge_values(N,2) ) then
-    x_tgt = x_g(N+1)
-    return  ! return because there is no need to look further
-  endif
 
   ! At this point, we know that the target value is bounded and does not
   ! lie between discontinuous, monotonic edge values. Therefore,
