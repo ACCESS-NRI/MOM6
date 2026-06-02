@@ -191,6 +191,7 @@ contains
 !> In situ density of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: density_elem_Roquet_rho
 real elemental function density_elem_Roquet_rho(this, T, S, pressure)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -250,6 +251,7 @@ end function density_elem_Roquet_rho
 !> In situ density anomaly of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: density_anomaly_elem_Roquet_rho
 real elemental function density_anomaly_elem_Roquet_rho(this, T, S, pressure, rho_ref)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -312,6 +314,7 @@ end function density_anomaly_elem_Roquet_rho
 !> In situ specific volume of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: spec_vol_elem_Roquet_rho
 real elemental function spec_vol_elem_Roquet_rho(this, T, S, pressure)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -325,6 +328,7 @@ end function spec_vol_elem_Roquet_rho
 !> In situ specific volume anomaly of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: spec_vol_anomaly_elem_Roquet_rho
 real elemental function spec_vol_anomaly_elem_Roquet_rho(this, T, S, pressure, spv_ref)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -339,6 +343,7 @@ end function spec_vol_anomaly_elem_Roquet_rho
 
 !> For a given thermodynamic state, calculate the derivatives of density with conservative
 !! temperature and absolute salinity, using the density polynomial fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_density_derivs_elem_Roquet_rho
 elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, drho_dT, drho_dS)
   class(Roquet_rho_EOS), intent(in)  :: this     !< This EOS
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
@@ -413,6 +418,7 @@ elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressu
 end subroutine calculate_density_derivs_elem_Roquet_rho
 
 !> Second derivatives of density with respect to temperature, salinity, and pressure
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_density_second_derivs_elem_Roquet_rho
 elemental subroutine calculate_density_second_derivs_elem_Roquet_rho(this, T, S, pressure, &
                        drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
   class(Roquet_rho_EOS), intent(in) :: this !< This EOS
@@ -506,6 +512,7 @@ end subroutine calculate_density_second_derivs_elem_Roquet_rho
 
 !> Calculate the partial derivatives of specific volume with temperature and salinity
 !! using the density polynomial fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_specvol_derivs_elem_Roquet_rho
 elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS)
   class(Roquet_rho_EOS), intent(in)    :: this     !< This EOS
   real,                  intent(in)    :: T        !< Conservative temperature [degC]
@@ -531,6 +538,7 @@ end subroutine calculate_specvol_derivs_elem_Roquet_rho
 !! (drho/dp = C_sound^-2, stored as drho_dp [s2 m-2]) from absolute salinity (sal [g kg-1]),
 !! conservative temperature (T [degC]), and pressure [Pa], using the density polynomial
 !! fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_compress_elem_Roquet_rho
 elemental subroutine calculate_compress_elem_Roquet_rho(this, T, S, pressure, rho, drho_dp)
   class(Roquet_rho_EOS), intent(in)  :: this !< This EOS
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
