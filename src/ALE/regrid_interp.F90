@@ -425,7 +425,10 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   ! Since discontinuous edge values are allowed, we check whether the target
   ! value lies between two discontinuous edge values at interior interfaces
   do k = 2,N
-    if ( ( target_value >= edge_values(k-1,2) ) .AND. ( target_value <= edge_values(k,1) ) ) then
+    if (target_value > edge_values(k,1) ) then
+      cycle
+    endif
+    if ( target_value >= edge_values(k-1,2) )  then
       x_tgt = x_g(k)
       return   ! return because there is no need to look further
     endif
@@ -437,7 +440,11 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   ! contains the target value. The variable k_found holds the index value
   ! of the cell where the taregt value lies.
   do k = 1,N
-    if ( ( target_value > edge_values(k,1) ) .AND. ( target_value < edge_values(k,2) ) ) then
+    if ( target_value >= edge_values(k,2) ) then
+      cycle
+    endif
+
+    if ( target_value > edge_values(k,1) ) then
       k_found = k
       exit
     endif
