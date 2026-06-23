@@ -109,12 +109,12 @@ end subroutine thickness_weighted_variance_flux_divergence
 
 subroutine check_variance_underflow(G, GV, Tr, asvp)
 
-  type(ocean_grid_type),                     intent(in) :: G     !< Ocean grid structure
-  type(verticalGrid_type),                   intent(in) :: GV    !< Ocean vertical grid structure
-  type(tracer_type),                         intent(in) :: Tr    !< Pointer to the tracer regsitry
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in) :: asvp  !< Advection scheme variance production
-                                                                 !! diagnostic [CU2 H T-1 ~> conc2 m s-1 or
-                                                                 !!             conc2 kg m-2 s-1]
+  type(ocean_grid_type),                        intent(in) :: G     !< Ocean grid structure
+  type(verticalGrid_type),                      intent(in) :: GV    !< Ocean vertical grid structure
+  type(tracer_type),                            intent(in) :: Tr    !< Pointer to the tracer regsitry
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp  !< Advection scheme variance production
+                                                                    !! diagnostic [CU2 H T-1 ~> conc2 m s-1 or
+                                                                    !!             conc2 kg m-2 s-1]
   ! Local variables
   integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
   integer :: i, j, k             !< Counters
