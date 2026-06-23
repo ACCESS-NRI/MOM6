@@ -27,11 +27,13 @@ subroutine advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, 
                                                                         !! used to advect tracers [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),   intent(in) :: vhtr      !< Accumulated meridional thickness fluxes
                                                                         !! used to advect tracers [H L2 ~> m3 or kg]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp      !< Advection scheme varianve production
-                                                                        !! diagnostic [CU2 H T-1 ~> conc2 m s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: asvp      !< Advection scheme variance production
+                                                                        !! diagnostic [CU2 H T-1 ~> conc2 m s-1 or
+                                                                        !!             conc2 kg m-2 s-1]
 
   call thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt_trans, Idt, asvp)
-  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, asvp)
+  call thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Idt, var_uf, asvp)
+  call check_variance_underflow(G, GV, Tr, asvp)
 
 end subroutine advection_scheme_variance_production
 
@@ -95,7 +97,7 @@ subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Id
   call zonal_upwind_values(G, GV, Tr, uhtr, x_upwind)
   call meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
 
-  do k=1,nz ;  do j=js,je ; do i=is,ie
+  do k=1,nz ; do j=js,je ; do i=is,ie
      east = (2 * (Tr%ad_x(I,j,k)  *x_upwind(I,j,k)))   - ((Idt*uhtr(I,j,k))   * (x_upwind(I,j,k)  *x_upwind(I,j,k)))
      west = (2 * (Tr%ad_x(I-1,j,k)*x_upwind(I-1,j,k))) - ((Idt*uhtr(I-1,j,k)) * (x_upwind(I-1,j,k)*x_upwind(I-1,j,k)))
     north = (2 * (Tr%ad_y(i,J,k)  *y_upwind(i,J,k)))   - ((Idt*vhtr(i,J,k))   * (y_upwind(i,J,k)  *y_upwind(i,J,k)))
@@ -104,6 +106,29 @@ subroutine thickness_weighted_variance_flux_divergence(G, Gv, Tr, uhtr, vhtr, Id
   enddo ; enddo; enddo
 
 end subroutine thickness_weighted_variance_flux_divergence
+
+subroutine check_variance_underflow(G, GV, Tr, asvp)
+
+  type(ocean_grid_type),                     intent(in) :: G     !< Ocean grid structure
+  type(verticalGrid_type),                   intent(in) :: GV    !< Ocean vertical grid structure
+  type(tracer_type),                         intent(in) :: Tr    !< Pointer to the tracer regsitry
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in) :: asvp  !< Advection scheme variance production
+                                                                 !! diagnostic [CU2 H T-1 ~> conc2 m s-1 or
+                                                                 !!             conc2 kg m-2 s-1]
+  ! Local variables
+  integer :: is, ie, js, je, nz  !< Grid cell centre and layer indexes
+  integer :: i, j, k             !< Counters
+  real    :: var_uf              !< A tiny underflow value for tracer variance tendency diagnostics
+                                 !! [CU2 H T-1 ~> conc2 m s-1 or conc2 kg m-2 s-1]
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  var_uf = Tr%conc_underflow**2 * GV%H_subroundoff * Idt
+
+  do k=1,nz ; do j=js,je ; do i=is,ie
+      if (abs(asvp(i,j,k) < var_uf)) asvp(i, j, k) = 0.0
+  enddo ; enddo; enddo
+
+end subroutine
 
 !< Subroutine to calculate upwind values in zonal direction
 subroutine zonal_upwind_values(G, GV, Tr, uhtr, x_upwind)
