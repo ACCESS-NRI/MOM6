@@ -124,7 +124,7 @@ subroutine check_variance_underflow(G, GV, Tr, Idt, asvp)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   if (Tr%conc_underflow == 0) then
-    var_uf = 1 * GV%H_subroundoff * Idt
+    var_uf = 1e-23 * GV%H_subroundoff * Idt
   else
     var_uf = Tr%conc_underflow**2 * GV%H_subroundoff * Idt
   endif
