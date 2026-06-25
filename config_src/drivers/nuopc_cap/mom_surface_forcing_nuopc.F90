@@ -543,20 +543,20 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
           IOB%fprec(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_fusion
       fluxes%latent_fprec_diag(i,j) = - G%mask2dT(i,j) * IOB%fprec(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_fusion
     endif
-    ! notice minus sign since frunoff is positive into the ocean
-    if (associated(IOB%frunoff)) then
-      fluxes%latent(i,j)              = fluxes%latent(i,j) - &
-          IOB%frunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
-      fluxes%latent_frunoff_diag(i,j) = - G%mask2dT(i,j) * &
-          IOB%frunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
-    endif
-    ! notice minus sign since frunoff_glc is positive into the ocean
-    if (associated(IOB%frunoff_glc)) then
-      fluxes%latent(i,j)              = fluxes%latent(i,j) - &
-          IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
-      fluxes%latent_frunoff_glc_diag(i,j) = fluxes%latent_frunoff_glc_diag(i,j) - G%mask2dT(i,j) * &
-          IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
-    endif
+!    ! notice minus sign since frunoff is positive into the ocean
+!    if (associated(IOB%frunoff)) then
+!      fluxes%latent(i,j)              = fluxes%latent(i,j) - &
+!          IOB%frunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
+!      fluxes%latent_frunoff_diag(i,j) = - G%mask2dT(i,j) * &
+!          IOB%frunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
+!    endif
+!    ! notice minus sign since frunoff_glc is positive into the ocean
+!    if (associated(IOB%frunoff_glc)) then
+!      fluxes%latent(i,j)              = fluxes%latent(i,j) - &
+!          IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
+!      fluxes%latent_frunoff_glc_diag(i,j) = fluxes%latent_frunoff_glc_diag(i,j) - G%mask2dT(i,j) * &
+!          IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
+!    endif
     if (associated(IOB%q_flux)) then
       fluxes%latent(i,j)           = fluxes%latent(i,j) + &
           IOB%q_flux(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_vapor
