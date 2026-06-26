@@ -468,7 +468,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   integer                                :: iostat
   integer                                :: readunit
   character(len=512)                     :: restartfile          ! Path/Name of restart file
-  character(len=2048)                    :: restartfiles         ! Path/Name of restart files
+  character(len=4096)                    :: restartfiles         ! Path/Name of restart files
                                                                  ! (same as restartfile if single restart file)
   character(240)                         :: additional_restart_dir
   character(len=*), parameter            :: subname='(MOM_cap:InitializeAdvertise)'
