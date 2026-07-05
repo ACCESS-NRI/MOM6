@@ -401,6 +401,7 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   integer :: k_found     ! index of target cell
   character(len=320) :: mesg
   logical :: use_2018_answers  ! If true use older, less accurate expressions.
+  integer :: maybe_kfound ! temporary variable to store a potential k_found value
 
   eps = NR_OFFSET
   k_found = -1
@@ -424,8 +425,10 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
 
   ! Since discontinuous edge values are allowed, we check whether the target
   ! value lies between two discontinuous edge values at interior interfaces
+  maybe_kfound = -1
   do k = 2,N
     if (target_value > edge_values(k,1) ) then
+      maybe_kfound = k
       cycle
     endif
     if ( target_value >= edge_values(k-1,2) )  then
@@ -439,17 +442,20 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   ! there is a unique solution. We loop on all cells and find which one
   ! contains the target value. The variable k_found holds the index value
   ! of the cell where the taregt value lies.
-  do k = 1,N
-    if ( target_value >= edge_values(k,2) ) then
-      cycle
-    endif
+  if ((maybe_kfound /= -1) .AND. (target_value < edge_values(maybe_kfound,2))) then
+    k_found = maybe_kfound
+  else
+    do k = 1,N
+      if ( target_value >= edge_values(k,2) ) then
+        cycle
+      endif
 
-    if ( target_value > edge_values(k,1) ) then
-      k_found = k
-      exit
-    endif
-  enddo
-
+      if ( target_value > edge_values(k,1) ) then
+        k_found = k
+        exit
+      endif
+    enddo
+  endif
   ! At this point, 'k_found' should be strictly positive. If not, this is
   ! a major failure because it means we could not find any target cell
   ! despite the fact that the target value lies between the extremes. It
