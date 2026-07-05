@@ -375,6 +375,7 @@ end subroutine build_and_interpolate_grid
 !!
 !! It is assumed that the number of cells defining 'grid' and 'ppoly' are the
 !! same.
+!DIR$ ATTRIBUTES FORCEINLINE :: get_polynomial_coordinate
 function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
                                     target_value, degree, answer_date ) result ( x_tgt )
   ! Arguments
