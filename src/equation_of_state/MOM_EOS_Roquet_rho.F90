@@ -530,11 +530,13 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
   real :: rho     ! In situ density [kg m-3]
   real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
   real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
+  real :: inv_rhosqr ! The inverse of the square of density [m6 kg-2]
 
   call calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, dRho_dT, dRho_dS)
   rho = density_elem_Roquet_rho(this, T, S, pressure)
-  dSV_dT = -dRho_DT/(rho**2)
-  dSV_dS = -dRho_DS/(rho**2)
+  inv_rhosqr = 1.0 / (rho*rho)
+  dSV_dT = -dRho_DT * inv_rhosqr
+  dSV_dS = -dRho_DS * inv_rhosqr
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
 
