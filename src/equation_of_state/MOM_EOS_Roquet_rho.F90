@@ -535,8 +535,8 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
   call calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, dRho_dT, dRho_dS)
   rho = density_elem_Roquet_rho(this, T, S, pressure)
   inv_rhosqr = 1.0 / (rho*rho)
-  dSV_dT = -dRho_DT * inv_rhosqr
-  dSV_dS = -dRho_DS * inv_rhosqr
+  dSV_dT = -dRho_dT * inv_rhosqr
+  dSV_dS = -dRho_dS * inv_rhosqr
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
 
