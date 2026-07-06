@@ -531,8 +531,8 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
   real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
   real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
 
-  call this%calculate_density_derivs_elem(T, S, pressure, drho_dT, drho_dS)
-  rho = this%density_elem(T, S, pressure)
+  call calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, dRho_dT, dRho_dS)
+  rho = density_elem_Roquet_rho(this, T, S, pressure)
   dSV_dT = -dRho_DT/(rho**2)
   dSV_dS = -dRho_DS/(rho**2)
 
