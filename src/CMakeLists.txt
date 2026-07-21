@@ -217,7 +217,7 @@ target_sources(mom6shared PRIVATE
   parameterizations/lateral/MOM_interface_filter.F90
   parameterizations/lateral/MOM_internal_tides.F90
   parameterizations/lateral/MOM_lateral_mixing_coeffs.F90
-  parameterizations/lateral/MOM_load_love_numbers.F90
+  parameterizations/lateral/MOM_load_Love_numbers.F90
   parameterizations/lateral/MOM_MEKE.F90
   parameterizations/lateral/MOM_MEKE_types.F90
   parameterizations/lateral/MOM_mixed_layer_restrat.F90
