@@ -51,6 +51,15 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -qno-opt-dynamic-align  -convert big_endian -assume byterecl -ftz -traceback -assume realloc_lhs -fp-model precise -r8 -g -grecord-gcc-switches")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O2")
   set(CMAKE_Fortran_FLAGS_DEBUG "-O0 -check noarg_temp_created -check all") #  -fpe0 see https://github.com/ACCESS-NRI/MOM6/issues/39
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  # -r8 promotes default REAL to 8 bytes, matching the other compiler branches
+  # above. Without it, this library's plain `real` declarations stay 4 bytes
+  # while FMS (R8 component) and the GSW-Fortran submodule (explicit real(r8),
+  # selected_real_kind(14,30)) are double precision, causing kind-mismatch
+  # compile errors (e.g. gsw_ct_freezing_exact in MOM_TFreeze.F90).
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -r8 -g")
+  set(CMAKE_Fortran_FLAGS_RELEASE "-O2")
+  set(CMAKE_Fortran_FLAGS_DEBUG "-O0 -g")
 else()
   message(WARNING "Fortran compiler with ID ${CMAKE_Fortran_COMPILER_ID} will be used with CMake default options")
 endif()
