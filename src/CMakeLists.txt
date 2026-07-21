@@ -156,6 +156,7 @@ target_sources(mom6shared PRIVATE
   framework/MOM_coms.F90
   framework/MOM_cpu_clock.F90
   framework/MOM_data_override.F90
+  framework/MOM_diag_buffers.F90
   framework/MOM_diag_mediator.F90
   framework/MOM_diag_remap.F90
   framework/MOM_document.F90
