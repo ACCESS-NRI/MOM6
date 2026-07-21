@@ -62,6 +62,43 @@ else()
   message(WARNING "Fortran compiler with ID ${CMAKE_Fortran_COMPILER_ID} will be used with CMake default options")
 endif()
 
+# Check whether the Fortran compiler supports do-concurrent locality
+# specifiers (local/local_init/reduce, Fortran 2018). Mirrors the autoconf
+# MOM6_FC_DO_CONCURRENT_LOCALITY check (ac/m4/mom6_fc_do_concurrent_locality.m4),
+# and uses the same test program.
+# Without this define, DO_LOCALITY() in do_concurrent_compat.h strips all
+# locality clauses from `do concurrent` loops, silently turning per-iteration
+# scratch variables and reductions (e.g. MOM_coms.F90, MOM_sum_output.F90)
+# into shared/racy state when the loops are actually parallelized (-stdpar=gpu).
+include(CheckFortranSourceCompiles)
+check_fortran_source_compiles(
+"program test
+  implicit none
+  integer :: i, a, b, total, bins(2), largest
+  logical :: found
+  total = 0
+  bins(:) = 0
+  largest = 0
+  found = .false.
+  b = 2
+  do concurrent(i=1:2) local(a) local_init(b) reduce(+:total,bins)
+    a = i
+    b = b * i
+    total = total + a
+    bins(:) = bins(:) + b
+  end do
+  do concurrent(i=1:2) reduce(max:largest) reduce(.or.:found)
+    largest = max(largest, i)
+    found = found .or. (i == 2)
+  end do
+end program test"
+  HAVE_FC_DO_CONCURRENT_LOCALITY
+  SRC_EXT F90
+)
+if(HAVE_FC_DO_CONCURRENT_LOCALITY)
+  add_compile_definitions(HAVE_FC_DO_CONCURRENT_LOCALITY=1)
+endif()
+
 # C compiler flags
 if(CMAKE_C_COMPILER_ID MATCHES "GNU")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -g -grecord-gcc-switches")
