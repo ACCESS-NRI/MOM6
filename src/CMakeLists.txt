@@ -51,6 +51,7 @@ target_sources(mom6shared PRIVATE
   ALE/Recon1d_PLM_CW.F90
   ALE/Recon1d_PLM_CWK.F90
   ALE/Recon1d_PLM_hybgen.F90
+  ALE/Recon1d_PLM_WLS.F90
   ALE/Recon1d_PPM_CW.F90
   ALE/Recon1d_PPM_CWK.F90
   ALE/Recon1d_PPM_H4_2018.F90
