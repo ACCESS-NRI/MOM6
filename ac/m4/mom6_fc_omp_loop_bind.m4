@@ -4,6 +4,10 @@ dnl Determine if the compiler supports the `bind` clause of the OpenMP `loop`
 dnl construct, e.g. `!$omp loop bind(teams,parallel)`.  This clause was
 dnl introduced in OpenMP 5.1 and is not yet universally supported.
 dnl
+dnl The loop of the test program must not be empty: with -g, NVHPC 26.5 stops
+dnl with an internal compiler error ("Could not locate uplevel instance") on an
+dnl empty loop in a target teams region.
+dnl
 dnl Results are cached in the `mom6_cv_fc_omp_loop_bind` variable.
 dnl
 AC_DEFUN([MOM6_FC_OMP_LOOP_BIND], [
@@ -17,11 +21,14 @@ AC_DEFUN([MOM6_FC_OMP_LOOP_BIND], [
       AC_COMPILE_IFELSE([
         AC_LANG_PROGRAM([], [
 dnl ---
-      !\$omp target teams
+      real a(2)
+      !\$omp target teams map(from: a)
       !\$omp loop bind(teams,parallel)
       do i=1,2
+        a(i) = i
       end do
       !\$omp end target teams
+      print *, a
 dnl ---
         ])
       ], [
