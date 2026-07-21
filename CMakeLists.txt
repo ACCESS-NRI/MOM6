@@ -15,14 +15,16 @@ project(MOM6
 #]==============================================================================]
 message(STATUS "Build options")
 
-option(MOM6_ACCESS3    "Build MOM6 library for use with ACCESS3"  OFF)
-option(MOM6_SOLO       "Build MOM6 solo executable"               ON)
-option(MOM6_OPENMP     "Enable OpenMP threading"                  OFF)
-option(MOM6_ASYMMETRIC "Use MOM asymmetric memory"                OFF)
+option(MOM6_ACCESS3        "Build MOM6 library for use with ACCESS3"           OFF)
+option(MOM6_SOLO           "Build MOM6 solo executable"                        ON)
+option(MOM6_OPENMP         "Enable OpenMP threading"                           OFF)
+option(MOM6_ASYMMETRIC     "Use MOM asymmetric memory"                         OFF)
+option(MOM6_USE_GENERIC_TRACER "Build with GFDL generic tracer support (GFDLGTracers/mocsy)" ON)
 message(STATUS "  - MOM6_ACCESS3     ${MOM6_ACCESS3}")
 message(STATUS "  - MOM6_SOLO        ${MOM6_SOLO}")
 message(STATUS "  - MOM6_OPENMP      ${MOM6_OPENMP}")
 message(STATUS "  - MOM6_ASYMMETRIC  ${MOM6_ASYMMETRIC}")
+message(STATUS "  - MOM6_USE_GENERIC_TRACER ${MOM6_USE_GENERIC_TRACER}")
 
 if(NOT MOM6_ACCESS3 AND NOT MOM6_SOLO)
   message(FATAL_ERROR "One of MOM6_ACCESS3 or MOM6_SOLO must be enabled")
@@ -67,7 +69,9 @@ else()
 endif()
 
 # See https://github.com/ACCESS-NRI/GFDL-generic-tracers/issues/29
-add_compile_definitions(_USE_GENERIC_TRACER) # _USE_MOM6_DIAG)
+if(MOM6_USE_GENERIC_TRACER)
+  add_compile_definitions(_USE_GENERIC_TRACER) # _USE_MOM6_DIAG)
+endif()
 
 ## Fortran modules path; currently this is simply set to be the include dir
 set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
@@ -80,7 +84,9 @@ set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
 #]==============================================================================]
 
 find_package(fms COMPONENTS R8 REQUIRED)
-find_package(GFDLGTracers REQUIRED)
+if(MOM6_USE_GENERIC_TRACER)
+  find_package(GFDLGTracers REQUIRED)
+endif()
 
 if(NOT TARGET NetCDF::NetCDF_Fortran OR NOT TARGET NetCDF::NetCDF_C) #fms provides NETCDF inteface
   message(FATAL_ERROR "NetCDF interface missing from FMS package")

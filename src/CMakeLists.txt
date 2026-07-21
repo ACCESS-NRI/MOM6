@@ -2,10 +2,13 @@
 
 add_fortran_target(mom6shared LIB mod STATIC)
 
-target_link_libraries(mom6shared PUBLIC 
-  FMS::fms_r8 
-  GFDLGTracers::gtracers
+target_link_libraries(mom6shared PUBLIC
+  FMS::fms_r8
 )
+
+if(MOM6_USE_GENERIC_TRACER)
+  target_link_libraries(mom6shared PUBLIC GFDLGTracers::gtracers)
+endif()
 
 if(OpenMP_Fortran_FOUND)
     target_link_libraries(mom6shared PRIVATE OpenMP::OpenMP_Fortran)
@@ -261,7 +264,6 @@ target_sources(mom6shared PRIVATE
   tracer/ideal_age_example.F90
   tracer/ISOMIP_tracer.F90
   tracer/MOM_CFC_cap.F90
-  tracer/MOM_generic_tracer.F90
   tracer/MOM_hor_bnd_diffusion.F90
   tracer/MARBL_forcing_mod.F90
   tracer/MARBL_tracers.F90
@@ -332,6 +334,8 @@ target_sources(mom6shared PRIVATE
 
   ../config_src/external/stochastic_physics/get_stochy_pattern.F90
   ../config_src/external/stochastic_physics/stochastic_physics.F90
+
+  ../config_src/external/GFDL_ocean_BGC/MOM_generic_tracer.F90
 
   ../config_src/infra/FMS2/MOM_coms_infra.F90
   ../config_src/infra/FMS2/MOM_constants.F90
