@@ -49,6 +49,13 @@ type, public :: file_dye_tracer_CS ; private
   !> Array of tracer source fields
   real, pointer :: tr_source(:,:,:,:) => NULL()
 
+  !> Array of non-zero source points
+  real, pointer :: tr_mask(:,:,:,:) => NULL()
+
+  !> Whether the tracer is accumulated in the source region
+  !! or simply held at the source value
+  logical :: accumulate = .true.
+
   !> If true, tracers may be initialized if not in a restart file
   logical :: tracers_may_reinit = .false.
 
@@ -99,6 +106,11 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
   ! expect a file, maybe make this fatal
   if (len_trim(CS%tracer_file) == 0) return
 
+  call get_param(param_file, mdl, "FILE_DYE_TRACERS_ACCUMULATE", CS%accumulate, &
+                 "If true, tracer is accumulated in the source region, emulating continuous "// &
+                 "forcing. Otherwise, the source region is held at the specified concentration.", &
+                 default=.true.)
+
   call get_param(param_file, mdl, "NUM_FILE_DYE_TRACERS", CS%ntr, &
                  "The number of file-based dye tracers in this run.", &
                  default=0)
@@ -110,6 +122,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
 
   allocate(CS%tr(isd:ied,jsd:jed,nz,CS%ntr), source=0.0)
   allocate(CS%tr_source(isd:ied,jsd:jed,nz,CS%ntr), source=0.0)
+  allocate(CS%tr_mask(isd:ied,jsd:jed,nz,CS%ntr), source=1.0)
 
   do m = 1, CS%ntr
     write(var_name(:), '(A,I3.3)') "dye", m
@@ -142,7 +155,7 @@ subroutine initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, spo
   type(file_dye_tracer_CS), pointer :: CS     !< This module's control structure
   type(sponge_CS), pointer :: sponge_CSp      !< Sponge control structure
 
-  integer :: m
+  integer :: i, j, k, m
   character(len=32) :: name
 
   if (.not. associated(CS)) return
@@ -158,6 +171,14 @@ subroutine initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, spo
   do m = 1, CS%ntr
     call query_vardesc(CS%tr_desc(m), name, caller="initialize_file_dye_tracer")
     call MOM_read_data(trim(CS%inputdir)//trim(CS%tracer_file), trim(name), CS%tr_source(:,:,:,m), G%Domain)
+
+    ! mask out tracer source points when we're not accumulating
+    ! update expression is tr = mask * tr + source
+    if (.not. CS%accumulate) then
+      do k = 1, GV%ke ; do j = G%jsc, G%jec ; do i = G%isc, G%iec
+        if (CS%tr_source(i,j,k,m) /= 0.0) CS%tr_mask(i,j,k,m) = 0.0
+      end do ; end do ; end do
+    end if
   end do
 
 end subroutine initialize_file_dye_tracer
@@ -217,7 +238,8 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
 
   ! add from source every timestep
   do m = 1, CS%ntr
-    CS%tr(is:ie,js:je,1:nz,m) = CS%tr(is:ie,js:je,1:nz,m) + CS%tr_source(is:ie,js:je,1:nz,m)
+    CS%tr(is:ie,js:je,1:nz,m) = CS%tr_mask(is:ie,js:je,1:nz,m) * CS%tr(is:ie,js:je,1:nz,m) &
+      + CS%tr_source(is:ie,js:je,1:nz,m)
   end do
 end subroutine file_dye_tracer_column_physics
 
@@ -280,6 +302,7 @@ subroutine file_dyes_end(CS)
   if (associated(CS)) then
     if (associated(CS%tr)) deallocate(CS%tr)
     if (associated(CS%tr_source)) deallocate(CS%tr_source)
+    if (associated(CS%tr_mask)) deallocate(CS%tr_mask)
     deallocate(CS)
   end if
 end subroutine file_dyes_end
