@@ -123,11 +123,7 @@ subroutine check_variance_underflow(G, GV, Tr, Idt, asvp)
                                  !! [CU2 H T-1 ~> conc2 m s-1 or conc2 kg m-2 s-1]
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
-  if (Tr%conc_underflow == 0) then
-    var_uf = 1e-23 * GV%H_subroundoff * Idt
-  else
-    var_uf = Tr%conc_underflow**2 * GV%H_subroundoff * Idt
-  endif
+  var_uf = Tr%var_underflow * GV%H_subroundoff * Idt
 
   do k=1,nz ; do j=js,je ; do i=is,ie
       if (abs(asvp(i,j,k)) < var_uf) asvp(i, j, k) = 0.0

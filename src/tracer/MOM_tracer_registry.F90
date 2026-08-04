@@ -189,6 +189,13 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
 
   Tr%conc_underflow = 0.0
   if (present(underflow_conc)) Tr%conc_underflow = underflow_conc
+  if (Tr%conc_underflow /= 0) then
+    Tr%var_underflow = Tr%conc_underflow**2
+  else
+    call get_param(param_file, "MOM", "NUM_MIXING_VAR_UNDERFLOW", Tr%var_underflow, &
+                 "A tiny magnitude for tracer variance used to determine when numerical mixing is set to 0.", &
+                 units=units//"2", default=1e-23, scale=conc_scale**2)
+  endif
 
   Tr%flux_nameroot = Tr%name
   if (present(flux_nameroot)) then
@@ -387,7 +394,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
       Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
           trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
           "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+          trim(Tr%units)//"2 m s-1", conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
           diag%axesCuL, Time, "Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
