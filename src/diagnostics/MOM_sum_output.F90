@@ -1075,8 +1075,8 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
     if (associated(fluxes%lprec) .and. associated(fluxes%fprec)) then
       do j=js,je ; do i=is,ie
         FW_in(i,j) = dt*G%areaT(i,j)*(fluxes%evap(i,j) + &
-            (((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
-              (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))))
+            ((((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
+              (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))) + fluxes%srunoff(i,j)))
       enddo ; enddo
     else
       call MOM_error(WARNING, &
@@ -1118,7 +1118,8 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
                        (fluxes%heat_content_evap(i,j) + fluxes%heat_content_lprec(i,j) + &
                         fluxes%heat_content_cond(i,j) + fluxes%heat_content_fprec(i,j) + &
                         fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j) + &
-                        fluxes%heat_content_lrunoff_glc(i,j) + fluxes%heat_content_frunoff_glc(i,j))
+                        fluxes%heat_content_lrunoff_glc(i,j) + fluxes%heat_content_frunoff_glc(i,j) + &
+                        fluxes%heat_content_srunoff(i,j))
       enddo ; enddo
     elseif (associated(tv%TempxPmE)) then
       do j=js,je ; do i=is,ie
