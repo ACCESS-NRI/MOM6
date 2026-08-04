@@ -48,6 +48,7 @@ target_sources(mom6shared PRIVATE
   ALE/Recon1d_PLM_CW.F90
   ALE/Recon1d_PLM_CWK.F90
   ALE/Recon1d_PLM_hybgen.F90
+  ALE/Recon1d_PLM_WLS.F90
   ALE/Recon1d_PPM_CW.F90
   ALE/Recon1d_PPM_CWK.F90
   ALE/Recon1d_PPM_H4_2018.F90
@@ -152,6 +153,7 @@ target_sources(mom6shared PRIVATE
   framework/MOM_coms.F90
   framework/MOM_cpu_clock.F90
   framework/MOM_data_override.F90
+  framework/MOM_diag_buffers.F90
   framework/MOM_diag_mediator.F90
   framework/MOM_diag_remap.F90
   framework/MOM_document.F90
@@ -217,6 +219,7 @@ target_sources(mom6shared PRIVATE
   parameterizations/lateral/MOM_load_love_numbers.F90
   parameterizations/lateral/MOM_MEKE.F90
   parameterizations/lateral/MOM_MEKE_types.F90
+  parameterizations/lateral/MOM_meso_sfn_ANN.F90
   parameterizations/lateral/MOM_mixed_layer_restrat.F90
   parameterizations/lateral/MOM_spherical_harmonics.F90
   parameterizations/lateral/MOM_streaming_filter.F90
@@ -332,6 +335,7 @@ target_sources(mom6shared PRIVATE
 
   ../config_src/external/stochastic_physics/get_stochy_pattern.F90
   ../config_src/external/stochastic_physics/stochastic_physics.F90
+  ../config_src/external/stochastic_physics/stochy_data_mod.F90
 
   ../config_src/infra/FMS2/MOM_coms_infra.F90
   ../config_src/infra/FMS2/MOM_constants.F90
