@@ -940,6 +940,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Sa_pslv"        , "will provide")
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofl"      , "will provide") !-> liquid runoff
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofi"      , "will provide") !-> ice runoff
+  call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofb"      , "will provide") !-> basal melt
   if (cesm_coupled) then
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofl_glc"  , "will provide") !-> liquid glc runoff
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofi_glc"  , "will provide") !-> frozen glc runoff
@@ -1391,6 +1392,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
                            ice_ocean_boundary=Ice_ocean_boundary, mesh=Emesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call allocate_optional_iob_fields(importState, Ice_ocean_boundary, isc, iec, jsc, jec)
 
     call MOM_RealizeFields(exportState, fldsFrOcn_num, fldsFrOcn, "Ocn export", mesh=Emesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -1682,6 +1684,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
          ice_ocean_boundary=Ice_ocean_boundary, grid=gridIn, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    call allocate_optional_iob_fields(importState, Ice_ocean_boundary, isc, iec, jsc, jec)
 
     call MOM_RealizeFields(exportState, fldsFrOcn_num, fldsFrOcn, "Ocn export", grid=gridOut, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2523,6 +2526,24 @@ subroutine State_SetScalar(value, scalar_id, State, mytask, scalar_name, scalar_
 
 end subroutine State_SetScalar
 
+!> Allocate ice_ocean_boundary fields whose presence depends on whether the coupler
+!! actually connects the corresponding field, rather than on a compile-time flag.
+subroutine allocate_optional_iob_fields(importState, ice_ocean_boundary, isc, iec, jsc, jec)
+  type(ESMF_State)             , intent(in)    :: importState !< Import ESMF_State object.
+  type(ice_ocean_boundary_type), intent(inout) :: ice_ocean_boundary !< Fields from the mediator.
+  integer                      , intent(in)    :: isc !< Start i-index of the computational domain.
+  integer                      , intent(in)    :: iec !< End i-index of the computational domain.
+  integer                      , intent(in)    :: jsc !< Start j-index of the computational domain.
+  integer                      , intent(in)    :: jec !< End j-index of the computational domain.
+  character(len=*), parameter :: subname = '(MOM_cap:allocate_optional_iob_fields)'
+
+  if (NUOPC_IsConnected(importState, fieldName='Foxx_rofb')) then
+    if (is_root_pe()) write(stdout,*) subname // " Allocating ice_ocean_boundary%brunoff"
+    allocate(ice_ocean_boundary%brunoff(isc:iec,jsc:jec), source=0.0)
+  endif
+
+end subroutine allocate_optional_iob_fields
+
 !> Realize the import and export fields using either a grid or a mesh.
 subroutine MOM_RealizeFields(state, nfields, field_defs, tag, ice_ocean_boundary, grid, mesh, rc)
   type(ESMF_State)             , intent(inout)           :: state !< ESMF_State object for
@@ -3079,6 +3100,14 @@ end subroutine shr_log_setLogUnit
 !!     <td>kg m-2 s-1</td>
 !!     <td>runoff</td>
 !!     <td>mass flux of frozen runoff</td>
+!!     <td></td>
+!! </tr>
+!! <tr>
+!!     <td>Foxx_rofb</td>
+!!     <td>kg m-2 s-1</td>
+!!     <td>runoff</td>
+!!     <td>mass flux of ice-shelf basal runoff. Only allocated in Ice_ocean_boundary if
+!!     advertised by the coupler.</td>
 !!     <td></td>
 !! </tr>
 !! <tr>
