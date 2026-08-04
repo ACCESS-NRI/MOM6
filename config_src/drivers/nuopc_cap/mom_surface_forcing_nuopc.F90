@@ -86,6 +86,11 @@ type, public :: surface_forcing_CS ; private
   logical :: use_marbl_tracers  !< enables the MARBL tracer package.
   logical :: enthalpy_cpl       !< Controls if enthalpy terms are provided by the coupler or computed
                                 !! internally.
+  logical :: brunoff_latent_heat !< If true, give basal runoff (brunoff) an effective temperature
+                                !! offset by latent_heat_fusion/C_p, following the Gade (1979)
+                                !! meltwater mixing line, so that melting the ice consumes latent
+                                !! heat. If false, brunoff enters the ocean at the ambient
+                                !! temperature.
   real :: gust_const            !< constant unresolved background gustiness for ustar [R L Z T-2 ~> Pa]
   logical :: read_gust_2d       !< If true, use a 2-dimensional gustiness supplied
                                 !! from an input file.
@@ -166,6 +171,7 @@ end type surface_forcing_CS
 type, public :: ice_ocean_boundary_type
   real, pointer, dimension(:,:) :: lrunoff           =>NULL() !< liquid runoff [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff           =>NULL() !< ice runoff [km m-2 s-1]
+  real, pointer, dimension(:,:) :: brunoff           =>NULL() !< ice-shelf basal melt [km m-2 s-1]
   real, pointer, dimension(:,:) :: lrunoff_glc       =>NULL() !< liquid glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff_glc       =>NULL() !< frozen glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: u_flux            =>NULL() !< i-direction wind stress [Pa]
@@ -330,6 +336,8 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
                                press=.true., fix_accum_bug=.not.CS%ustar_gustless_bug, &
                                cfc=CS%use_CFC, marbl=CS%use_marbl_tracers, hevap=CS%enthalpy_cpl, &
                                tau_mag=.true., ice_ncat=IOB%ice_ncat)
+    fluxes%latent_heat_fusion = CS%latent_heat_fusion
+    fluxes%brunoff_latent_heat = CS%brunoff_latent_heat
     call safe_alloc_ptr(fluxes%omega_w2x,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dir,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dif,isd,ied,jsd,jed)
@@ -503,6 +511,15 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%frunoff(i,j) = kg_m2_s_conversion * IOB%frunoff(i-i0,j-j0) * G%mask2dT(i,j)
     endif
 
+    ! basal runoff flux
+    if (associated(IOB%brunoff)) then
+      fluxes%brunoff(i,j) = kg_m2_s_conversion * IOB%brunoff(i-i0,j-j0) * G%mask2dT(i,j)
+      ! Total latent heat extracted by ice-shelf basal melt (not depth-dependent)
+      if (CS%brunoff_latent_heat) &
+        fluxes%latent_brunoff_diag(i,j) = - G%mask2dT(i,j) * &
+            IOB%brunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
+    endif
+
     ! add liquid glc runoff flux via rof
     if (associated(IOB%lrunoff_glc)) then
       fluxes%lrunoff_glc(i,j) = kg_m2_s_conversion * IOB%lrunoff_glc(i-i0,j-j0) * G%mask2dT(i,j)
@@ -557,6 +574,10 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%latent_frunoff_glc_diag(i,j) = fluxes%latent_frunoff_glc_diag(i,j) - G%mask2dT(i,j) * &
           IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
+    ! Ice-shelf basal melt (brunoff) is not included in fluxes%latent. Instead, the latent heat
+    ! extraction from the ocean due to basal melt is accounted for as a Gade (1979)-line effective
+    ! temperature offset via fluxes%heat_content_brunoff in MOM_forcing_type.F90, so that the same
+    ! code path can be extended to include depth-distribution of basal melt in the future.
     if (associated(IOB%q_flux)) then
       fluxes%latent(i,j)           = fluxes%latent(i,j) + &
           IOB%q_flux(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_vapor
@@ -1216,6 +1237,11 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, restore_salt,
                  "The latent heat of fusion.", units="J/kg", default=hlf)
   call get_param(param_file, mdl, "LATENT_HEAT_VAPORIZATION", CS%latent_heat_vapor, &
                  "The latent heat of fusion.", units="J/kg", default=hlv)
+  call get_param(param_file, mdl, "BRUNOFF_LATENT_HEAT", CS%brunoff_latent_heat, &
+                 "If true, give basal runoff (brunoff) an effective temperature offset by "//&
+                 "LATENT_HEAT_FUSION/C_p, following the Gade (1979) meltwater mixing line, "//&
+                 "so that melting the ice consumes latent heat. If false, brunoff enters "// &
+                 "the ocean at the ambient temperature.", default=.false.)
   call get_param(param_file, mdl, "MAX_P_SURF", CS%max_p_surf, &
                  "The maximum surface pressure that can be exerted by the "//&
                  "atmosphere and floating sea-ice or ice shelves. This is "//&
@@ -1581,6 +1607,9 @@ subroutine ice_ocn_bnd_type_chksum(id, timestep, iobt)
   chks = field_chksum( iobt%fprec          ) ; if (root) write(outunit,100) 'iobt%fprec          ', chks
   chks = field_chksum( iobt%lrunoff        ) ; if (root) write(outunit,100) 'iobt%lrunoff        ', chks
   chks = field_chksum( iobt%frunoff        ) ; if (root) write(outunit,100) 'iobt%frunoff        ', chks
+  if (associated(iobt%brunoff)) then
+    chks = field_chksum( iobt%brunoff      ) ; if (root) write(outunit,100) 'iobt%brunoff        ', chks
+  endif
   chks = field_chksum( iobt%lrunoff_glc    ) ; if (root) write(outunit,100) 'iobt%lrunoff_glc    ', chks
   chks = field_chksum( iobt%frunoff_glc    ) ; if (root) write(outunit,100) 'iobt%frunoff_glc    ', chks
   chks = field_chksum( iobt%p              ) ; if (root) write(outunit,100) 'iobt%p              ', chks
