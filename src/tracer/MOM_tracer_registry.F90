@@ -194,7 +194,7 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
   else
     call get_param(param_file, "MOM", "NUM_MIXING_VAR_UNDERFLOW", Tr%var_underflow, &
                  "A tiny magnitude for tracer variance used to determine when numerical mixing is set to 0.", &
-                 units=units//"2", default=1e-23, scale=conc_scale**2)
+                 units=Tr%units//"2", default=1e-23, scale=Tr%conc_scale**2)
   endif
 
   Tr%flux_nameroot = Tr%name
