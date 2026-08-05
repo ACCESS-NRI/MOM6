@@ -805,12 +805,9 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme varianve production of a
                                                       ! tracer [CU2 H T-1 ~> conc2 m s-1]
-  real :: H_to_RZ_dt      ! A conversion factor from accumulated transports to fluxes
-                          ! [R Z H-1 T-1 ~> kg m-3 s-1 or s-1].
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
-  H_to_RZ_dt = GV%H_to_RZ * Idt
 
   ! If any tracers are posting 100m vertical integrals, compute weights
   frac_under_100m(:,:,:) = 0.0
