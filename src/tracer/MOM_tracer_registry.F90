@@ -803,7 +803,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme varianve production of a
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme variance production of a
                                                       ! tracer [CU2 H T-1 ~> conc2 m s-1]
   type(tracer_type), pointer :: Tr=>NULL()
 
