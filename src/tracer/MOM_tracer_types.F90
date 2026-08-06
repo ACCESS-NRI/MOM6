@@ -71,8 +71,9 @@ type, public :: tracer_type
                                                               !! diagnostics associated with this tracer.
   real                            :: conc_underflow = 0.0     !< A magnitude of tracer concentrations below
                                                               !! which values should be set to 0. [CU ~> conc]
-  real                            :: var_underflow = 0.0      !< A magnitude of tracer variance concentrations below
-                                                              !! which values should be set to 0. [CU2 ~> conc2]
+  real                            :: var_underflow = 0.0      !< A magnitude of tracer variance concentrations used to
+                                                              !! determine when advection scheme variance production
+                                                              !! values should be set to 0. [CU2 ~> conc2]
   real                            :: conc_scale = 1.0         !< A scaling factor used to convert the concentrations
                                                               !! of this tracer to its desired units [CU conc-1 ~> 1]
   character(len=64)               :: cmor_name                !< CMOR name of this tracer
@@ -128,13 +129,15 @@ end type tracer_type
 
 !> Type to carry basic tracer information
 type, public :: tracer_registry_type
-  integer                  :: ntr = 0           !< number of registered tracers
-  type(tracer_type)        :: Tr(MAX_FIELDS_)   !< array of registered tracers
-! type(diag_ctrl), pointer :: diag              !< structure to regulate timing of diagnostics
-  logical                  :: locked = .false.  !< New tracers may be registered if locked=.false.
-                                                !! When locked=.true., no more tracers can be registered,
-                                                !! at which point common diagnostics can be set up
-                                                !! for the registered tracers
+  integer                  :: ntr = 0                 !< number of registered tracers
+  type(tracer_type)        :: Tr(MAX_FIELDS_)         !< array of registered tracers
+! type(diag_ctrl), pointer :: diag                    !< structure to regulate timing of diagnostics
+  logical                  :: locked = .false.        !< New tracers may be registered if locked=.false.
+                                                      !! When locked=.true., no more tracers can be registered,
+                                                      !! at which point common diagnostics can be set up
+                                                      !! for the registered tracers
+  real                     :: nondim_asvar_underflow  !< A tiny, non-dimensional value used to determine when advection
+                                                      !! scheme variance production should be set to zero. [nondim]
 end type tracer_registry_type
 
 
