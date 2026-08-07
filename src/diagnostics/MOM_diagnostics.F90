@@ -1705,7 +1705,7 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
     call post_data(IDs%id_dynamics_h_tendency, h_tend, diag, alt_h=diag_pre_dyn%h_state)
   endif
 
-  call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag)
+  call post_tracer_transport_diagnostics(G, GV, Reg, diag_pre_dyn%h_state, diag, uhtr, vhtr, h, dt_trans, Idt)
 
   call diag_restore_grids(diag)
 

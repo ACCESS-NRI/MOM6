@@ -14,6 +14,7 @@ use MOM_debugging,     only : hchksum
 use MOM_diag_mediator, only : diag_ctrl, register_diag_field, post_data, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_grid_storage
 use MOM_diag_mediator, only : diag_copy_storage_to_diag, diag_save_grids, diag_restore_grids
+use MOM_domains,       only : pass_var
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, MOM_mesg, is_root_pe
 use MOM_file_parser,   only : get_param, log_version, param_file_type
 use MOM_hor_index,     only : hor_index_type
@@ -25,6 +26,7 @@ use MOM_time_manager,  only : time_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_verticalGrid,  only : verticalGrid_type
 use MOM_tracer_types,  only : tracer_type, tracer_registry_type
+use MOM_tracer_numerical_mixing,  only : advection_scheme_variance_production
 
 implicit none ; private
 
@@ -187,6 +189,9 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
 
   Tr%conc_underflow = 0.0
   if (present(underflow_conc)) Tr%conc_underflow = underflow_conc
+
+  ! transform asvar_underflow from [Conc2] ~> [CU2] to get correct internal units for each tracer
+  Tr%var_underflow = Reg%asvar_underflow / (Tr%conc_scale**2)
 
   Tr%flux_nameroot = Tr%name
   if (present(flux_nameroot)) then
@@ -408,6 +413,12 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           flux_units, v_extensive=.true., conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T, &
           x_cell_method='sum')
     endif
+    unit2 = trim(units)//"2"
+    if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
+    Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
+        trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
+        "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
+        trim(unit2)//" m s-1", conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
         "Thickness-weighted integral of " // trim(longname), &
@@ -418,8 +429,10 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         trim(units) // " m")
     Tr%id_surf = register_diag_field("ocean_model", trim(shortnm)//"_SURF", &
         diag%axesT1, Time, "Surface values of "// trim(longname), trim(units))
-    if (Tr%id_adx > 0) call safe_alloc_ptr(Tr%ad_x,IsdB,IedB,jsd,jed,nz)
-    if (Tr%id_ady > 0) call safe_alloc_ptr(Tr%ad_y,isd,ied,JsdB,JedB,nz)
+    if ((Tr%id_adx > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+      call safe_alloc_ptr(Tr%ad_x,IsdB,IedB,jsd,jed,nz)
+    if ((Tr%id_ady > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+      call safe_alloc_ptr(Tr%ad_y,isd,ied,JsdB,JedB,nz)
     if (Tr%id_dfx > 0) call safe_alloc_ptr(Tr%df_x,IsdB,IedB,jsd,jed,nz)
     if (Tr%id_dfy > 0) call safe_alloc_ptr(Tr%df_y,isd,ied,JsdB,JedB,nz)
     if (Tr%id_hbd_dfx > 0) call safe_alloc_ptr(Tr%hbd_dfx,IsdB,IedB,jsd,jed,nz)
@@ -468,7 +481,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         diag%axesT1, Time, &
         'Vertical sum of horizontal convergence of residual mean advective fluxes of '//&
         trim(lowercase(flux_longname)), conv_units, conversion=Tr%conv_scale*US%s_to_T)
-    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0)) &
+    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
       call safe_alloc_ptr(Tr%advection_xy,isd,ied,jsd,jed,nz)
 
     Tr%id_tendency = register_diag_field('ocean_model', trim(shortnm)//'_tendency', &
@@ -476,9 +489,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         'Net time tendency for '//trim(lowercase(longname)), &
         trim(units)//' s-1', conversion=Tr%conc_scale*US%s_to_T)
 
-    if (Tr%id_tendency > 0) then
+    if ((Tr%id_tendency > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) then
       call safe_alloc_ptr(Tr%t_prev,isd,ied,jsd,jed,nz)
-      do k=1,nz ; do j=js,je ; do i=is,ie
+      do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
         Tr%t_prev(i,j,k) = Tr%t(i,j,k)
       enddo ; enddo ; enddo
     endif
@@ -603,8 +616,6 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
     endif
 
     if (use_ALE .and. (Reg%ntr<MAX_FIELDS_) .and. Tr%remap_tr) then
-      unit2 = trim(units)//"2"
-      if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
       Tr%id_tr_vardec = register_diag_field('ocean_model', trim(shortnm)//"_vardec", diag%axesTL, &
           Time, "ALE variance decay for "//lowercase(longname), &
           trim(unit2)//" s-1", conversion=Tr%conc_scale**2*US%s_to_T)
@@ -733,6 +744,12 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
       enddo ; enddo ; enddo
       call post_data(Tr%id_tendency, work3d, diag, alt_h=diag_prev%h_state)
     endif
+    if (Tr%id_advection_scheme_variance_production > 0) then
+      call pass_var(Tr%t, G%Domain, halo=1)
+      do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
+        tr%t_prev(i,j,k) =  Tr%t(i,j,k)
+      enddo ; enddo ; enddo
+    endif
     if ((Tr%id_trxh_tendency > 0) .or. (Tr%id_trxh_tendency_2d > 0)) then
       do k=1,nz ; do j=js,je ; do i=is,ie
         work3d(i,j,k)     = (Tr%t(i,j,k)*h(i,j,k) - Tr%Trxh_prev(i,j,k)) * Idt
@@ -754,13 +771,23 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
 end subroutine post_tracer_diagnostics_at_sync
 
 !> Post the advective and diffusive tendencies
-subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
+subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vhtr, h, dt_trans, Idt)
   type(ocean_grid_type),      intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type),    intent(in) :: GV   !< The ocean's vertical grid structure
   type(tracer_registry_type), pointer    :: Reg  !< pointer to the tracer registry
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               intent(in) :: h_diag !< Layer thicknesses on which to post fields [H ~> m or kg m-2]
   type(diag_ctrl),            intent(in) :: diag !< structure to regulate diagnostic output
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
+                              intent(in) :: uhtr !< Accumulated zonal thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
+                              intent(in) :: vhtr !< Accumulated meridional thickness fluxes
+                                                 !! used to advect tracers [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                              intent(in) :: h   !< The updated layer thicknesses [H ~> m or kg m-2]
+  real,                       intent(in) :: dt_trans  !< The transport time interval [T ~> s]
+  real,                       intent(in) :: Idt       !< The inverse of the time interval [T-1 ~> s-1]
 
   integer :: i, j, k, is, ie, js, je, nz, m, khi
   real    :: work2d(SZI_(G),SZJ_(G))      ! The vertically integrated convergence of lateral advective
@@ -768,6 +795,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme variance production of a
+                                                      ! tracer [CU2 H T-1 ~> conc2 m s-1]
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -819,6 +848,12 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
         work2d(i,j) = work2d(i,j) + Tr%advection_xy(i,j,k)
       enddo ; enddo ; enddo
       call post_data(Tr%id_adv_xy_2d, work2d, diag)
+    endif
+
+    if (Tr%id_advection_scheme_variance_production > 0) then
+      asvp(:,:,:) = 0.
+      call advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, asvp)
+      call post_data(Tr%id_advection_scheme_variance_production, asvp, diag, alt_h=h_diag)
     endif
 
     ! A few diagnostics introduce with MARBL driver
@@ -976,6 +1011,13 @@ subroutine tracer_registry_init(param_file, Reg)
 
   if (.not.associated(Reg)) then ; allocate(Reg)
   else ; return ; endif
+
+  ! Read in the nondim value that is used to set the underflow value below which advection scheme variance
+  ! production is set to zero
+  call get_param(param_file, mdl, "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%asvar_underflow, &
+               "A tiny magnitude for variance used to determine when advection scheme variance &
+                production is set to 0.", &
+               units='Conc2 (tracer dependent)', default=1e-23)
 
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, mdl, version, "", all_default=.true.)

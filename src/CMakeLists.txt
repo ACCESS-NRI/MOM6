@@ -274,6 +274,7 @@ target_sources(mom6shared PRIVATE
   tracer/MOM_tracer_diabatic.F90
   tracer/MOM_tracer_flow_control.F90
   tracer/MOM_tracer_hor_diff.F90
+  tracer/MOM_tracer_numerical_mixing.F90
   tracer/MOM_tracer_registry.F90
   tracer/MOM_tracer_types.F90
   tracer/MOM_tracer_Z_init.F90
