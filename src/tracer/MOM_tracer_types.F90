@@ -129,15 +129,15 @@ end type tracer_type
 
 !> Type to carry basic tracer information
 type, public :: tracer_registry_type
-  integer                  :: ntr = 0          !< number of registered tracers
-  type(tracer_type)        :: Tr(MAX_FIELDS_)  !< array of registered tracers
-! type(diag_ctrl), pointer :: diag             !< structure to regulate timing of diagnostics
-  logical                  :: locked = .false. !< New tracers may be registered if locked=.false.
-                                               !! When locked=.true., no more tracers can be registered,
-                                               !! at which point common diagnostics can be set up
-                                               !! for the registered tracers
+  integer                  :: ntr = 0           !< number of registered tracers
+  type(tracer_type)        :: Tr(MAX_FIELDS_)   !< array of registered tracers
+! type(diag_ctrl), pointer :: diag              !< structure to regulate timing of diagnostics
+  logical                  :: locked = .false.  !< New tracers may be registered if locked=.false.
+                                                !! When locked=.true., no more tracers can be registered,
+                                                !! at which point common diagnostics can be set up
+                                                !! for the registered tracers
   real                     :: asvar_underflow  !< A tiny, value used to determine when advection scheme variance
-                                               !! production should be set to zero. [conc2]
+                                                !! production should be set to zero. [conc2]
 end type tracer_registry_type
 
 
