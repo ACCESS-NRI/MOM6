@@ -164,6 +164,7 @@ type, public :: transport_diag_IDs ; private
   !>@}
 end type transport_diag_IDs
 
+
 contains
 !> Diagnostics not more naturally calculated elsewhere are computed here.
 subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
