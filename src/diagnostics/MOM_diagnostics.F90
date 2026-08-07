@@ -29,7 +29,7 @@ use MOM_grid,              only : ocean_grid_type
 use MOM_interface_heights, only : find_eta, find_col_mass
 use MOM_spatial_means,     only : global_area_mean, global_layer_mean
 use MOM_spatial_means,     only : global_volume_mean, global_area_integral
-use MOM_tracer_registry,   only : tracer_type, tracer_registry_type, post_tracer_transport_diagnostics
+use MOM_tracer_registry,   only : tracer_registry_type, post_tracer_transport_diagnostics
 use MOM_unit_scaling,      only : unit_scale_type
 use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
 use MOM_variables,         only : accel_diag_ptrs, cont_diag_ptrs, surface
