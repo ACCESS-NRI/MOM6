@@ -1018,8 +1018,8 @@ subroutine tracer_registry_init(param_file, Reg)
 
   ! Read in the nondim value that is used to set the underflow value below which advection scheme variance
   ! production is set to zero
-  call get_param(param_file, "MOM", "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%asvar_underflow, &
-               "A tiny, non-dimensional magnitude for varince used to determine when advection scheme variance &
+  call get_param(param_file, mdl, "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%asvar_underflow, &
+               "A tiny magnitude for variance used to determine when advection scheme variance &
                 production is set to 0.", &
                units='Conc2 (tracer dependent)', default=1e-23)
 
