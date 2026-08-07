@@ -387,10 +387,6 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           "flux from the horizontal boundary diffusion scheme", trim(flux_units), &
           v_extensive=.true., &
           x_cell_method='sum', conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T)
-      Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
-          trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
-          "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     else
       Tr%id_adx = register_diag_field("ocean_model", trim(shortnm)//"_adx", &
           diag%axesCuL, Time, "Advective (by residual mean) Zonal Flux of "//trim(flux_longname), &
@@ -416,11 +412,13 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
           "Horizontal Boundary Diffusive Meridional Flux of "//trim(flux_longname), &
           flux_units, v_extensive=.true., conversion=(US%L_to_m**2)*Tr%flux_scale*US%s_to_T, &
           x_cell_method='sum')
-      Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
-          trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
-          "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
-          trim(Tr%units)//"2 m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     endif
+    unit2 = trim(units)//"2"
+    if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
+    Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
+        trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
+        "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
+        trim(unit2)//"m s-1", conversion=(TR%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
         "Thickness-weighted integral of " // trim(longname), &
@@ -618,8 +616,6 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
     endif
 
     if (use_ALE .and. (Reg%ntr<MAX_FIELDS_) .and. Tr%remap_tr) then
-      unit2 = trim(units)//"2"
-      if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
       Tr%id_tr_vardec = register_diag_field('ocean_model', trim(shortnm)//"_vardec", diag%axesTL, &
           Time, "ALE variance decay for "//lowercase(longname), &
           trim(unit2)//" s-1", conversion=Tr%conc_scale**2*US%s_to_T)
@@ -750,7 +746,7 @@ subroutine post_tracer_diagnostics_at_sync(Reg, h, diag_prev, diag, G, GV, dt)
     endif
     if (Tr%id_advection_scheme_variance_production > 0) then
       call pass_var(Tr%t, G%Domain, halo=2)
-      do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
+      do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
         tr%t_prev(i,j,k) =  Tr%t(i,j,k)
       enddo ; enddo ; enddo
     endif
