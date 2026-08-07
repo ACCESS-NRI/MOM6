@@ -190,7 +190,8 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
   Tr%conc_underflow = 0.0
   if (present(underflow_conc)) Tr%conc_underflow = underflow_conc
 
-  Tr%var_underflow = Reg%nondim_asvar_underflow ! var_underflow has units [CU2] so I think this now has correct units
+  ! transform asvar_underflow from [Conc2] ~> [CU2] to get correct internal units for each tracer
+  Tr%var_underflow = Reg%asvar_underflow / (Tr%conc_scale**2)
 
   Tr%flux_nameroot = Tr%name
   if (present(flux_nameroot)) then
@@ -1017,10 +1018,10 @@ subroutine tracer_registry_init(param_file, Reg)
 
   ! Read in the nondim value that is used to set the underflow value below which advection scheme variance
   ! production is set to zero
-  call get_param(param_file, "MOM", "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%nondim_asvar_underflow, &
+  call get_param(param_file, "MOM", "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%asvar_underflow, &
                "A tiny, non-dimensional magnitude for varince used to determine when advection scheme variance &
                 production is set to 0.", &
-               units='nondim', default=1e-23)
+               units='Conc2 (tracer dependent)', default=1e-23)
 
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, mdl, version, "", all_default=.true.)
