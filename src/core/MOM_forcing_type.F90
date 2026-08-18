@@ -651,11 +651,10 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
 
     ! net volume/mass of liquid and solid passing through surface boundary fluxes
     netMassInOut(i) = dt * (scale * &
-                                 ((((((((( fluxes%lprec(i,j)        &
+                                 (((((((( fluxes%lprec(i,j)        &
                                         + fluxes%fprec(i,j)      )  &
                                         + fluxes%evap(i,j)       )  &
                                         + fluxes%lrunoff(i,j)    )  &
-                                        + fluxes%brunoff(i,j)    )  &
                                         + fluxes%lrunoff_glc(i,j))  &
                                         + fluxes%vprec(i,j)      )  &
                                         + fluxes%seaice_melt(i,j))  &
@@ -664,11 +663,10 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
 
     if (do_NMIOr) then  ! Repeat the above code without multiplying by a timestep for legacy reasons
       netMassInOut_rate(i) = (scale * &
-                                 ((((((((( fluxes%lprec(i,j)      &
+                                 (((((((( fluxes%lprec(i,j)      &
                                         + fluxes%fprec(i,j)      )  &
                                         + fluxes%evap(i,j)       )  &
                                         + fluxes%lrunoff(i,j)    )  &
-                                        + fluxes%brunoff(i,j)    )  &
                                         + fluxes%lrunoff_glc(i,j))  &
                                         + fluxes%vprec(i,j)      )  &
                                         + fluxes%seaice_melt(i,j))  &
@@ -761,32 +759,6 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
             (I_Cp*fluxes%heat_content_lrunoff(i,j) - fluxes%lrunoff(i,j)*T(i,1))
         tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + (scale * dt) * &
             (I_Cp*fluxes%heat_content_lrunoff_glc(i,j) - fluxes%lrunoff_glc(i,j)*T(i,1))
-      endif
-    endif
-
-    ! Add explicit heat flux for basal melt (brunoff). Basal melt is added at the ambient
-    ! temperature which is not available at depth in the coupler, so there is no option for a
-    ! coupler-supplied heat content. The heat content computed here optionally includes the latent
-    ! heat to melt the ice, accounted for by an effective temperature offset following
-    ! the Gade (1979) meltwater mixing line.
-    if (associated(fluxes%brunoff) .and. associated(fluxes%heat_content_brunoff)) then
-      if (fluxes%brunoff_latent_heat) then
-        fluxes%heat_content_brunoff(i,j) = tv%C_p*fluxes%brunoff(i,j)*T(i,1) - &
-            fluxes%brunoff(i,j)*fluxes%latent_heat_fusion*US%J_kg_to_Q
-      else
-        fluxes%heat_content_brunoff(i,j) = tv%C_p*fluxes%brunoff(i,j)*T(i,1)
-      endif
-
-      net_heat(i) = net_heat(i) + (scale*(dt * I_Cp_Hconvert)) * fluxes%heat_content_brunoff(i,j)
-
-      if (do_enthalpy) then
-        ! remove brunoff*SST here, to counteract its addition in applyBoundaryFluxesInOut
-        net_heat(i) = net_heat(i) - (GV%RZ_to_H * (scale * dt)) * fluxes%brunoff(i,j) * T(i,1)
-
-        if (calculate_diags .and. associated(tv%TempxPmE)) then
-          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + (scale * dt) * &
-              (I_Cp*fluxes%heat_content_brunoff(i,j) - fluxes%brunoff(i,j)*T(i,1))
-        endif
       endif
     endif
 
@@ -992,9 +964,8 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
 
       if (associated(tv%TempxPmE)) then
         tv%TempxPmE(i,j) =  (I_Cp*dt*scale) * &
-         (((((fluxes%heat_content_lprec(i,j) + fluxes%heat_content_fprec(i,j)) + &
+         ((((fluxes%heat_content_lprec(i,j) + fluxes%heat_content_fprec(i,j)) + &
             (fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j))) + &
-            fluxes%heat_content_brunoff(i,j)) + &
             (fluxes%heat_content_lrunoff_glc(i,j) + fluxes%heat_content_frunoff_glc(i,j))) + &
             (fluxes%heat_content_evap(i,j) + fluxes%heat_content_cond(i,j)))
       endif
