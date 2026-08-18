@@ -1999,6 +1999,10 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("layered_diabatic(), MOM_diabatic_driver.F90")
 
+  if (associated(fluxes%brunoff)) call MOM_error(FATAL, &
+    "layered_diabatic: basal runoff (brunoff) coupling requires the ALE algorithm; "//&
+    "it is not supported with the layered (non-ALE) diabatic driver.")
+
   ! set equivalence between the same bits of memory for these arrays
   eaml => eatr ; ebml => ebtr
 
@@ -3334,7 +3338,9 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "and applied as either incoming or outgoing depending on the sign of the net. "//&
                  "If false, the net incoming fresh water flux is added to the model and "//&
                  "thereafter the net outgoing is removed from the topmost non-vanished "//&
-                 "layers of the updated state.", default=.true.)
+                 "layers of the updated state. This does not apply to basal runoff (brunoff), "//&
+                 "which is always distributed by distribute_brunoff (MOM_diabatic_aux.F90), "//&
+                 "independent of this setting.", default=.true.)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
