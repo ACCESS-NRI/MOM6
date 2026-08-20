@@ -9,7 +9,7 @@ module MOM_tracer_diabatic
 
 use MOM_grid,             only : ocean_grid_type
 use MOM_verticalGrid,     only : verticalGrid_type
-use MOM_forcing_type,     only : forcing
+use MOM_forcing_type,     only : forcing, distribute_srunoff
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
 
 implicit none ; private
@@ -612,6 +612,13 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
       endif
 
     enddo ! i
+
+    ! Distribute submarine melt (srunoff) mass over a range of depths, if requested, diluting
+    ! this tracer according.
+    ! Because srunoff is applied after loop B above, it's possible that groundings could be
+    ! reported when in fact they would not have occured had srunoff been accounted for. It
+    ! might be better to do this before loop A and B?
+    if (associated(fluxes%srunoff)) call distribute_srunoff(G, GV, dt, fluxes, j, h2d, Tr2d)
 
     ! Step C/ copy updated tracer concentration from the 2d slice now back into model state.
     do k=1,nz ; do i=is,ie
