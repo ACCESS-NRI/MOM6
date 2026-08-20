@@ -54,6 +54,8 @@ type, public :: continuity_PPM_CS ; private
   real :: h_marg_min         !< Negligible floor on h_marg, the marginal thickness
                              !! used to calculate the partial derivative of transports
                              !! with velocities [H ~> m or kg m-2]
+  logical :: use_h_marg_min  !< If true, apply the floor h_marg_min to h_marg.  If false,
+                             !! h_marg is used unmodified, including when it is negative.
   logical :: aggress_adjust  !< If true, allow the adjusted velocities to have a
                              !! relative CFL change up to 0.5.  False by default.
   logical :: vol_CFL         !< If true, use the ratio of the open face lengths
@@ -631,7 +633,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       call zonal_flux_layer(u(:,j,k), h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), &
                             uh(:,j,k), duhdu(:,k), visc_rem(:,k), &
                             dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
       if (local_specified_BC) then
         do I=ish-1,ieh ; if (OBC%segnum_u(I,j) /= 0) then
           l_seg = abs(OBC%segnum_u(I,j))
@@ -882,7 +884,7 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
       ! This sets uh and duhdu.
       call zonal_flux_layer(u(:,j,k), h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh, duhdu, ones, &
                             dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
       if (OBC_in_row) then ; do I=ish-1,ieh ; if (OBC%segnum_u(I,j) /= 0) then
         l_seg = abs(OBC%segnum_u(I,j))
         if (OBC%segment(l_seg)%specified) uh(I) = OBC%segment(l_seg)%normal_trans(I,j,k)
@@ -901,7 +903,7 @@ end subroutine zonal_BT_mass_flux
 
 !> Evaluates the zonal mass or volume fluxes in a layer.
 subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
-                            ish, ieh, do_I, vol_CFL, por_face_areaU, h_marg_min, OBC)
+                            ish, ieh, do_I, vol_CFL, por_face_areaU, h_marg_min, use_h_marg_min, OBC)
   type(ocean_grid_type),        intent(in)    :: G        !< Ocean's grid structure.
   real, dimension(SZIB_(G)),    intent(in)    :: u        !< Zonal velocity [L T-1 ~> m s-1].
   real, dimension(SZIB_(G)),    intent(in)    :: visc_rem !< Both the fraction of the
@@ -926,6 +928,7 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
   real, dimension(SZIB_(G)),    intent(in)    :: por_face_areaU !< fractional open area of U-faces [nondim]
           !! ratio of face areas to the cell areas when estimating the CFL number.
   real,                         intent(in)    :: h_marg_min !< Negligible floor on h_marg [H ~> m or kg m-2]
+  logical,                      intent(in)    :: use_h_marg_min !< If true, apply the floor on h_marg.
   type(ocean_OBC_type), optional, pointer     :: OBC !< Open boundaries control structure.
   ! Local variables
   real :: CFL  ! The CFL number based on the local velocity and grid spacing [nondim]
@@ -959,7 +962,7 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
       uh(I) = 0.0
       h_marg = 0.5 * (h_W(i+1) + h_E(i))
     endif
-    h_marg = max(h_marg, h_marg_min)
+    if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
     duhdu(I) = (G%dy_Cu(I,j) * por_face_areaU(I)) * h_marg * visc_rem(I)
   endif ; enddo
 
@@ -968,10 +971,14 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
       if (OBC%segment(abs(OBC%segnum_u(I,j)))%open) then
         if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
           uh(I) = (G%dy_Cu(I,j) * por_face_areaU(I)) * u(I) * h(i)
-          duhdu(I) = (G%dy_Cu(I,j) * por_face_areaU(I)) * max(h(i), h_marg_min) * visc_rem(I)
+          h_marg = h(i)
+          if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
+          duhdu(I) = (G%dy_Cu(I,j) * por_face_areaU(I)) * h_marg * visc_rem(I)
         else !  OBC_DIRECTION_W
           uh(I) = (G%dy_Cu(I,j) * por_face_areaU(I)) * u(I) * h(i+1)
-          duhdu(I) = (G%dy_Cu(I,j)* por_face_areaU(I)) * max(h(i+1), h_marg_min) * visc_rem(I)
+          h_marg = h(i+1)
+          if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
+          duhdu(I) = (G%dy_Cu(I,j)* por_face_areaU(I)) * h_marg * visc_rem(I)
         endif
       endif
     endif ; endif ; enddo
@@ -1224,7 +1231,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       call zonal_flux_layer(u_new, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), &
                             uh_aux(:,k), duhdu(:,k), visc_rem(:,k), &
                             dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
     enddo ; endif
 
     if (itt < max_itts) then
@@ -1373,13 +1380,13 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     endif ; enddo
     call zonal_flux_layer(u_0, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh_0, duhdu_0, &
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaU(:,j,k), CS%h_marg_min)
+                          por_face_areaU(:,j,k), CS%h_marg_min, CS%use_h_marg_min)
     call zonal_flux_layer(u_L, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh_L, duhdu_L, &
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaU(:,j,k), CS%h_marg_min)
+                          por_face_areaU(:,j,k), CS%h_marg_min, CS%use_h_marg_min)
     call zonal_flux_layer(u_R, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh_R, duhdu_R, &
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaU(:,j,k), CS%h_marg_min)
+                          por_face_areaU(:,j,k), CS%h_marg_min, CS%use_h_marg_min)
     do I=ish-1,ieh ; if (do_I(I)) then
       FAmt_0(I) = FAmt_0(I) + duhdu_0(I)
       FAmt_L(I) = FAmt_L(I) + duhdu_L(I)
@@ -1531,7 +1538,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       call merid_flux_layer(v(:,J,k), h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), &
                             vh(:,J,k), dvhdv(:,k), visc_rem(:,k), &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
       if (local_specified_BC) then
         do i=ish,ieh ; if (OBC%segnum_v(i,J) /= 0) then
           l_seg = abs(OBC%segnum_v(i,J))
@@ -1779,7 +1786,7 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
       ! This sets vh and dvhdv.
       call merid_flux_layer(v(:,J,k), h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh, dvhdv, ones, &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
       if (OBC_in_row) then ; do i=ish,ieh ; if (OBC%segnum_v(i,J) /= 0) then
         l_seg = abs(OBC%segnum_v(i,J))
         if (OBC%segment(l_seg)%specified) vh(i) = OBC%segment(l_seg)%normal_trans(i,J,k)
@@ -1799,7 +1806,7 @@ end subroutine meridional_BT_mass_flux
 
 !> Evaluates the meridional mass or volume fluxes in a layer.
 subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
-                            ish, ieh, do_I, vol_CFL, por_face_areaV, h_marg_min, OBC)
+                            ish, ieh, do_I, vol_CFL, por_face_areaV, h_marg_min, use_h_marg_min, OBC)
   type(ocean_grid_type),        intent(in)    :: G        !< Ocean's grid structure.
   real, dimension(SZI_(G)),     intent(in)    :: v        !< Meridional velocity [L T-1 ~> m s-1].
   real, dimension(SZI_(G)),     intent(in)    :: visc_rem !< Both the fraction of the
@@ -1828,6 +1835,7 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   real, dimension(SZI_(G),SZJB_(G)), &
                              intent(in) :: por_face_areaV !< fractional open area of V-faces [nondim]
   real,                         intent(in)    :: h_marg_min !< Negligible floor on h_marg [H ~> m or kg m-2]
+  logical,                      intent(in)    :: use_h_marg_min !< If true, apply the floor on h_marg.
   type(ocean_OBC_type), optional, pointer :: OBC !< Open boundaries control structure.
   ! Local variables
   real :: CFL ! The CFL number based on the local velocity and grid spacing [nondim]
@@ -1863,7 +1871,7 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
       vh(i) = 0.0
       h_marg = 0.5 * (h_S(i,j+1) + h_N(i,j))
     endif
-    h_marg = max(h_marg, h_marg_min)
+    if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
     dvhdv(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * h_marg * visc_rem(i)
   endif ; enddo
 
@@ -1873,10 +1881,14 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
         if (OBC%segment(abs(OBC%segnum_v(i,J)))%open) then
           if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
             vh(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * v(i) * h(i,j)
-            dvhdv(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * max(h(i,j), h_marg_min) * visc_rem(i)
+            h_marg = h(i,j)
+            if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
+            dvhdv(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * h_marg * visc_rem(i)
           else
             vh(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * v(i) * h(i,j+1)
-            dvhdv(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * max(h(i,j+1), h_marg_min) * visc_rem(i)
+            h_marg = h(i,j+1)
+            if (use_h_marg_min) h_marg = max(h_marg, h_marg_min)
+            dvhdv(i) = (G%dx_Cv(i,J)*por_face_areaV(i,J)) * h_marg * visc_rem(i)
           endif
         endif
       endif
@@ -2129,7 +2141,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       call merid_flux_layer(v_new, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), &
                             vh_aux(:,k), dvhdv(:,k), visc_rem(:,k), &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), &
-                            CS%h_marg_min, OBC)
+                            CS%h_marg_min, CS%use_h_marg_min, OBC)
     enddo ; endif
 
     if (itt < max_itts) then
@@ -2278,13 +2290,13 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     endif ; enddo
     call merid_flux_layer(v_0, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh_0, dvhdv_0, &
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaV(:,:,k), CS%h_marg_min)
+                          por_face_areaV(:,:,k), CS%h_marg_min, CS%use_h_marg_min)
     call merid_flux_layer(v_L, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh_L, dvhdv_L, &
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaV(:,:,k), CS%h_marg_min)
+                          por_face_areaV(:,:,k), CS%h_marg_min, CS%use_h_marg_min)
     call merid_flux_layer(v_R, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh_R, dvhdv_R, &
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, &
-                          por_face_areaV(:,:,k), CS%h_marg_min)
+                          por_face_areaV(:,:,k), CS%h_marg_min, CS%use_h_marg_min)
     do i=ish,ieh ; if (do_I(i)) then
       FAmt_0(i) = FAmt_0(i) + dvhdv_0(i)
       FAmt_L(i) = FAmt_L(i) + dvhdv_L(i)
@@ -2740,7 +2752,7 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
                   !! regulate diagnostic output.
   type(continuity_PPM_CS), intent(inout) :: CS   !< Module's control structure.
   type(ocean_OBC_type),    pointer       :: OBC  !< Open boundaries control structure.
-  logical :: local_open_BC, use_h_marg_min
+  logical :: local_open_BC
   type(OBC_segment_type), pointer :: segment => NULL()
   integer :: n
 
@@ -2813,21 +2825,17 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
                  "If true, use the marginal face areas from the continuity "//&
                  "solver for use as the weights in the barotropic solver. "//&
                  "Otherwise use the transport averaged areas.", default=.true.)
-  call get_param(param_file, mdl, "CONT_USE_H_MARG_MIN", use_h_marg_min, &
+  call get_param(param_file, mdl, "CONT_USE_H_MARG_MIN", CS%use_h_marg_min, &
                  "If true, the marginal thickness used and returned from continuity "//&
-                 "is bounded from below by a sub-roundoff value. Otherwise the "//&
-                 "minimum is 0.", default=.false.)
+                 "is bounded from below by a sub-roundoff value. Otherwise no floor "//&
+                 "is applied.", default=.false.)
   CS%diag => diag
 
   id_clock_reconstruct = cpu_clock_id('(Ocean continuity reconstruction)', grain=CLOCK_ROUTINE)
   id_clock_update = cpu_clock_id('(Ocean continuity update)', grain=CLOCK_ROUTINE)
   id_clock_correct = cpu_clock_id('(Ocean continuity correction)', grain=CLOCK_ROUTINE)
 
-  if (use_h_marg_min) then
-    CS%h_marg_min = GV%H_subroundoff
-  else
-    CS%h_marg_min = 0.
-  endif
+  CS%h_marg_min = GV%H_subroundoff
 
   if (local_open_BC) then
     do n=1, OBC%number_of_segments
