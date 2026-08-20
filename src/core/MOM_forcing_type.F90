@@ -30,7 +30,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public extractFluxes1d, extractFluxes2d, optics_type
+public extractFluxes1d, extractFluxes2d, optics_type, distribute_brunoff
 public MOM_forcing_chksum, MOM_mech_forcing_chksum
 public calculateBuoyancyFlux1d, calculateBuoyancyFlux2d, find_ustar
 public forcing_accumulate, fluxes_accumulate
@@ -235,6 +235,10 @@ type, public :: forcing
                                 !! (1979) meltwater mixing line, so that melting the ice consumes
                                 !! latent heat. If false, brunoff enters the ocean at the ambient
                                 !! temperature.
+  real :: brunoff_depth = 0.0  !< The depth over which the mass and heat from coupled basal melt
+                                !! are spread, distributed uniformly by thickness. If 0, brunoff
+                                !! is applied entirely within the top layer. The same value as
+                                !! CS%brunoff_depth in surface_forcing_CS [m].
 
   ! arrays needed in the some tracer modules, e.g., MOM_CFC_cap
   real, pointer, dimension(:,:) :: &
@@ -1045,6 +1049,147 @@ subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth,
 
 end subroutine extractFluxes2d
 
+!> Distribute the mass and (optionally) heat content of basal runoff (brunoff) uniformly by
+!! thickness over the upper fluxes%brunoff_depth of a column. If fluxes%brunoff_depth is 0, the
+!! distribution depth for a column instead falls back to that column's own top layer thickness,
+!! so that brunoff is deposited entirely within the top layer.
+!! This routine is called from both:
+!! - applyBoundaryFluxesInOut, to update thickness and temperature and dilute salinity.
+!! - applyTracerBoundaryFluxesInOut, to dilute a tracer concentration.
+subroutine distribute_brunoff(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, US, &
+                               g_Hconv2, cTKE, dSV_dT, dSV_dS, dHeat_total, dTempxPmE_total)
+  type(ocean_grid_type),            intent(in)    :: G              !< Grid structure
+  type(verticalGrid_type),          intent(in)    :: GV             !< Ocean vertical grid structure
+  real,                             intent(in)    :: dt             !< Time step [T ~> s]
+  type(forcing),                    intent(in)    :: fluxes         !< Surface fluxes, including brunoff
+  integer,                          intent(in)    :: j              !< j-index to work on
+  real, dimension(SZI_(G),SZK_(GV)), &
+                                    intent(inout) :: h2d            !< Layer thicknesses [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZK_(GV)), &
+                                    intent(inout) :: C2d            !< A concentration diluted by brunoff's
+                                                                    !! fresh water, e.g. salinity or a tracer's own
+                                                                    !! concentration [CU]
+  real, dimension(SZI_(G),SZK_(GV)), &
+                          optional, intent(inout) :: T2d            !< Layer temperatures [C ~> degC]
+  real,                   optional, intent(in)    :: C_p            !< The heat capacity of seawater
+                                                                    !! [Q C-1 ~> J kg-1 degC-1]
+  type(unit_scale_type),  optional, intent(in)    :: US             !< A dimensional unit scaling type
+  real,                   optional, intent(in)    :: g_Hconv2       !< A conversion factor for use in the
+                                                                    !! TKE calculation.
+                                                                    !! [Z3 R2 T-2 H-2 ~> kg2 m-5 s-2 or m s-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                          optional, intent(inout) :: cTKE           !< Turbulent kinetic energy requirement
+                                                                    !! to mix forcing through each layer.
+                                                                    !! [R Z3 T-2 ~> J m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                          optional, intent(in)    :: dSV_dT         !< Partial derivative of specific
+                                                                    !! volume with potential temperature.
+                                                                    !! [R-1 C-1 ~> m3 kg-1 degC-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                          optional, intent(in)    :: dSV_dS         !< Partial derivative of specific
+                                                                    !! volume with salinity.
+                                                                    !! [R-1 S-1 ~> m3 kg-1 ppt-1]
+  real, dimension(SZI_(G)), &
+                          optional, intent(out)   :: dHeat_total    !< The total heat added to each
+                                                                    !! column by brunoff.
+                                                                    !! [Q H ~> J m-2]
+  real, dimension(SZI_(G)), &
+                          optional, intent(out)   :: dTempxPmE_total !< The total brunoff mass
+                                                                    !! added to each column,
+                                                                    !! weighted by ambient
+                                                                    !! temperature.
+                                                                    !! [C H ~> degC m or degC kg m-2]
+
+  ! Local variables
+  real :: dM_tot     ! Total mass of brunoff to be distributed this timestep [H ~> m or kg m-2]
+  real :: dM_k       ! The portion of dM_tot applied to a layer [H ~> m or kg m-2]
+  real :: dHeat      ! The heat added to the column so far, accumulated for diagnostics [Q H ~> J m-2]
+  real :: dTempxPmE  ! The ambient-temperature-weighted mass added to the column so far,
+                     ! accumulated for diagnostics [C H ~> degC m or degC kg m-2]
+  real :: depth      ! The requested depth over which brunoff is distributed [H ~> m or kg m-2]
+  real :: total_h    ! The full thickness of the water column [H ~> m or kg m-2]
+  real :: eff_depth  ! The depth actually spanned in this column, capped at total_h so that the
+                      ! full amount of brunoff is always distributed even in a column shallower
+                      ! than depth [H ~> m or kg m-2]
+  real :: h_above    ! Cumulative thickness above the current layer, before adding brunoff [H ~> m or kg m-2]
+  real :: h_in_range ! The portion of a layer's thickness within eff_depth [H ~> m or kg m-2]
+  real :: T_eff      ! The effective temperature carried by brunoff mass added to a layer [C ~> degC]
+  real :: hOld       ! The layer thickness before adding brunoff mass [H ~> m or kg m-2]
+  real :: I_Habs     ! The inverse of eff_depth [H-1 ~> m-1 or m2 kg-1]
+  logical :: do_heat        ! If true, T2d and C_p are present and get updated
+  logical :: do_energetics  ! If true, cTKE and its supporting arguments are also present
+  integer :: i, k, is, ie, nz
+
+  is = G%isc ; ie = G%iec ; nz = GV%ke
+  do_heat = present(T2d) .and. present(C_p)
+  do_energetics = do_heat .and. present(cTKE) .and. present(dSV_dT) .and. present(dSV_dS) &
+                  .and. present(g_Hconv2)
+  if (do_heat .and. fluxes%brunoff_latent_heat .and. .not.present(US)) call MOM_error(FATAL, &
+    "distribute_brunoff: US must be present when T2d is present and "//&
+    "fluxes%brunoff_latent_heat is true.")
+
+  do i=is,ie
+    if (present(dHeat_total)) dHeat_total(i) = 0.0
+    if (present(dTempxPmE_total)) dTempxPmE_total(i) = 0.0
+
+    if ((G%mask2dT(i,j) > 0.) .and. (fluxes%brunoff(i,j) /= 0.0)) then
+
+      dM_tot = GV%RZ_to_H * dt * fluxes%brunoff(i,j)
+
+      ! When fluxes%brunoff_depth is 0 (the default), fall back to this column's own top layer
+      ! thickness as the distribution depth, so brunoff is deposited within the top layer.
+      depth = GV%m_to_H * fluxes%brunoff_depth
+      if (depth <= 0.0) depth = max(h2d(i,1), GV%H_subroundoff)
+
+      ! Cap the depth actually used at the full column thickness, so that a column shallower
+      ! than the requested depth still receives all of dM_tot.
+      ! Note, with the currently implementation, if the column is zero thickness any brunoff
+      ! is just dropped.
+      total_h = 0.0
+      do k=1,nz ; total_h = total_h + h2d(i,k) ; enddo
+      eff_depth = min(depth, total_h)
+      I_Habs = 0.0 ; if (eff_depth > 0.0) I_Habs = 1.0 / eff_depth
+
+      h_above = 0.0
+      dHeat = 0.0
+      dTempxPmE = 0.0
+
+      ! Spread dM_tot over the upper eff_depth of the column, in proportion to how much of each
+      ! layer's thickness falls within that range.
+      do k=1,nz
+        h_in_range = max(0.0, min(h_above + h2d(i,k), eff_depth) - h_above)
+        h_above = h_above + h2d(i,k)
+        if (h_in_range > 0.0) then
+          dM_k = dM_tot * (h_in_range * I_Habs)
+          hOld = h2d(i,k)
+
+          if (do_heat) then
+            T_eff = T2d(i,k)
+            if (fluxes%brunoff_latent_heat) &
+              T_eff = T_eff - fluxes%latent_heat_fusion*US%J_kg_to_Q/C_p
+            dHeat = dHeat + C_p*dM_k*T_eff
+            dTempxPmE = dTempxPmE + dM_k*T2d(i,k)
+
+            if (do_energetics) then
+              ! Calculate the energy required to mix the brunoff added to this layer.
+              cTKE(i,j,k) = cTKE(i,j,k) + 0.5*g_Hconv2*(hOld*dM_k) * &
+                 ((T2d(i,k) - T_eff) * dSV_dT(i,j,k) + C2d(i,k) * dSV_dS(i,j,k))
+            endif
+          endif
+
+          h2d(i,k) = hOld + dM_k
+          if (do_heat) T2d(i,k) = (hOld*T2d(i,k) + dM_k*T_eff) / h2d(i,k)
+          C2d(i,k) = (hOld*C2d(i,k)) / h2d(i,k)
+        endif
+      enddo
+
+      if (present(dHeat_total)) dHeat_total(i) = dHeat
+      if (present(dTempxPmE_total)) dTempxPmE_total(i) = dTempxPmE
+
+    endif
+  enddo
+
+end subroutine distribute_brunoff
 
 !> This routine calculates surface buoyancy flux by adding up the heat, FW & salt fluxes.
 !! These are actual fluxes, with units of stuff per time. Setting dt=1 in the call to
@@ -1679,7 +1824,7 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, handles,
   ! surface mass flux maps
 
   handles%id_prcme = register_diag_field('ocean_model', 'PRCmE', diag%axesT1, Time, &
-        'Net surface water flux (precip+melt+lrunoff+ice calving-evap)',  &
+        'Net surface water flux (precip+melt+lrunoff+brunoff+ice calving-evap)',  &
         'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s,                       &
         standard_name='water_flux_into_sea_water', cmor_field_name='wfo', &
         cmor_standard_name='water_flux_into_sea_water',cmor_long_name='Water Flux Into Sea Water')
@@ -1760,11 +1905,13 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, handles,
         'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s)
 
   handles%id_massout_flux = register_diag_field('ocean_model', 'massout_flux', diag%axesT1, Time, &
-        'Net mass flux of freshwater out of the ocean (used in the boundary flux calculation)', &
+        'Net mass flux of freshwater out of the ocean (used in the boundary flux calculation). '//&
+        'Excludes coupled basal melt (brunoff).', &
          'kg m-2', conversion=diag%GV%H_to_kg_m2)
 
   handles%id_massin_flux  = register_diag_field('ocean_model', 'massin_flux', diag%axesT1, Time, &
-        'Net mass flux of freshwater into the ocean (used in boundary flux calculation)', &
+        'Net mass flux of freshwater into the ocean (used in boundary flux calculation). '//&
+        'Excludes coupled basal melt (brunoff).', &
         'kg m-2', conversion=diag%GV%H_to_kg_m2)
 
   !=========================================================================
@@ -1965,7 +2112,8 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, handles,
         cmor_long_name='Heat Content (relative to 0degC) of Water Leaving Ocean via Evaporation and Ice Formation')
 
   handles%id_heat_content_massin = register_diag_field('ocean_model', 'heat_content_massin',   &
-         diag%axesT1, Time,'Heat content (relative to 0degC) of net mass entering ocean ocean',&
+         diag%axesT1, Time,'Heat content (relative to 0degC) of net mass entering ocean ocean. '//&
+         'Excludes coupled basal melt (brunoff).',&
         'W m-2', conversion=US%QRZ_T_to_W_m2)
 
   handles%id_net_heat_coupler = register_diag_field('ocean_model', 'net_heat_coupler',          &
@@ -2484,7 +2632,6 @@ subroutine fluxes_accumulate(flux_tmp, fluxes, G, wt2, forces)
     fluxes%vprec(i,j) = wt1*fluxes%vprec(i,j) + wt2*flux_tmp%vprec(i,j)
     fluxes%lrunoff(i,j) = wt1*fluxes%lrunoff(i,j) + wt2*flux_tmp%lrunoff(i,j)
     fluxes%frunoff(i,j) = wt1*fluxes%frunoff(i,j) + wt2*flux_tmp%frunoff(i,j)
-    fluxes%brunoff(i,j) = wt1*fluxes%brunoff(i,j) + wt2*flux_tmp%brunoff(i,j)
     fluxes%lrunoff_glc(i,j) = wt1*fluxes%lrunoff_glc(i,j) + wt2*flux_tmp%lrunoff_glc(i,j)
     fluxes%frunoff_glc(i,j) = wt1*fluxes%frunoff_glc(i,j) + wt2*flux_tmp%frunoff_glc(i,j)
     fluxes%seaice_melt(i,j) = wt1*fluxes%seaice_melt(i,j) + wt2*flux_tmp%seaice_melt(i,j)
@@ -2499,6 +2646,13 @@ subroutine fluxes_accumulate(flux_tmp, fluxes, G, wt2, forces)
 
     fluxes%salt_flux(i,j) = wt1*fluxes%salt_flux(i,j) + wt2*flux_tmp%salt_flux(i,j)
   enddo ; enddo
+  ! Unlike the other water-group fields above, fluxes%brunoff is only associated when
+  ! basal-melt coupling is actually configured, so it needs its own guard here.
+  if (associated(fluxes%brunoff) .and. associated(flux_tmp%brunoff)) then
+    do j=js,je ; do i=is,ie
+      fluxes%brunoff(i,j) = wt1*fluxes%brunoff(i,j) + wt2*flux_tmp%brunoff(i,j)
+    enddo ; enddo
+  endif
   if (associated(fluxes%salt_flux_in) .and. associated(flux_tmp%salt_flux_in)) then
     do j=js,je ; do i=is,ie
       fluxes%salt_flux_in(i,j) = wt1*fluxes%salt_flux_in(i,j) + wt2*flux_tmp%salt_flux_in(i,j)
@@ -3551,7 +3705,7 @@ end subroutine forcing_diagnostics
 subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
                                   shelf, iceberg, salt, fix_accum_bug, fix_excess_salt_accum_bug, &
                                   cfc, marbl, waves, shelf_sfc_accumulation, lamult, hevap, &
-                                  ice_ncat, tau_mag)
+                                  ice_ncat, tau_mag, brunoff)
   type(ocean_grid_type), intent(in) :: G       !< Ocean grid structure
   type(forcing),      intent(inout) :: fluxes  !< A structure containing thermodynamic forcing fields
   logical, optional,     intent(in) :: water   !< If present and true, allocate water fluxes
@@ -3579,6 +3733,10 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
                                                !! via coupler.
   integer, optional,     intent(in) :: ice_ncat !< number of ice categories
   logical, optional,     intent(in) :: tau_mag !< If present and true, allocate tau_mag and related fields
+  logical, optional,     intent(in) :: brunoff !< If present and true, allocate fields for basal
+                                               !! runoff (ice-shelf basal melt), independent of water,
+                                               !! so that associated(fluxes%brunoff) reliably indicates
+                                               !! that basal-melt coupling is actually configured.
 
   ! Local variables
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
@@ -3608,7 +3766,7 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
   call myAlloc(fluxes%vprec,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%lrunoff,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%frunoff,isd,ied,jsd,jed, water)
-  call myAlloc(fluxes%brunoff,isd,ied,jsd,jed, water)
+  call myAlloc(fluxes%brunoff,isd,ied,jsd,jed, brunoff)
   call myAlloc(fluxes%lrunoff_glc,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%frunoff_glc,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%seaice_melt,isd,ied,jsd,jed, water)
@@ -3623,7 +3781,10 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
   call myAlloc(fluxes%latent_fprec_diag,isd,ied,jsd,jed, heat)
   call myAlloc(fluxes%latent_frunoff_diag,isd,ied,jsd,jed, heat)
   call myAlloc(fluxes%latent_frunoff_glc_diag,isd,ied,jsd,jed, heat)
-  call myAlloc(fluxes%latent_brunoff_diag,isd,ied,jsd,jed, heat)
+
+  if (present(heat) .and. present(brunoff)) then ; if (heat .and. brunoff) then
+    call myAlloc(fluxes%latent_brunoff_diag,isd,ied,jsd,jed, .true.)
+  endif ; endif
 
   call myAlloc(fluxes%salt_flux,isd,ied,jsd,jed, salt)
 
@@ -3635,7 +3796,7 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
     call myAlloc(fluxes%heat_content_vprec,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_lrunoff,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_frunoff,isd,ied,jsd,jed, .true.)
-    call myAlloc(fluxes%heat_content_brunoff,isd,ied,jsd,jed, .true.)
+    call myAlloc(fluxes%heat_content_brunoff,isd,ied,jsd,jed, brunoff)
     call myAlloc(fluxes%heat_content_lrunoff_glc,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_frunoff_glc,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_massout,isd,ied,jsd,jed, enthalpy_mom)
@@ -3727,6 +3888,13 @@ subroutine allocate_forcing_by_ref(fluxes_ref, G, fluxes, turns)
       associated(fluxes_ref%heat_added))
   call myAlloc(fluxes%buoy, G%isd, G%ied, G%jsd, G%jed, &
       associated(fluxes_ref%buoy))
+
+  call myAlloc(fluxes%brunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%brunoff))
+  call myAlloc(fluxes%heat_content_brunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%heat_content_brunoff))
+  call myAlloc(fluxes%latent_brunoff_diag, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%latent_brunoff_diag))
 
   call myAlloc(fluxes%BBL_tidal_dis, G%isd, G%ied, G%jsd, G%jed, &
       associated(fluxes_ref%BBL_tidal_dis))
@@ -3941,7 +4109,7 @@ subroutine deallocate_forcing_type(fluxes)
   if (associated(fluxes%latent_fprec_diag))    deallocate(fluxes%latent_fprec_diag)
   if (associated(fluxes%latent_frunoff_diag))  deallocate(fluxes%latent_frunoff_diag)
   if (associated(fluxes%latent_frunoff_glc_diag))  deallocate(fluxes%latent_frunoff_glc_diag)
-  if (associated(fluxes%latent_brunoff_diag))      deallocate(fluxes%latent_brunoff_diag)
+  if (associated(fluxes%latent_brunoff_diag))  deallocate(fluxes%latent_brunoff_diag)
   if (associated(fluxes%sens))                 deallocate(fluxes%sens)
   if (associated(fluxes%heat_added))           deallocate(fluxes%heat_added)
   if (associated(fluxes%heat_content_lrunoff)) deallocate(fluxes%heat_content_lrunoff)
@@ -4047,7 +4215,6 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
     call rotate_array(fluxes_in%vprec, turns, fluxes%vprec)
     call rotate_array(fluxes_in%lrunoff, turns, fluxes%lrunoff)
     call rotate_array(fluxes_in%frunoff, turns, fluxes%frunoff)
-    call rotate_array(fluxes_in%brunoff, turns, fluxes%brunoff)
     call rotate_array(fluxes_in%lrunoff_glc, turns, fluxes%lrunoff_glc)
     call rotate_array(fluxes_in%frunoff_glc, turns, fluxes%frunoff_glc)
     call rotate_array(fluxes_in%seaice_melt, turns, fluxes%seaice_melt)
@@ -4065,7 +4232,6 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
     call rotate_array(fluxes_in%latent_fprec_diag, turns, fluxes%latent_fprec_diag)
     call rotate_array(fluxes_in%latent_frunoff_diag, turns, fluxes%latent_frunoff_diag)
     call rotate_array(fluxes_in%latent_frunoff_glc_diag, turns, fluxes%latent_frunoff_glc_diag)
-    call rotate_array(fluxes_in%latent_brunoff_diag, turns, fluxes%latent_brunoff_diag)
   endif
 
   if (do_salt) then
@@ -4081,7 +4247,6 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
     call rotate_array(fluxes_in%heat_content_lrunoff_glc, turns, fluxes%heat_content_lrunoff_glc)
     call rotate_array(fluxes_in%heat_content_frunoff, turns, fluxes%heat_content_frunoff)
     call rotate_array(fluxes_in%heat_content_frunoff_glc, turns, fluxes%heat_content_frunoff_glc)
-    call rotate_array(fluxes_in%heat_content_brunoff, turns, fluxes%heat_content_brunoff)
     if (associated (fluxes_in%heat_content_evap))  then
       call rotate_array(fluxes_in%heat_content_evap, turns, fluxes%heat_content_evap)
     else
@@ -4113,6 +4278,13 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
   endif
 
   ! The following fields are handled by drivers rather than control flags.
+  if (associated(fluxes_in%brunoff)) &
+    call rotate_array(fluxes_in%brunoff, turns, fluxes%brunoff)
+  if (associated(fluxes_in%heat_content_brunoff)) &
+    call rotate_array(fluxes_in%heat_content_brunoff, turns, fluxes%heat_content_brunoff)
+  if (associated(fluxes_in%latent_brunoff_diag)) &
+    call rotate_array(fluxes_in%latent_brunoff_diag, turns, fluxes%latent_brunoff_diag)
+
   if (associated(fluxes_in%sw_vis_dir)) &
     call rotate_array(fluxes_in%sw_vis_dir, turns, fluxes%sw_vis_dir)
   if (associated(fluxes_in%sw_vis_dif)) &
@@ -4159,6 +4331,7 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
   fluxes%C_p = fluxes_in%C_p
   fluxes%latent_heat_fusion = fluxes_in%latent_heat_fusion
   fluxes%brunoff_latent_heat = fluxes_in%brunoff_latent_heat
+  fluxes%brunoff_depth = fluxes_in%brunoff_depth
   ! NOTE: gustless_accum_bug is set during allocation
 
   fluxes%num_msg = fluxes_in%num_msg
@@ -4331,7 +4504,10 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%vprec, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%lrunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%frunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
-    call homogenize_field_t(fluxes%brunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
+    ! Unlike the other water-group fields above, fluxes%brunoff is only associated when
+    ! basal-melt coupling is actually configured, so it needs its own guard here.
+    if (associated(fluxes%brunoff)) &
+      call homogenize_field_t(fluxes%brunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%lrunoff_glc, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%frunoff_glc, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%seaice_melt, G, tmp_scale=US%RZ_T_to_kg_m2s)
@@ -4353,8 +4529,12 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%latent_fprec_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%latent_frunoff_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%latent_frunoff_glc_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
-    call homogenize_field_t(fluxes%latent_brunoff_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
   endif
+
+  ! Unlike the other latent_*_diag fields above, fluxes%latent_brunoff_diag is only associated
+  ! when basal-melt coupling is actually configured, so it needs its own guard here.
+  if (associated(fluxes%latent_brunoff_diag)) &
+    call homogenize_field_t(fluxes%latent_brunoff_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
 
   if (do_salt) call homogenize_field_t(fluxes%salt_flux, G, tmp_scale=US%RZ_T_to_kg_m2s)
 
@@ -4365,7 +4545,10 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%heat_content_vprec, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_lrunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_frunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
-    call homogenize_field_t(fluxes%heat_content_brunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+    ! Unlike the other heat_content fields above, fluxes%heat_content_brunoff is only associated
+    ! when basal-melt coupling is actually configured, so it needs its own guard here.
+    if (associated(fluxes%heat_content_brunoff)) &
+      call homogenize_field_t(fluxes%heat_content_brunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_lrunoff_glc, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_frunoff_glc, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_massout, G, tmp_scale=US%QRZ_T_to_W_m2)

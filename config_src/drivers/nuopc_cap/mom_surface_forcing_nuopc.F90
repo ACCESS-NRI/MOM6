@@ -91,6 +91,9 @@ type, public :: surface_forcing_CS ; private
                                 !! meltwater mixing line, so that melting the ice consumes latent
                                 !! heat. If false, brunoff enters the ocean at the ambient
                                 !! temperature.
+  real :: brunoff_depth         !< The depth over which the mass and heat from coupled basal melt
+                                !! are spread, distributed uniformly by thickness. If 0, brunoff
+                                !! is applied entirely within the top layer [m].
   real :: gust_const            !< constant unresolved background gustiness for ustar [R L Z T-2 ~> Pa]
   logical :: read_gust_2d       !< If true, use a 2-dimensional gustiness supplied
                                 !! from an input file.
@@ -335,9 +338,10 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
     call allocate_forcing_type(G, fluxes, water=.true., heat=.true., ustar=.true., &
                                press=.true., fix_accum_bug=.not.CS%ustar_gustless_bug, &
                                cfc=CS%use_CFC, marbl=CS%use_marbl_tracers, hevap=CS%enthalpy_cpl, &
-                               tau_mag=.true., ice_ncat=IOB%ice_ncat)
+                               tau_mag=.true., ice_ncat=IOB%ice_ncat, brunoff=associated(IOB%brunoff))
     fluxes%latent_heat_fusion = CS%latent_heat_fusion
     fluxes%brunoff_latent_heat = CS%brunoff_latent_heat
+    fluxes%brunoff_depth = CS%brunoff_depth
     call safe_alloc_ptr(fluxes%omega_w2x,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dir,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dif,isd,ied,jsd,jed)
@@ -574,10 +578,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%latent_frunoff_glc_diag(i,j) = fluxes%latent_frunoff_glc_diag(i,j) - G%mask2dT(i,j) * &
           IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
-    ! Ice-shelf basal melt (brunoff) is not included in fluxes%latent. Instead, the latent heat
-    ! extraction from the ocean due to basal melt is accounted for as a Gade (1979)-line effective
-    ! temperature offset via fluxes%heat_content_brunoff in MOM_forcing_type.F90, so that the same
-    ! code path can be extended to include depth-distribution of basal melt in the future.
+    ! Ice-shelf basal melt (brunoff) is not currently included in fluxes%latent.
     if (associated(IOB%q_flux)) then
       fluxes%latent(i,j)           = fluxes%latent(i,j) + &
           IOB%q_flux(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_vapor
@@ -1242,6 +1243,10 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, restore_salt,
                  "LATENT_HEAT_FUSION/C_p, following the Gade (1979) meltwater mixing line, "//&
                  "so that melting the ice consumes latent heat. If false, brunoff enters "// &
                  "the ocean at the ambient temperature.", default=.false.)
+  call get_param(param_file, mdl, "BRUNOFF_DEPTH", CS%brunoff_depth, &
+                 "The depth over which the mass and heat from coupled basal melt are spread, "//&
+                 "distributed uniformly by thickness. If 0, brunoff is applied entirely "//&
+                 "within the top layer.", units="m", default=0.0)
   call get_param(param_file, mdl, "MAX_P_SURF", CS%max_p_surf, &
                  "The maximum surface pressure that can be exerted by the "//&
                  "atmosphere and floating sea-ice or ice shelves. This is "//&

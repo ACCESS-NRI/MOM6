@@ -1058,9 +1058,16 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
     if (associated(fluxes%lprec) .and. associated(fluxes%fprec)) then
       do j=js,je ; do i=is,ie
         FW_in(i,j) = dt*G%areaT(i,j)*(fluxes%evap(i,j) + &
-            ((((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
-              (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))) + fluxes%brunoff(i,j)))
+            (((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
+              (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))))
       enddo ; enddo
+      ! fluxes%brunoff is only associated when basal-melt coupling is actually configured,
+      ! unlike the other water-group fields above, so it needs its own guard here.
+      if (associated(fluxes%brunoff)) then
+        do j=js,je ; do i=is,ie
+          FW_in(i,j) = FW_in(i,j) + dt*G%areaT(i,j)*fluxes%brunoff(i,j)
+        enddo ; enddo
+      endif
     else
       call MOM_error(WARNING, &
         "accumulate_net_input called with associated evap field, but no precip field.")
@@ -1100,9 +1107,15 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
         heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
                        (fluxes%heat_content_evap(i,j) + fluxes%heat_content_lprec(i,j) + &
                         fluxes%heat_content_cond(i,j) + fluxes%heat_content_fprec(i,j) + &
-                        fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j) + &
-                        fluxes%heat_content_brunoff(i,j))
+                        fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j))
       enddo ; enddo
+      ! fluxes%heat_content_brunoff is only associated when basal-melt coupling is actually
+      ! configured, unlike the other heat_content fields above, so it needs its own guard here.
+      if (associated(fluxes%heat_content_brunoff)) then
+        do j=js,je ; do i=is,ie
+          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * fluxes%heat_content_brunoff(i,j)
+        enddo ; enddo
+      endif
     elseif (associated(tv%TempxPmE)) then
       do j=js,je ; do i=is,ie
         heat_in(i,j) = heat_in(i,j) + (tv%C_p * G%areaT(i,j)) * tv%TempxPmE(i,j)
