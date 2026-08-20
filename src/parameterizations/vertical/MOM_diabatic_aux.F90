@@ -998,6 +998,39 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       endif
     enddo
 
+    if (associated(fluxes%srunoff)) then
+      ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
+      ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
+      ! and heat associated with srunoff are treated as if they were applied at the surface,
+      ! analogous to how penetrating SW is handled.
+      if (calculate_buoyancy) then
+        do i=is,ie
+          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%srunoff(i,j) /= 0.0)) then
+            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
+            srunoff_Teff = T2d(i,1)
+            if (fluxes%srunoff_latent_heat) &
+              srunoff_Teff = srunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
+            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%srunoff(i,j)) * srunoff_Teff
+          endif
+        enddo ! i
+      endif
+
+      ! Distribute srunoff's mass and heat over a range of depths, if requested,
+      ! updating temperature and salinity together. This is done before loops A and B
+      ! below so loop B sees the srunoff-fattened column, making grounding less likely.
+      call distribute_srunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
+                               g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
+                               dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
+
+      ! Add srunoff's contributions to relevant diagnostics.
+      do i=is,ie
+        if (associated(fluxes%heat_content_srunoff)) &
+          fluxes%heat_content_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
+        if (associated(tv%TempxPmE)) &
+          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
+      enddo
+    endif
+
     ! Apply the surface boundary fluxes in three steps:
     ! A/ update mass, temp, and salinity due to all terms except mass leaving
     !    ocean (and corresponding outward heat content), and ignoring penetrative SW.
@@ -1219,41 +1252,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       endif
 
     enddo ! i
-
-    if (associated(fluxes%srunoff)) then
-      ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
-      ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
-      ! and heat associated with srunoff are treated as if they were applied at the surface,
-      ! analogous to penetrating SW.
-      if (calculate_buoyancy) then
-        do i=is,ie
-          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%srunoff(i,j) /= 0.0)) then
-            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
-            srunoff_Teff = T2d(i,1)
-            if (fluxes%srunoff_latent_heat) &
-              srunoff_Teff = srunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
-            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%srunoff(i,j)) * srunoff_Teff
-          endif
-        enddo ! i
-      endif
-
-      ! Distribute submarine melt (srunoff) mass and heat over a range of depths, if requested,
-      ! updating temperature and salinity together.
-      ! Because srunoff is applied after loop B above, it's possible that groundings could be
-      ! reported when in fact they would not have occured had srunoff been accounted for. It
-      ! might be better to do this before loop A and B?
-      call distribute_srunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
-                               g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
-                               dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
-
-      ! Add contributions to relevant diagnostics.
-      do i=is,ie
-        if (associated(fluxes%heat_content_srunoff)) &
-          fluxes%heat_content_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
-        if (associated(tv%TempxPmE)) &
-          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
-      enddo
-    endif
 
     ! Step C/ in the application of fluxes
     ! Heat by the convergence of penetrating SW.
