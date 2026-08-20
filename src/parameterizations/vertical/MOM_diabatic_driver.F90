@@ -333,6 +333,16 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   if (dt < 0.0) call MOM_error(FATAL, "MOM_diabatic_driver: "// &
         "diabatic was called with a negative timestep.")
 
+  if (associated(fluxes%srunoff)) then
+    ! KPP code does not account for submarine-melt contributions to the surface buoyancy fluxes.
+    if (CS%useKPP) call MOM_error(FATAL, &
+        "MOM_diabatic_driver: submarine melt (srunoff) coupling is not supported with USE_KPP=True.")
+
+    ! Distribution of submarine melt does not handle negative values, which is not physical anyway.
+    if (any(fluxes%srunoff(G%isc:G%iec,G%jsc:G%jec) < 0.0)) call MOM_error(FATAL, &
+        "MOM_diabatic_driver: coupled submarine melt (srunoff) contains negative values.")
+  endif
+
   showCallTree = callTree_showQuery()
 
   ! Offer diagnostics of various state variables at the start of diabatic
@@ -3338,9 +3348,8 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "and applied as either incoming or outgoing depending on the sign of the net. "//&
                  "If false, the net incoming fresh water flux is added to the model and "//&
                  "thereafter the net outgoing is removed from the topmost non-vanished "//&
-                 "layers of the updated state. This does not apply to submarine melt (srunoff), "//&
-                 "which is always distributed by distribute_srunoff (MOM_diabatic_aux.F90), "//&
-                 "independent of this setting.", default=.true.)
+                 "layers of the updated state. This does not apply to submarine melt (srunoff) "//&
+                 "which is handled separately.", default=.true.)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
