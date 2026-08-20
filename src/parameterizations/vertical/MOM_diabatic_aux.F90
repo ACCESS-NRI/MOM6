@@ -15,7 +15,7 @@ use MOM_EOS,           only : calculate_specific_vol_derivs, calculate_density_d
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, callTree_showQuery
 use MOM_error_handler, only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,   only : get_param, log_param, log_version, param_file_type
-use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint
+use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint, distribute_brunoff
 use MOM_grid,          only : ocean_grid_type
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_interpolate,   only : init_external_field, time_interp_external, time_interp_external_init
@@ -46,10 +46,6 @@ type, public :: diabatic_aux_CS ; private
   logical :: do_rivermix = .false. !< Provide additional TKE to mix river runoff at the
                                    !! river mouths to a depth of "rivermix_depth"
   real    :: rivermix_depth = 0.0  !< The depth to which rivers are mixed if do_rivermix = T [Z ~> m].
-  real :: brunoff_depth_distribute = 0.0 !< The depth over which basal runoff (brunoff) mass and
-                                   !! heat are distributed, spread uniformly by thickness,
-                                   !! instead of being applied entirely within the top layer
-                                   !! [H ~> m or kg m-2].
   real    :: dSalt_frac_max  !< An upper limit on the fraction of the salt in a layer that can be
                              !! lost to the net surface salt fluxes within a timestep [nondim]
   logical :: reclaim_frazil  !<   If true, try to use any frazil heat deficit to
@@ -730,6 +726,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   integer :: numberOfGroundings, iGround(maxGroundings), jGround(maxGroundings)
   real :: H_limit_fluxes ! Surface fluxes are scaled down fluxes when the total depth of the ocean
                      ! drops below this value [H ~> m or kg m-2]
+  real :: brunoff_Teff ! The effective temperature carried by brunoff's contribution to
+                     ! net_heat_rate [C ~> degC]
   real :: IforcingDepthScale ! The inverse of the layer thickness below which mass losses are
                      ! shifted to the next deeper layer [H ~> m or kg m-2]
   real :: Idt        ! The inverse of the timestep [T-1 ~> s-1]
@@ -766,7 +764,12 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                      ! [S H T-1 ~> ppt m s-1 or ppt kg m-2 s-1]
     netMassInOut_rate, & ! netmassinout but for dt=1 [H T-1 ~> m s-1 or kg m-2 s-1]
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
-    total_h          ! Total thickness of the water column [H ~> m or kg m-2]
+    total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
+    dHeat_brunoff, & ! The heat added to each column by brunoff, from distribute_brunoff, for
+                     ! the heat_content_brunoff diagnostic [Q H ~> J m-2]
+    dTempxPmE_brunoff ! The ambient-temperature-weighted mass added to each column by brunoff,
+                     ! from distribute_brunoff, for the tv%TempxPmE diagnostic
+                     ! [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
     ! dz, &            ! Layer thicknesses in depth units [Z ~> m]
@@ -873,7 +876,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   !$OMP                                  drhodt,drhods,pen_sw_bnd_rate,                    &
   !$OMP                                  pen_TKE_2d,Temp_in,Salin_in,RivermixConst,        &
   !$OMP                                  mixing_depth,A_brine,fraction_left_brine,         &
-  !$OMP                                  plume_fraction,dK,total_h)                        &
+  !$OMP                                  plume_fraction,dK,total_h,dHeat_brunoff,          &
+  !$OMP                                  dTempxPmE_brunoff,brunoff_Teff)                   &
   !$OMP                     firstprivate(SurfPressure,plume_flux)
   do j=js,je
   ! Work in vertical slices for efficiency
@@ -1216,9 +1220,40 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
 
     enddo ! i
 
-    ! Distribute basal runoff (brunoff) mass and heat over a range of depths, if requested.
-    call distribute_brunoff(CS, G, GV, US, dt, fluxes, j, h2d, T2d, tv, &
-                             calculate_energetics, g_Hconv2, cTKE, dSV_dT, dSV_dS)
+    if (associated(fluxes%brunoff)) then
+      ! Add brunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
+      ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
+      ! and heat associated with brunoff are treated as if they were applied at the surface,
+      ! analogous to penetrating SW.
+      if (calculate_buoyancy) then
+        do i=is,ie
+          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%brunoff(i,j) /= 0.0)) then
+            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%brunoff(i,j)
+            brunoff_Teff = T2d(i,1)
+            if (fluxes%brunoff_latent_heat) &
+              brunoff_Teff = brunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
+            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%brunoff(i,j)) * brunoff_Teff
+          endif
+        enddo ! i
+      endif
+
+      ! Distribute basal runoff (brunoff) mass and heat over a range of depths, if requested,
+      ! updating temperature and salinity together.
+      ! Because brunoff is applied after loop B above, it's possible that groundings could be
+      ! reported when in fact they would not have occured had brunoff been accounted for. It
+      ! might be better to do this before loop A and B?
+      call distribute_brunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
+                               g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
+                               dHeat_total=dHeat_brunoff, dTempxPmE_total=dTempxPmE_brunoff)
+
+      ! Add contributions to relevant diagnostics.
+      do i=is,ie
+        if (associated(fluxes%heat_content_brunoff)) &
+          fluxes%heat_content_brunoff(i,j) = dHeat_brunoff(i) * GV%H_to_RZ / dt
+        if (associated(tv%TempxPmE)) &
+          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_brunoff(i) * GV%H_to_RZ
+      enddo
+    endif
 
     ! Step C/ in the application of fluxes
     ! Heat by the convergence of penetrating SW.
@@ -1360,135 +1395,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
 
 end subroutine applyBoundaryFluxesInOut
 
-!> Distribute the mass and heat content of basal runoff (brunoff) uniformly by thickness
-!! over the upper CS%brunoff_depth_distribute of a column. If CS%brunoff_depth_distribute
-!! is 0, the distribution depth for a column instead falls back to that column's own top
-!! layer thickness, so that brunoff is deposited entirely within the top layer. Called once
-!! per j-row from applyBoundaryFluxesInOut, alongside absorbRemainingSW, and operating on
-!! the same 2-D h2d/T2d slices.
-!!
-!! Because brunoff is applied here rather than through netMassInOut/netMassOut above, its
-!! mass is not included in the fractionOfForcing/evap_CFL_limit calculation that Loop B
-!! (above) applies to the other surface mass fluxes when AGGREGATE_FW_FORCING is true. That
-!! calculation is not depth-aware regardless, so including brunoff in it would not make it
-!! correctly account for brunoff's eventual depth placement -- it would just add brunoff at
-!! the surface for the purpose of that calculation before removing and redistributing it
-!! here, which does not improve on the current behavior. This can very slightly alter how
-!! much evaporation-driven forcing gets CFL-limited or spread downward at brunoff-active
-!! points (i.e. near ice shelves) relative to a version of the model without this coupling,
-!! and in the extreme could very slightly change the likelihood of a column grounding out
-!! (netMassIn+netMassOut left over after the k-loop above) at such points. distribute_brunoff
-!! itself cannot ground out or need CFL-limiting, since it only ever adds mass to a column.
-subroutine distribute_brunoff(CS, G, GV, US, dt, fluxes, j, h2d, T2d, tv, &
-                               calculate_energetics, g_Hconv2, cTKE, dSV_dT, dSV_dS)
-  type(diabatic_aux_CS),   pointer       :: CS  !< Control structure for diabatic_aux
-  type(ocean_grid_type),   intent(in)    :: G   !< Grid structure
-  type(verticalGrid_type), intent(in)    :: GV  !< Ocean vertical grid structure
-  type(unit_scale_type),   intent(in)    :: US  !< A dimensional unit scaling type
-  real,                    intent(in)    :: dt  !< Time step [T ~> s]
-  type(forcing),           intent(inout) :: fluxes !< Surface fluxes, including brunoff
-  integer,                 intent(in)    :: j   !< j-index to work on
-  real, dimension(SZI_(G),SZK_(GV)), intent(inout) :: h2d !< Layer thicknesses [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZK_(GV)), intent(inout) :: T2d !< Layer temperatures [C ~> degC]
-  type(thermo_var_ptrs),   intent(inout) :: tv  !< Thermodynamic variables
-  logical,                 intent(in)    :: calculate_energetics !< If true, calculate the energy
-                                             !! required to mix the brunoff added to a layer
-                                             !! throughout that layer
-  real,                    intent(in)    :: g_Hconv2 !< A conversion factor for use in the TKE
-                                             !! calculation [Z3 R2 T-2 H-2 ~> kg2 m-5 s-2 or m s-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                 optional, intent(inout) :: cTKE !< Turbulent kinetic energy requirement to mix
-                                             !! forcing through each layer [R Z3 T-2 ~> J m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                 optional, intent(in)    :: dSV_dT !< Partial derivative of specific volume with
-                                             !! potential temperature [R-1 C-1 ~> m3 kg-1 degC-1]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                 optional, intent(in)    :: dSV_dS !< Partial derivative of specific volume with
-                                             !! salinity [R-1 S-1 ~> m3 kg-1 ppt-1]
-
-  ! Local variables
-  real :: dM_tot     ! Total mass of brunoff to be distributed this timestep [H ~> m or kg m-2]
-  real :: dM_k       ! The portion of dM_tot applied to a layer [H ~> m or kg m-2]
-  real :: dHeat      ! The heat added to the column so far, accumulated for diagnostics [Q H ~> J m-2]
-  real :: depth      ! The requested depth over which brunoff is distributed [H ~> m or kg m-2]
-  real :: total_h    ! The full thickness of the water column [H ~> m or kg m-2]
-  real :: eff_depth  ! The depth actually spanned in this column, capped at total_h so that the
-                      ! full amount of brunoff is always distributed even in a column shallower
-                      ! than depth [H ~> m or kg m-2]
-  real :: h_above    ! Cumulative thickness above the current layer, before adding brunoff [H ~> m or kg m-2]
-  real :: h_in_range ! The portion of a layer's thickness within eff_depth [H ~> m or kg m-2]
-  real :: T_eff      ! The effective temperature carried by brunoff mass added to a layer [C ~> degC]
-  real :: hOld       ! The layer thickness before adding brunoff mass [H ~> m or kg m-2]
-  real :: I_Habs     ! The inverse of eff_depth [H-1 ~> m-1 or m2 kg-1]
-  integer :: i, k, is, ie, nz
-
-  if (.not.associated(fluxes%brunoff)) return
-
-  is = G%isc ; ie = G%iec ; nz = GV%ke
-
-  do i=is,ie ; if ((G%mask2dT(i,j) > 0.) .and. (fluxes%brunoff(i,j) /= 0.0)) then
-
-    dM_tot = GV%RZ_to_H * dt * fluxes%brunoff(i,j)
-
-    ! When CS%brunoff_depth_distribute is 0 (the default), fall back to this column's own top
-    ! layer thickness as the distribution depth, so brunoff is deposited within the top layer,
-    ! as it was before this depth-distribution capability existed. Floor by GV%H_subroundoff
-    ! to avoid dividing by zero if the top layer has vanished; the loop below then naturally
-    ! rolls the deposit into the first layer down with non-negligible thickness instead.
-    depth = CS%brunoff_depth_distribute
-    if (depth <= 0.0) depth = max(h2d(i,1), GV%H_subroundoff)
-
-    ! Cap the depth actually used at the full column thickness, so that a column shallower
-    ! than the requested depth still receives all of dM_tot, spread by thickness over the
-    ! whole column, rather than requiring a separate step to redistribute a shortfall.
-    total_h = 0.0
-    do k=1,nz ; total_h = total_h + h2d(i,k) ; enddo
-    eff_depth = min(depth, total_h)
-    I_Habs = 1.0 / eff_depth
-
-    h_above = 0.0
-    dHeat = 0.0
-
-    ! Spread dM_tot over the upper eff_depth of the column, in proportion to how much of each
-    ! layer's thickness falls within that range, mixing in each layer at that layer's own
-    ! local temperature (optionally offset by the Gade (1979) latent heat adjustment), the
-    ! same way Loop A above does for surface-only mass sources, just repeated over depth
-    ! instead of only at the top layer.
-    do k=1,nz
-      h_in_range = max(0.0, min(h_above + h2d(i,k), eff_depth) - h_above)
-      h_above = h_above + h2d(i,k)
-      if (h_in_range > 0.0) then
-        dM_k = dM_tot * (h_in_range * I_Habs)
-        T_eff = T2d(i,k)
-        if (fluxes%brunoff_latent_heat) &
-          T_eff = T_eff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
-        dHeat = dHeat + tv%C_p*dM_k*T_eff
-
-        hOld = h2d(i,k)
-        if (calculate_energetics) then
-          ! Calculate the energy required to mix the brunoff added to this layer throughout
-          ! the layer, mirroring the analogous calculation in Loop A above for other incoming
-          ! mass sources. Brunoff is fresh water, so its salinity plays the role of Salin_in = 0
-          ! there.
-          cTKE(i,j,k) = cTKE(i,j,k) + 0.5*g_Hconv2*(hOld*dM_k) * &
-             ((T2d(i,k) - T_eff) * dSV_dT(i,j,k) + tv%S(i,j,k) * dSV_dS(i,j,k))
-        endif
-        h2d(i,k) = hOld + dM_k
-        T2d(i,k) = (hOld*T2d(i,k) + dM_k*T_eff) / h2d(i,k)
-        tv%S(i,j,k) = (hOld*tv%S(i,j,k)) / h2d(i,k)   ! brunoff is fresh water
-      endif
-    enddo
-
-    ! Report the total heat added to the column, converted back to a flux, purely for
-    ! diagnostic purposes -- this heat has already been applied above, spread over depth,
-    ! not just at the surface.
-    if (associated(fluxes%heat_content_brunoff)) &
-      fluxes%heat_content_brunoff(i,j) = dHeat * GV%H_to_RZ / dt
-
-  endif ; enddo
-
-end subroutine distribute_brunoff
-
 !> This subroutine initializes the parameters and control structure of the diabatic_aux module.
 subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgorithm, use_ePBL)
   type(time_type), target, intent(in)    :: Time !< The current model time.
@@ -1571,12 +1477,6 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
   else
     CS%do_rivermix = .false. ; CS%rivermix_depth = 0.0 ; CS%ignore_fluxes_over_land = .false.
   endif
-
-  call get_param(param_file, mdl, "BRUNOFF_DEPTH_DISTRIBUTE", CS%brunoff_depth_distribute, &
-               "The depth over which basal runoff (brunoff) mass and heat are spread, "//&
-               "distributed uniformly by thickness, instead of being applied entirely "//&
-               "within the top layer. If 0, brunoff is applied entirely within the top layer.", &
-               units="m", default=0.0, scale=GV%m_to_H, do_not_log=.not.use_temperature)
 
   if (GV%nkml == 0) then
     call get_param(param_file, mdl, "USE_RIVER_HEAT_CONTENT", CS%use_river_heat_content, &
