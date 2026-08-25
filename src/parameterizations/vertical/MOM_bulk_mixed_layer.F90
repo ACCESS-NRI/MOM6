@@ -123,6 +123,10 @@ type, public :: bulkmixedlayer_CS ; private
                              !! to set the heat carried by runoff, instead of
                              !! using SST for temperature of liq_runoff
   logical :: use_calving_heat_content !< Use SST for temperature of froz_runoff
+  logical :: runoff_calving_heat_content_bug !< If true, recover a bug in which the
+                             !! use_river_heat_content/use_calving_heat_content
+                             !! corrections are applied even when the full enthalpy
+                             !! budget is already supplied via the coupler
   logical :: convect_mom_bug !< If true, use code with a bug that causes a loss of momentum
                              !! conservation during mixedlayer convection.
 
@@ -556,6 +560,7 @@ subroutine bulkmixedlayer(h_3d, u_3d, v_3d, tv, fluxes, dt, ea, eb, G, GV, US, C
     ! Pen_SW_bnd   = components to penetrative shortwave radiation
     call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
                   CS%H_limit_fluxes, CS%use_river_heat_content, CS%use_calving_heat_content, &
+                  CS%runoff_calving_heat_content_bug, &
                   h(:,1:), T(:,1:), netMassInOut, netMassOut, Net_heat, Net_salt, Pen_SW_bnd, &
                   tv, aggregate_FW_forcing)
 
@@ -3965,6 +3970,7 @@ subroutine bulkmixedlayer_init(Time, G, GV, US, param_file, diag, CS)
   real :: Hmix_min_z       ! HMIX_MIN in units of vertical extent [Z ~> m], used to set other defaults
   integer :: isd, ied, jsd, jed
   logical :: use_temperature, use_omega
+  logical :: enable_bugs  ! If true, bugs are enabled by default.
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
 
   CS%initialized = .true.
@@ -4143,6 +4149,14 @@ subroutine bulkmixedlayer_init(Time, G, GV, US, param_file, diag, CS)
                  "If true, use the fluxes%calving_Hflx field to set the "//&
                  "heat carried by runoff, instead of using SST*CP*froz_runoff.", &
                  default=.false.)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "RUNOFF_CALVING_HEAT_CONTENT_BUG", CS%runoff_calving_heat_content_bug, &
+                 "If true, recover a bug in which the USE_RIVER_HEAT_CONTENT / "//&
+                 "USE_CALVING_HEAT_CONTENT corrections are applied even when the full "//&
+                 "enthalpy budget is already supplied via the coupler (e.g. with "//&
+                 "ENTHALPY_FROM_COUPLER=True).", default=enable_bugs, &
+                 do_not_log=.not.(CS%use_river_heat_content .or. CS%use_calving_heat_content))
   call get_param(param_file, mdl, "BULKML_CONV_MOMENTUM_BUG", CS%convect_mom_bug, &
                  "If true, use code with a bug that causes a loss of momentum conservation "//&
                  "during mixedlayer convection.", default=.false.)
