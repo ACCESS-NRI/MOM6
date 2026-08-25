@@ -65,6 +65,10 @@ type, public :: diabatic_aux_CS ; private
   logical :: use_calving_heat_content !< If true, assumes that ice-ocean boundary
                              !! has provided a calving heat content. Otherwise, calving
                              !! is added with a temperature of the local SST.
+  logical :: runoff_calving_heat_content_bug !< If true, recover a bug in which the
+                             !! use_river_heat_content/use_calving_heat_content
+                             !! corrections are applied even when the full enthalpy
+                             !! budget is already supplied via the coupler
   logical :: var_pen_sw      !<   If true, use one of the CHL_A schemes to determine the
                              !! e-folding depth of incoming shortwave radiation.
   type(external_field) :: sbc_chl   !< A handle used in time interpolation of
@@ -956,6 +960,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     if (calculate_buoyancy) then
       call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt,          &
                   H_limit_fluxes, CS%use_river_heat_content, CS%use_calving_heat_content, &
+                  CS%runoff_calving_heat_content_bug, &
                   h2d, T2d, netMassInOut, netMassOut, netHeat, netSalt,                   &
                   Pen_SW_bnd, tv, aggregate_FW_forcing, nonpenSW=nonpenSW,                &
                   net_Heat_rate=netheat_rate, net_salt_rate=netsalt_rate,                 &
@@ -963,6 +968,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     else
       call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt,          &
                   H_limit_fluxes, CS%use_river_heat_content, CS%use_calving_heat_content, &
+                  CS%runoff_calving_heat_content_bug, &
                   h2d, T2d, netMassInOut, netMassOut, netHeat, netSalt,                   &
                   Pen_SW_bnd, tv, aggregate_FW_forcing, nonpenSW=nonpenSW)
     endif
@@ -1372,6 +1378,7 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
                                  ! when var_pen_sw is defined and reading from file.
   character(len=32)  :: chl_varname ! Name of chl_a variable in chl_file.
   logical :: use_temperature     ! True if thermodynamics are enabled.
+  logical :: enable_bugs         ! If true, bugs are enabled by default.
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB, nz
   isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -1438,9 +1445,18 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
                    "If true, use the fluxes%calving_Hflx field to set the "//&
                    "heat carried by runoff, instead of using SST*CP*froz_runoff.", &
                    default=.false., do_not_log=.not.use_temperature)
+    call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                   default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+    call get_param(param_file, mdl, "RUNOFF_CALVING_HEAT_CONTENT_BUG", CS%runoff_calving_heat_content_bug, &
+                   "If true, recover a bug in which the USE_RIVER_HEAT_CONTENT / "//&
+                   "USE_CALVING_HEAT_CONTENT corrections are applied even when the full "//&
+                   "enthalpy budget is already supplied via the coupler (e.g. with "//&
+                   "ENTHALPY_FROM_COUPLER=True).", default=enable_bugs, &
+                   do_not_log=.not.(CS%use_river_heat_content .or. CS%use_calving_heat_content))
   else
     CS%use_river_heat_content = .false.
     CS%use_calving_heat_content = .false.
+    CS%runoff_calving_heat_content_bug = .true.
   endif
 
   call get_param(param_file, mdl, "DO_BRINE_PLUME", CS%do_brine_plume, &
