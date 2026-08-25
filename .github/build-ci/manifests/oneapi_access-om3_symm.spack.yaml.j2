@@ -22,6 +22,11 @@ spack:
       require:
       - '%access_oneapi'
       - 'target={{ target }}'
+  repos:
+    access_spack_packages:
+      git: https://github.com/ACCESS-NRI/access-spack-packages.git
+      tag: 2026.08.008
+      destination: $env/package-repos/access-spack-packages
   concretizer:
     unify: false
   view: false
