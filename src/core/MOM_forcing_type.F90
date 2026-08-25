@@ -465,6 +465,7 @@ contains
 !! over a time step.
 subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
                   FluxRescaleDepth, useRiverHeatContent, useCalvingHeatContent, &
+                  runoffCalvingHeatContentBug, &
                   h, T, netMassInOut, netMassOut, net_heat, net_salt, pen_SW_bnd, tv, &
                   aggregate_FW, nonpenSW, netmassInOut_rate, net_Heat_Rate, &
                   net_salt_rate, pen_sw_bnd_Rate)
@@ -482,6 +483,13 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
                                                             !! are scaled away [H ~> m or kg m-2]
   logical,                  intent(in)    :: useRiverHeatContent   !< logical for river heat content
   logical,                  intent(in)    :: useCalvingHeatContent !< logical for calving heat content
+  logical,                  intent(in)    :: runoffCalvingHeatContentBug !< If true, recover a bug
+                                                            !! in which the use_river_heat_content/
+                                                            !! use_calving_heat_content corrections
+                                                            !! are applied even when the full
+                                                            !! enthalpy budget is already supplied
+                                                            !! via the coupler (ie when do_enthalpy
+                                                            !! is false).
   real, dimension(SZI_(G),SZK_(GV)), &
                             intent(in)    :: h              !< layer thickness [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZK_(GV)), &
@@ -730,7 +738,8 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
 
     ! Add explicit heat flux for runoff (which is part of the ice-ocean boundary
     ! flux type). Runoff is otherwise added with a temperature of SST.
-    if (useRiverHeatContent) then
+    ! This should only be done when do_enthalpy is true.
+    if (useRiverHeatContent .and. (runoffCalvingHeatContentBug .or. do_enthalpy)) then
       ! remove lrunoff*SST here, to counteract its addition elsewhere
       net_heat(i) = (net_heat(i) + (scale*(dt * I_Cp_Hconvert)) * fluxes%heat_content_lrunoff(i,j)) - &
                      (GV%RZ_to_H * (scale * dt)) * fluxes%lrunoff(i,j) * T(i,1)
@@ -751,7 +760,8 @@ subroutine extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
 
     ! Add explicit heat flux for calving (which is part of the ice-ocean boundary
     ! flux type). Calving is otherwise added with a temperature of SST.
-    if (useCalvingHeatContent) then
+    ! This should only be done when do_enthalpy is true.
+    if (useCalvingHeatContent .and. (runoffCalvingHeatContentBug .or. do_enthalpy)) then
       ! remove frunoff*SST here, to counteract its addition elsewhere
       net_heat(i) = net_heat(i) + (scale*(dt * I_Cp_Hconvert)) * fluxes%heat_content_frunoff(i,j) - &
                     (GV%RZ_to_H * (scale * dt)) * fluxes%frunoff(i,j) * T(i,1)
@@ -967,7 +977,8 @@ end subroutine extractFluxes1d
 !! This subroutine extracts fluxes from the surface fluxes type. It multiplies the
 !! fluxes by dt, so that the result is an accumulation of the fluxes over a time step.
 subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth, &
-                           useRiverHeatContent, useCalvingHeatContent, h, T, &
+                           useRiverHeatContent, useCalvingHeatContent, &
+                           runoffCalvingHeatContentBug, h, T, &
                            netMassInOut, netMassOut, net_heat, Net_salt, Pen_SW_bnd, tv, &
                            aggregate_FW)
 
@@ -982,6 +993,13 @@ subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth,
                                                                     !! are scaled away [H ~> m or kg m-2]
   logical,                          intent(in)    :: useRiverHeatContent   !< logical for river heat content
   logical,                          intent(in)    :: useCalvingHeatContent !< logical for calving heat content
+  logical,                          intent(in)    :: runoffCalvingHeatContentBug !< If true, recover a bug
+                                                                    !! in which the use_river_heat_content/
+                                                                    !! use_calving_heat_content corrections
+                                                                    !! are applied even when the full
+                                                                    !! enthalpy budget is already supplied
+                                                                    !! via the coupler (ie when do_enthalpy
+                                                                    !! is false).
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                                     intent(in)    :: h              !< layer thickness [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -1016,6 +1034,7 @@ subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth,
   do j=G%jsc, G%jec
     call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt, &
             FluxRescaleDepth, useRiverHeatContent, useCalvingHeatContent,&
+            runoffCalvingHeatContentBug, &
             h(:,j,:), T(:,j,:), netMassInOut(:,j), netMassOut(:,j),              &
             net_heat(:,j), net_salt(:,j), pen_SW_bnd(:,:,j), tv, aggregate_FW)
   enddo
@@ -1094,7 +1113,7 @@ subroutine calculateBuoyancyFlux1d(G, GV, US, fluxes, optics, nsw, h, Temp, Salt
   ! Note that unlike other calls to extractFLuxes1d() that return the time-integrated flux
   ! this call returns the rate because dt=1 (in arbitrary time units)
   call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, 1.0,                        &
-                H_limit_fluxes, useRiverHeatContent, useCalvingHeatContent, &
+                H_limit_fluxes, useRiverHeatContent, useCalvingHeatContent, .false., &
                 h(:,j,:), Temp(:,j,:), netH, netEvap, netHeatMinusSW,                 &
                 netSalt, penSWbnd, tv_rate, .false.)
 
