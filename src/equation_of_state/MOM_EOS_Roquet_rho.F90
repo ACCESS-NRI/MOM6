@@ -183,6 +183,10 @@ contains
   procedure :: calculate_density_array => calculate_density_array_Roquet_rho
   !> Local implementation of generic calculate_spec_vol_array for efficiency
   procedure :: calculate_spec_vol_array => calculate_spec_vol_array_Roquet_rho
+  !> Local implementation of generic calculate_density_derivs_array for efficiency
+  procedure :: calculate_density_derivs_array => calculate_density_derivs_array_Roquet_rho
+  !> Local implementation of generic calculate_specvol_derivs_array for efficiency
+  procedure :: calculate_specvol_derivs_array => calculate_specvol_derivs_array_Roquet_rho
 
 end type Roquet_rho_EOS
 
@@ -191,6 +195,7 @@ contains
 !> In situ density of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: density_elem_Roquet_rho
 real elemental function density_elem_Roquet_rho(this, T, S, pressure)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -250,6 +255,7 @@ end function density_elem_Roquet_rho
 !> In situ density anomaly of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: density_anomaly_elem_Roquet_rho
 real elemental function density_anomaly_elem_Roquet_rho(this, T, S, pressure, rho_ref)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -312,6 +318,7 @@ end function density_anomaly_elem_Roquet_rho
 !> In situ specific volume of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: spec_vol_elem_Roquet_rho
 real elemental function spec_vol_elem_Roquet_rho(this, T, S, pressure)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -325,6 +332,7 @@ end function spec_vol_elem_Roquet_rho
 !> In situ specific volume anomaly of sea water from Roquet et al., 2015 [kg m-3]
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
+!DIR$ ATTRIBUTES FORCEINLINE :: spec_vol_anomaly_elem_Roquet_rho
 real elemental function spec_vol_anomaly_elem_Roquet_rho(this, T, S, pressure, spv_ref)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
   real,                  intent(in) :: T        !< Conservative temperature [degC]
@@ -339,6 +347,7 @@ end function spec_vol_anomaly_elem_Roquet_rho
 
 !> For a given thermodynamic state, calculate the derivatives of density with conservative
 !! temperature and absolute salinity, using the density polynomial fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_density_derivs_elem_Roquet_rho
 elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, drho_dT, drho_dS)
   class(Roquet_rho_EOS), intent(in)  :: this     !< This EOS
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
@@ -413,6 +422,7 @@ elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressu
 end subroutine calculate_density_derivs_elem_Roquet_rho
 
 !> Second derivatives of density with respect to temperature, salinity, and pressure
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_density_second_derivs_elem_Roquet_rho
 elemental subroutine calculate_density_second_derivs_elem_Roquet_rho(this, T, S, pressure, &
                        drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
   class(Roquet_rho_EOS), intent(in) :: this !< This EOS
@@ -506,6 +516,7 @@ end subroutine calculate_density_second_derivs_elem_Roquet_rho
 
 !> Calculate the partial derivatives of specific volume with temperature and salinity
 !! using the density polynomial fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_specvol_derivs_elem_Roquet_rho
 elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS)
   class(Roquet_rho_EOS), intent(in)    :: this     !< This EOS
   real,                  intent(in)    :: T        !< Conservative temperature [degC]
@@ -519,18 +530,45 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
   real :: rho     ! In situ density [kg m-3]
   real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
   real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
+  real :: inv_rhosqr ! The inverse of the square of density [m6 kg-2]
 
-  call this%calculate_density_derivs_elem(T, S, pressure, drho_dT, drho_dS)
-  rho = this%density_elem(T, S, pressure)
-  dSV_dT = -dRho_DT/(rho**2)
-  dSV_dS = -dRho_DS/(rho**2)
+  call calculate_density_derivs_elem_Roquet_rho(this, T, S, pressure, dRho_dT, dRho_dS)
+  rho = density_elem_Roquet_rho(this, T, S, pressure)
+  inv_rhosqr = 1.0 / (rho*rho)
+  dSV_dT = -dRho_dT * inv_rhosqr
+  dSV_dS = -dRho_dS * inv_rhosqr
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
+
+
+subroutine calculate_specvol_derivs_array_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS, start, npts)
+  class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
+  real, dimension(:), intent(in)    :: T        !< Potential temperature [degC]
+  real, dimension(:), intent(in)    :: S        !< Salinity [PSU]
+  real, dimension(:), intent(in)    :: pressure !< Pressure [Pa]
+  real, dimension(:), intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
+                                                !! potential temperature [m3 kg-1 degC-1]
+  real, dimension(:), intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
+                                                !! salinity [m3 kg-1 PSU-1]
+  integer,            intent(in)    :: start    !< The starting index for calculations
+  integer,            intent(in)    :: npts     !< The number of values to calculate
+
+  ! Local variables
+  integer :: js, je
+
+  js = start
+  je = start+npts-1
+
+  call calculate_specvol_derivs_elem_Roquet_rho(this, T(js:je), S(js:je), pressure(js:je), &
+                                                dSV_dT(js:je), dSV_dS(js:je))
+
+end subroutine calculate_specvol_derivs_array_Roquet_rho
 
 !> Compute the in situ density of sea water (rho in [kg m-3]) and the compressibility
 !! (drho/dp = C_sound^-2, stored as drho_dp [s2 m-2]) from absolute salinity (sal [g kg-1]),
 !! conservative temperature (T [degC]), and pressure [Pa], using the density polynomial
 !! fit EOS from Roquet et al. (2015).
+!DIR$ ATTRIBUTES FORCEINLINE :: calculate_compress_elem_Roquet_rho
 elemental subroutine calculate_compress_elem_Roquet_rho(this, T, S, pressure, rho, drho_dp)
   class(Roquet_rho_EOS), intent(in)  :: this !< This EOS
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
@@ -668,6 +706,31 @@ subroutine calculate_spec_vol_array_Roquet_rho(this, T, S, pressure, specvol, st
   endif
 
 end subroutine calculate_spec_vol_array_Roquet_rho
+
+!> Calculate the density derivatives for 1D array inputs and outputs.
+subroutine calculate_density_derivs_array_Roquet_rho(this, T, S, pressure, drho_dT, drho_dS, start, npts)
+  class(Roquet_rho_EOS),    intent(in)  :: this     !< This EOS
+  real, dimension(:), intent(in)  :: T        !< Potential temperature relative to the surface [degC]
+  real, dimension(:), intent(in)  :: S        !< Salinity [PSU]
+  real, dimension(:), intent(in)  :: pressure !< Pressure [Pa]
+  real, dimension(:), intent(out) :: drho_dT  !< The partial derivative of density with potential
+                                              !! temperature [kg m-3 degC-1]
+  real, dimension(:), intent(out) :: drho_dS  !< The partial derivative of density with salinity,
+                                              !! in [kg m-3 PSU-1]
+  integer,            intent(in)  :: start    !< The starting index for calculations
+  integer,            intent(in)  :: npts     !< The number of values to calculate  ! Local variables
+
+  ! Local variables
+  integer :: js, je
+
+  js = start
+  je = start+npts-1
+
+  call calculate_density_derivs_elem_Roquet_rho(this, T(js:je), S(js:je), pressure(js:je), &
+                                                drho_dt(js:je), drho_ds(js:je))
+
+end subroutine calculate_density_derivs_array_Roquet_rho
+
 
 !> \namespace mom_eos_Roquet_rho
 !!
