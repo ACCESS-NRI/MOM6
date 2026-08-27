@@ -1,4 +1,10 @@
 spack:
+  include:
+  - git: https://github.com/ACCESS-NRI/access-spack-packages
+    # FIXME: Update when merged into api-v2
+    branch: 484-top-level-includes
+    paths:
+    - .github/build-ci/includes/oneapi
   specs:
   - 'access-om3@latest ^openmpi'
   packages:
@@ -11,22 +17,4 @@ spack:
     access-mom6:
       require:
       - '@git.{{ ref }}=stable ~asymmetric_mem +mom6_solo'
-    gcc-runtime:
-      require:
-      - '%access_gcc'
-      - 'target={{ target }}'
-    intel-oneapi-compilers:
-      require:
-      - '@{{ oneapi_compiler_version }}'
-    all:
-      require:
-      - '%access_oneapi'
-      - 'target={{ target }}'
-  repos:
-    access_spack_packages:
-      git: https://github.com/ACCESS-NRI/access-spack-packages.git
-      tag: 2026.08.008
-      destination: $env/package-repos/access-spack-packages
-  concretizer:
-    unify: false
   view: false
