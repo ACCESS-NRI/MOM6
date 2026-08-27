@@ -1,19 +1,16 @@
 spack:
   include:
+  # Include base configuration from access-spack-packages/.github/build-ci/includes
   - git: https://github.com/ACCESS-NRI/access-spack-packages
     # FIXME: Update when merged into api-v2
     branch: 484-top-level-includes
     paths:
     - .github/build-ci/includes/oneapi
+  # Include configuration from this repositories .github/build-ci/includes directory
+  - path: ../includes
   specs:
   - 'access-om3@latest ^openmpi'
   packages:
-    cmake:
-      require:
-      - '@3.31.6:'
-    access3:
-      require:
-      - 'configurations=MOM6,MOM6-CICE6,MOM6-CICE6-WW3'
     access-mom6:
       require:
       - '@git.{{ ref }}=stable +asymmetric_mem +mom6_solo'
