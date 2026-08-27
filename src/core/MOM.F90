@@ -713,11 +713,12 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
     !---------- Initiate group halo pass of the forcing fields
     call cpu_clock_begin(id_clock_pass)
-    ! Halo updates for surface pressure need to be completed before calling calc_resoln_function
-    ! among other routines if the surface pressure is used in the equation of state.
+    ! Halo updates for surface pressure need to be completed before the halo points of
+    ! forces%p_surf are copied into CS%tv%p_surf below, and before calling
+    ! calc_resoln_function among other routines if the surface pressure is used in the
+    ! equation of state.
     nonblocking_p_surf_update = G%nonblocking_updates .and. &
-        .not.(associated(CS%tv%p_surf) .and. associated(forces%p_surf) .and. &
-              allocated(CS%tv%SpV_avg) .and. associated(CS%tv%T))
+        .not.(associated(CS%tv%p_surf) .and. associated(forces%p_surf))
     if (.not.associated(forces%taux) .or. .not.associated(forces%tauy)) &
          call MOM_error(FATAL,'step_MOM:forces%taux,tauy not associated')
     call create_group_pass(pass_tau_ustar_psurf, forces%taux, forces%tauy, G%Domain)
