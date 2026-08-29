@@ -18,6 +18,7 @@ use MOM_verticalGrid, only : verticalGrid_type
 use regrid_consts, only : coordinateMode, DEFAULT_COORDINATE_MODE
 use regrid_consts, only : REGRIDDING_LAYER, REGRIDDING_ZSTAR
 use regrid_consts, only : REGRIDDING_RHO, REGRIDDING_SIGMA
+use regrid_consts, only : REGRIDDING_ADAPTIVE
 
 implicit none ; private
 
@@ -196,7 +197,7 @@ subroutine DOME2d_initialize_thickness ( h, depth_tot, G, GV, US, param_file, ju
  !
  !    enddo ; enddo
 
-    case ( REGRIDDING_ZSTAR )
+    case ( REGRIDDING_ZSTAR, REGRIDDING_ADAPTIVE )
 
       do j=js,je ; do i=is,ie
         eta1D(nz+1) = -depth_tot(i,j)
@@ -284,7 +285,7 @@ subroutine DOME2d_initialize_temperature_salinity ( T, S, h, G, GV, US, param_fi
 
   select case ( coordinateMode(verticalCoordinate) )
 
-    case ( REGRIDDING_ZSTAR, REGRIDDING_SIGMA )
+    case ( REGRIDDING_ZSTAR, REGRIDDING_SIGMA, REGRIDDING_ADAPTIVE )
 
       do j=js,je ; do i=is,ie
         xi0 = 0.0
