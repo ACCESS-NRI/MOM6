@@ -23,7 +23,7 @@ option(MOM6_USE_GENERIC_TRACER "Build with GFDL generic tracer support (GFDLGTra
 option(MOM6_OPENMP_OFFLOAD "Enable NVHPC OpenMP/OpenACC/do-concurrent GPU offload flags (requires NVHPC)" OFF)
 set(MOM6_OFFLOAD_MEM_MODEL "separate" CACHE STRING "GPU memory model for MOM6_OPENMP_OFFLOAD: unified, managed, or separate (maps to -gpu=mem:<model>)")
 set_property(CACHE MOM6_OFFLOAD_MEM_MODEL PROPERTY STRINGS unified managed separate)
-set(MOM6_OFFLOAD_CC "70;80;90" CACHE STRING "GPU compute capabilities for MOM6_OPENMP_OFFLOAD, as a semicolon-separated list (e.g. 70;80;90); each entry NN maps to ccNN in -gpu=")
+set(MOM6_OFFLOAD_CC "" CACHE STRING "GPU compute capabilities for MOM6_OPENMP_OFFLOAD, as a semicolon-separated list (e.g. 70;80;90); each entry NN maps to ccNN in -gpu=. Empty (default) omits -gpu=cc... entirely, so NVHPC targets the native/local GPU.")
 message(STATUS "  - MOM6_ACCESS3     ${MOM6_ACCESS3}")
 message(STATUS "  - MOM6_SOLO        ${MOM6_SOLO}")
 message(STATUS "  - MOM6_OPENMP      ${MOM6_OPENMP}")
@@ -32,7 +32,11 @@ message(STATUS "  - MOM6_USE_GENERIC_TRACER ${MOM6_USE_GENERIC_TRACER}")
 message(STATUS "  - MOM6_OPENMP_OFFLOAD ${MOM6_OPENMP_OFFLOAD}")
 if(MOM6_OPENMP_OFFLOAD)
   message(STATUS "  - MOM6_OFFLOAD_MEM_MODEL ${MOM6_OFFLOAD_MEM_MODEL}")
-  message(STATUS "  - MOM6_OFFLOAD_CC  ${MOM6_OFFLOAD_CC}")
+  if(MOM6_OFFLOAD_CC)
+    message(STATUS "  - MOM6_OFFLOAD_CC  ${MOM6_OFFLOAD_CC}")
+  else()
+    message(STATUS "  - MOM6_OFFLOAD_CC  (unset - compiler defaults to native GPU)")
+  endif()
 endif()
 
 if(NOT MOM6_ACCESS3 AND NOT MOM6_SOLO)
@@ -78,19 +82,29 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O2")
   set(CMAKE_Fortran_FLAGS_DEBUG "-O0 -g")
   if(MOM6_OPENMP_OFFLOAD)
-    list(TRANSFORM MOM6_OFFLOAD_CC PREPEND "cc" OUTPUT_VARIABLE _mom6_offload_gpu)
-    list(JOIN _mom6_offload_gpu "," _mom6_offload_gpu)
-    set(_mom6_offload_gpu "mem:${MOM6_OFFLOAD_MEM_MODEL},${_mom6_offload_gpu}")
+    # NVHPC accepts multiple -gpu= flags and accumulates their suboptions, so
+    # the memory model and compute-capability list are kept as separate flags
+    # rather than combined into one comma-joined string. The compute-capability
+    # list is optional: if MOM6_OFFLOAD_CC is unset, -gpu=cc... is omitted
+    # entirely and NVHPC defaults to targeting the native/local GPU.
+    set(_mom6_offload_gpu "-gpu=mem:${MOM6_OFFLOAD_MEM_MODEL}")
+    if(MOM6_OFFLOAD_CC)
+      list(TRANSFORM MOM6_OFFLOAD_CC PREPEND "cc" OUTPUT_VARIABLE _mom6_offload_cc)
+      list(JOIN _mom6_offload_cc "," _mom6_offload_cc)
+      string(APPEND _mom6_offload_gpu " -gpu=${_mom6_offload_cc}")
+      unset(_mom6_offload_cc)
+    endif()
     # -Mnofma/-mno-fma/-Mnovect preserve bit-reproducibility with the
     # reference CPU build; see SPACK-NVHPC-FMA-ANSWER-CHANGE.md. Requires an
     # optimized build type (e.g. -DCMAKE_BUILD_TYPE=Release): compiling with
     # no -O level at all has been observed to segfault inside NVHPC's runtime
     # array-gather while writing the final restart file (MOM_restart.F90).
-    set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -mp=gpu -stdpar=gpu -acc=gpu -gpu=${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
+    set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -mp=gpu -stdpar=gpu -acc=gpu ${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
     # -gpu=... must also be passed at link (not just compile), since it selects
     # which GPU runtime/memory-model/compute-capability support gets linked in.
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu -gpu=${_mom6_offload_gpu}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu ${_mom6_offload_gpu}")
     unset(_mom6_offload_gpu)
+    unset(_mom6_offload_cc)
   endif()
 else()
   message(WARNING "Fortran compiler with ID ${CMAKE_Fortran_COMPILER_ID} will be used with CMake default options")
