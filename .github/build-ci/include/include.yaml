@@ -1,0 +1,7 @@
+# This file is included via the manifest
+# It has two variations on the include:
+# For CRs (which don't have vars.USE_CALLER_REPOSITORY_PATH set): They use this repos .github/build-ci/include/local
+# For ASP (which do have the above var set): Use the $CALLER_REPOSITORY_PATH_CONFIG path to include instead, which is set in build-ci to be the caller ASP
+include:
+  - path: local
+    path_override_env_var: CALLER_REPOSITORY_PATH_CONFIG
