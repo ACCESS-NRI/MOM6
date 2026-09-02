@@ -99,12 +99,30 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
     # optimized build type (e.g. -DCMAKE_BUILD_TYPE=Release): compiling with
     # no -O level at all has been observed to segfault inside NVHPC's runtime
     # array-gather while writing the final restart file (MOM_restart.F90).
-    set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -mp=gpu -stdpar=gpu -acc=gpu ${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
+    #
+    # These must land AFTER the build type's -O.../-g flags on the actual
+    # compiler command line, not in CMAKE_Fortran_FLAGS: CMake always emits
+    # CMAKE_Fortran_FLAGS before CMAKE_Fortran_FLAGS_<CONFIG>, regardless of
+    # the order these set() calls run in. NVHPC applies -M/-m options
+    # left-to-right with last-wins semantics, and -O<n> re-asserts its own
+    # bundled vectorization -- so with -Mnovect placed before -O2, -O2 was
+    # silently re-enabling vectorization, defeating the bit-reproducibility
+    # goal for every optimized build type. Confirmed empirically on sm_70:
+    # with -O2 before these flags, a representative do-concurrent kernel
+    # compiles to scalar host code; with -O2 after them (the old order),
+    # the same kernel vectorizes (vmulpd/vaddpd), changing the summation
+    # order and hence the answers. GPU device code was unaffected either
+    # way in that test, but keep these ordered after -O for safety on the
+    # host side regardless.
+    set(_mom6_offload_flags "-mp=gpu -stdpar=gpu -acc=gpu ${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
+    set(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE} ${_mom6_offload_flags}")
+    set(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG} ${_mom6_offload_flags}")
     # -gpu=... must also be passed at link (not just compile), since it selects
     # which GPU runtime/memory-model/compute-capability support gets linked in.
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu ${_mom6_offload_gpu}")
     unset(_mom6_offload_gpu)
     unset(_mom6_offload_cc)
+    unset(_mom6_offload_flags)
   endif()
 else()
   message(WARNING "Fortran compiler with ID ${CMAKE_Fortran_COMPILER_ID} will be used with CMake default options")
