@@ -239,6 +239,13 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
        isc, iec, jsc, jec, ice_ocean_boundary%frunoff, areacor=med2mod_areacor, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+  ! ice-shelf basal melt. This is not preset to 0.0 since it is only allocated if connected.
+  if ( associated(ice_ocean_boundary%brunoff) ) then
+    call state_getimport(importState, 'Foxx_rofb',  &
+         isc, iec, jsc, jec, ice_ocean_boundary%brunoff, areacor=med2mod_areacor, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+  endif
+
   ! liquid glc runoff
   if ( associated(ice_ocean_boundary%lrunoff_glc) ) then
     ice_ocean_boundary%lrunoff_glc (:,:) = 0._ESMF_KIND_R8
