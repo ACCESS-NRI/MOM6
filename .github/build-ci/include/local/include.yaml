@@ -1,6 +1,0 @@
-include:
-# Include base configuration from access-spack-packages/.github/build-ci/includes
-- git: https://github.com/ACCESS-NRI/access-spack-packages
-  branch: 484-top-level-includes
-  paths:
-  - .github/build-ci/include/base
