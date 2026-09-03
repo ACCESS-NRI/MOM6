@@ -3,5 +3,9 @@ spack:
   # Include configuration from this repository, with the environment variable defined in build-ci
   - path: $SPACK_MANIFEST_REPOSITORY_PATH/.github/build-ci/include
   specs:
-  - 'access-mom6@git.{{ ref }}=stable ~access3 +mom6_solo %%access_oneapi ^openmpi'
+  - 'access-mom6@git.{{ ref }}=stable ~access3 +mom6_solo ^openmpi'
+  packages:
+    all:
+      require:
+      - '%access_oneapi'
   view: false
