@@ -1,21 +1,11 @@
 spack:
+  include:
+  # Include configuration from this repository, with the environment variable defined in build-ci
+  - path: $SPACK_MANIFEST_REPOSITORY_PATH/.github/build-ci/include
   specs:
   - 'access-mom6@git.{{ ref }}=stable ~access3 +mom6_solo ^openmpi'
   packages:
-    cmake:
-      require:
-      - '@3.31.6:'
-    gcc-runtime:
-      require:
-      - '%access_gcc'
-      - 'target={{ target }}'
-    intel-oneapi-compilers:
-      require:
-      - '@{{ oneapi_compiler_version }}'
     all:
       require:
       - '%access_oneapi'
-      - 'target={{ target }}'
-  concretizer:
-    unify: false
   view: false
