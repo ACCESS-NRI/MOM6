@@ -1,0 +1,13 @@
+spack:
+  # Installs NVHPC before the manifest in manifests/nvhpc_*.spack.yaml.j2 is
+  # concretized. The build-ci runner image only ships oneapi and gcc, and
+  # Spack >= 1.0 only accepts compilers that are external or already
+  # installed, so '%nvhpc' cannot be concretized without this.
+  # Passed to build-ci via spack-compiler-manifest-path in
+  # .github/workflows/ci.yml. Keep the version in step with the 'nvhpc:'
+  # requirement in the nvhpc manifests.
+  specs:
+  - nvhpc@26.9 target=x86_64_v3
+  view: false
+  concretizer:
+    unify: false

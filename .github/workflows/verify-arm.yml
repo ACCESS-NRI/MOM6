@@ -20,7 +20,7 @@ jobs:
   # Executables
 
   build-symmetric:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -46,7 +46,7 @@ jobs:
           retention-days: 1
 
   build-asymmetric:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -72,7 +72,7 @@ jobs:
           retention-days: 1
 
   build-openmp:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -101,7 +101,7 @@ jobs:
     # Temporarily disabled pending investigation of ARM optimization differences.
     # Remove this condition and the one on test-repro to re-enable REPRO.
     if: ${{ false }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -126,34 +126,36 @@ jobs:
           path: mom6-repro.tar
           retention-days: 1
 
-  build-target:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04-arm
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: ./.github/actions/ubuntu-setup/
-
-      - name: Compile target dependencies
-        run: |
-          make -C .testing DO_REGRESSION_TESTS=1 build/target_codebase
-          make -C .testing/build/target_codebase/.testing -j2 build/deps/lib/libFMS.a
-
-      - name: Compile target MOM6
-        run: make -C .testing -j2 DO_REGRESSION_TESTS=1 build/target/MOM6
-
-      - name: Prepare artifact
-        run: tar -cf mom6-target.tar .testing/build/target/MOM6
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: mom6-target-artifact
-          path: mom6-target.tar
-          retention-days: 1
+  # Disabled along with test-regression, which was its only consumer: nothing
+  # now needs mom6-target-artifact, so this build would be dead weight.
+  #build-target:
+  #  if: github.event_name == 'pull_request'
+  #  runs-on: ubuntu-26.04-arm
+  #
+  #  steps:
+  #    - uses: actions/checkout@v7
+  #
+  #    - uses: ./.github/actions/ubuntu-setup/
+  #
+  #    - name: Compile target dependencies
+  #      run: |
+  #        make -C .testing DO_REGRESSION_TESTS=1 build/target_codebase
+  #        make -C .testing/build/target_codebase/.testing -j2 build/deps/lib/libFMS.a
+  #
+  #    - name: Compile target MOM6
+  #      run: make -C .testing -j2 DO_REGRESSION_TESTS=1 build/target/MOM6
+  #
+  #    - name: Prepare artifact
+  #      run: tar -cf mom6-target.tar .testing/build/target/MOM6
+  #
+  #    - uses: actions/upload-artifact@v7
+  #      with:
+  #        name: mom6-target-artifact
+  #        path: mom6-target.tar
+  #        retention-days: 1
 
   build-unit:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     steps:
       - uses: actions/checkout@v7
@@ -183,7 +185,7 @@ jobs:
   # Tests
 
   test-grid:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: [build-symmetric, build-asymmetric]
 
     steps:
@@ -214,7 +216,7 @@ jobs:
           test.grid
 
   test-layout:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-symmetric
 
     steps:
@@ -233,7 +235,7 @@ jobs:
         run: make -C .testing -j2 -o build/symmetric/MOM6 test.layout
 
   test-rotate:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-symmetric
 
     steps:
@@ -252,7 +254,7 @@ jobs:
         run: make -C .testing -j2 -o build/symmetric/MOM6 test.rotate
 
   test-restart:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-symmetric
 
     steps:
@@ -271,7 +273,7 @@ jobs:
         run: make -C .testing -j2 -o build/symmetric/MOM6 test.restart
 
   test-nan:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-symmetric
 
     steps:
@@ -290,7 +292,7 @@ jobs:
         run: make -C .testing -j2 -o build/symmetric/MOM6 test.nan
 
   test-dim:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-symmetric
     strategy:
       fail-fast: false
@@ -313,7 +315,7 @@ jobs:
         run: make -C .testing -j2 -o build/symmetric/MOM6 test.dim.${{ matrix.dim }}
 
   test-openmp:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: [build-symmetric, build-openmp]
 
     steps:
@@ -345,7 +347,7 @@ jobs:
   test-repro:
     # Re-enable together with build-repro above.
     if: ${{ false }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: [build-symmetric, build-repro]
 
     steps:
@@ -374,40 +376,42 @@ jobs:
           -o build/repro/MOM6 \
           test.repro
 
-  test-regression:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04-arm
-    needs: [build-symmetric, build-target]
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: ./.github/actions/ubuntu-setup/
-
-      - name: Download symmetric MOM6
-        uses: actions/download-artifact@v8
-        with:
-          name: mom6-symmetric-artifact
-
-      - name: Download target MOM6
-        uses: actions/download-artifact@v8
-        with:
-          name: mom6-target-artifact
-
-      - name: Unpack artifacts
-        run: |
-          tar -xpvf mom6-symmetric.tar
-          tar -xpvf mom6-target.tar
-
-      - name: Check for regressions
-        run: |
-          make -C .testing -j2 \
-          -o build/symmetric/MOM6 \
-          -o build/target/MOM6 \
-          DO_REGRESSION_TESTS=1 test.regression
+  # Disabled along with test-regression, which was its only consumer: nothing
+  # now needs mom6-target-artifact, so this build would be dead weight.
+  #test-regression:
+  #  if: github.event_name == 'pull_request'
+  #  runs-on: ubuntu-26.04-arm
+  #  needs: [build-symmetric, build-target]
+  #
+  #  steps:
+  #    - uses: actions/checkout@v7
+  #
+  #    - uses: ./.github/actions/ubuntu-setup/
+  #
+  #    - name: Download symmetric MOM6
+  #      uses: actions/download-artifact@v8
+  #      with:
+  #        name: mom6-symmetric-artifact
+  #
+  #    - name: Download target MOM6
+  #      uses: actions/download-artifact@v8
+  #      with:
+  #        name: mom6-target-artifact
+  #
+  #    - name: Unpack artifacts
+  #      run: |
+  #        tar -xpvf mom6-symmetric.tar
+  #        tar -xpvf mom6-target.tar
+  #
+  #    - name: Check for regressions
+  #      run: |
+  #        make -C .testing -j2 \
+  #        -o build/symmetric/MOM6 \
+  #        -o build/target/MOM6 \
+  #        DO_REGRESSION_TESTS=1 test.regression
 
   test-unit:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     needs: build-unit
 
     steps:
