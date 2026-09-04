@@ -24,6 +24,8 @@ use MOM_open_boundary,     only : ocean_OBC_type, OBC_NONE
 use MOM_open_boundary,     only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTION_N, OBC_DIRECTION_S
 use MOM_MEKE_types,        only : MEKE_type
 
+!$ use omp_lib, only: omp_get_num_devices
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -49,8 +51,8 @@ type, public :: VarMix_CS
                                   !! speed and calculate the resolution function
                                   !! independently at each point.
   logical :: use_stored_slopes    !< If true, stores isopycnal slopes in this structure.
-  logical :: Resoln_use_ebt       !< If true, uses the equivalent barotropic wave speed instead
-                                  !! of first baroclinic wave for calculating the resolution fn.
+  logical :: Resoln_use_ebt       !< If true, use the equivalent barotropic wave speed instead of the
+                                  !! first baroclinic wave speed for calculating the resolution function.
   logical :: khth_use_ebt_struct  !< If true, uses the equivalent barotropic structure
                                   !! as the vertical structure of thickness diffusivity.
   logical :: kdgl90_use_ebt_struct  !< If true, uses the equivalent barotropic structure
@@ -176,6 +178,11 @@ type, public :: VarMix_CS
   logical :: use_QG_Leith_GM      !< If true, uses the QG Leith viscosity as the GM coefficient
   logical :: use_beta_in_QG_Leith !< If true, includes the beta term in the QG Leith GM coefficient
 
+  ! Isoneutral blocking parameters
+  integer :: niblock         !< The i block size used in calc_isoneutral_slopes [nondim].
+  integer :: njblock         !< The j block size used in calc_isoneutral_slopes [nondim].
+  integer :: nkblock         !< The k block size used in calc_isoneutral_slopes [nondim].
+
   ! Diagnostics
   !>@{
   !! Diagnostic identifier
@@ -208,6 +215,7 @@ subroutine calc_depth_function(G, CS)
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq
   integer :: i, j
   real    :: H0   ! The depth above which KHTH is linearly scaled away [Z ~> m]
+  real    :: h1, h2  ! Temporary total thicknesses [Z ~> m]
   real    :: expo ! exponent used in the depth dependent scaling [nondim]
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -226,11 +234,15 @@ subroutine calc_depth_function(G, CS)
   expo = CS%depth_scaled_khth_exp
 !$OMP do
   do j=js,je ; do I=is-1,Ieq
-    CS%Depth_fn_u(I,j) = (MIN(1.0, (0.5*(G%bathyT(i,j) + G%bathyT(i+1,j)) + G%Z_ref)/H0))**expo
+    h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
+    h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
+    CS%Depth_fn_u(I,j) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
   enddo ; enddo
 !$OMP do
   do J=js-1,Jeq ; do i=is,ie
-    CS%Depth_fn_v(i,J) = (MIN(1.0, (0.5*(G%bathyT(i,j) + G%bathyT(i,j+1)) + G%Z_ref)/H0))**expo
+    h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
+    h2 = max(G%meanSL(i,j+1) + G%bathyT(i,j+1), 0.0)
+    CS%Depth_fn_v(i,J) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
   enddo ; enddo
 
 end subroutine calc_depth_function
@@ -265,6 +277,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
          "Module must be initialized before it is used.")
 
   if (CS%calculate_cg1) then
+    !$omp target update from(h)
     if (.not. allocated(CS%cg1)) call MOM_error(FATAL, &
       "calc_resoln_function: %cg1 is not associated with Resoln_scaled_Kh.")
     if (CS%khth_use_ebt_struct .or. CS%kdgl90_use_ebt_struct &
@@ -288,8 +301,10 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     call create_group_pass(CS%pass_cg1, CS%cg1, G%Domain)
     call do_group_pass(CS%pass_cg1, G%Domain)
   endif
+
   if (CS%BS_use_sqg_struct .or. CS%khth_use_sqg_struct .or. CS%khtr_use_sqg_struct &
       .or. CS%kdgl90_use_sqg_struct .or. CS%id_sqg_struct>0) then
+    !$omp target update from(h)
     call calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
     call pass_var(CS%sqg_struct, G%Domain)
   endif
@@ -599,7 +614,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     call uvchksum("Res_fn_[uv]", CS%Res_fn_u, CS%Res_fn_v, G%HI, haloshift=0, &
                   unscale=1.0, scalar_pair=.true.)
   endif
-
 end subroutine calc_resoln_function
 
 !> Calculates and stores functions of SQG mode
@@ -645,6 +659,11 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
   real :: dz_int        ! Average of thicknesses around an interface in height units [Z ~> m]
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
   integer :: i, j, k, is, ie, js, je, nz
+  integer :: niblock, njblock, nkblock
+
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   f_subround = 1.0e-40 * US%s_to_T
@@ -675,10 +694,27 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
         f(i,j) = max(0.25 * abs((G%CoriolisBu(I,J) + G%CoriolisBu(I-1,J-1)) + &
                          (G%CoriolisBu(I-1,J) + G%CoriolisBu(I,J-1))), f_subround)
       enddo ; enddo
+      !$omp target update to(h)
+      !$omp target enter data map(alloc: e)
       call find_eta(h, tv, G, GV, US, e, halo_size=2)  !### Could be halo_size=1?
+
+      if (niblock == 0) niblock = ie - is + 1
+      if (njblock == 0) njblock = je - js + 1
+      if (nkblock == 0) nkblock = nz
+
+      !$omp target enter data map(to: tv, tv%T, tv%S)
+      !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
-                                  dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
+                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
+      !$omp target exit data map(release: tv%T, tv%S, tv)
+      !$omp target exit data map(delete: e)
+      !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target exit data map(from: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       do k=2,nz ; do j=js,je ; do i=is,ie
         N2 = max(0.25 * ((N2_u(I-1,j,K) + N2_u(I,j,K)) + (N2_v(i,J-1,K) + N2_v(i,J,K))), 0.0)
         dzc = 0.25 * ((dzu(I-1,j,K) + dzu(I,j,K)) + (dzv(i,J-1,K) + dzv(i,J,K)))
@@ -767,25 +803,57 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: dzv  ! Z-thickness at v-points [Z ~> m]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: dzSxN ! |Sx| N times dz at u-points [Z T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: dzSyN ! |Sy| N times dz at v-points [Z T-1 ~> m s-1]
+  integer :: niblock, njblock, nkblock
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_slope_functions: "//&
          "Module must be initialized before it is used.")
 
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  if (nkblock == 0) nkblock = GV%ke
+
   if (CS%calculate_Eady_growth_rate) then
+    !$omp target update to(h)
+    !$omp target enter data map(alloc: e)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
+
     if (CS%use_simpler_Eady_growth_rate) then
+      !$omp target enter data map(to: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
-                                  dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
+                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
+      !$omp target update from(e, dzu, dzv, dzSxN, dzSyN)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
+      !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target exit data map(release: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target exit data map(delete: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
     elseif (CS%use_stored_slopes) then
+      !$omp target enter data map(to: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target enter data map(alloc: N2_u, N2_v)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, halo=1, OBC=OBC, &
-                                  OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+      !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
+      !$omp target exit data map(release: tv%T, tv%S, tv, CS%slope_x, CS%slope_y)
+      !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
+      !$omp target exit data map(delete: N2_u, N2_v )
     else
+      !$omp target update from(e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
+    !$omp target exit data map(delete: e)
   endif
 
   if (query_averaging_enabled(CS%diag)) then
@@ -843,18 +911,18 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   integer :: OBC_dir_v(SZI_(G),SZJB_(G))  ! An integer indicating where there are v OBCs: +1 for
                                  ! northern OBCs, -1 for southern OBCs and 0 at points with no OBCs.
   real :: h4_u(SZIB_(G),SZJ_(G),SZK_(GV)+1)  ! The product of the 4 thicknesses surrounding a u-point
-                                 ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg2 m-4]
+                                 ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg4 m-8]
   real :: h4_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! The product of the 4 thicknesses surrounding a v-point
-                                 ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg2 m-4]
+                                 ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg4 m-8]
   integer :: i, j, k, is, ie, js, je, nz
 
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_Visbeck_coeffs_old: "// &
          "Module must be initialized before it is used.")
 
   if (.not. CS%calculate_Eady_growth_rate) return
-  if (.not. allocated(CS%SN_u)) call MOM_error(FATAL, "calc_slope_function:"// &
+  if (.not. allocated(CS%SN_u)) call MOM_error(FATAL, "calc_slope_function: "// &
          "%SN_u is not associated with use_variable_mixing.")
-  if (.not. allocated(CS%SN_v)) call MOM_error(FATAL, "calc_slope_function:R"// &
+  if (.not. allocated(CS%SN_v)) call MOM_error(FATAL, "calc_slope_function: "// &
          "%SN_v is not associated with use_variable_mixing.")
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -1049,7 +1117,7 @@ subroutine calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN,
   real :: dz_neglect ! A negligibly small distance to avoid division by zero [Z ~> m]
   real :: r_crp_dist ! The inverse of the distance over which to scale the cropping [Z-1 ~> m-1]
   real :: dB, dT ! Elevation variables used when cropping [Z ~> m]
-  integer :: i, j, k, l_seg
+  integer :: i, j, k
   logical :: crop
 
   dz_neglect = GV%dZ_subroundoff
@@ -1070,7 +1138,7 @@ subroutine calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN,
     CS%SN_v(i,j) = 0.0
   enddo ; enddo
 
-  !$OMP parallel do default(shared) private(dnew,dz,weight,l_seg,vint_SN,sum_dz,dT,dB)
+  !$OMP parallel do default(shared) private(dnew,dz,weight,vint_SN,sum_dz,dT,dB)
   do j=G%jsc-1,G%jec+1
     do I=G%isc-1,G%iec
       vint_SN(I) = 0.
@@ -1113,7 +1181,7 @@ subroutine calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN,
     enddo
   enddo
 
-  !$OMP parallel do default(shared) private(dnew,dz,weight,l_seg,vint_SN,sum_dz,dT,dB)
+  !$OMP parallel do default(shared) private(dnew,dz,weight,vint_SN,sum_dz,dT,dB)
   do J=G%jsc-1,G%jec
     do i=G%isc-1,G%iec+1
       vint_SN(i) = 0.
@@ -1194,6 +1262,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   ! real :: dz(SZI_(G),SZJ_(G),SZK_(GV)) ! The vertical distance across each layer [Z ~> m]
   real :: H_cutoff      ! Local estimate of a minimum thickness for masking [H ~> m or kg m-2]
   real :: dZ_cutoff     ! A minimum water column depth for masking [H ~> m or kg m-2]
+  real :: h1, h2        ! Temporary total thicknesses [Z ~> m]
   real :: h_neglect     ! A thickness that is so small it is usually lost
                         ! in roundoff and can be neglected [H ~> m or kg m-2].
   real :: S2            ! Interface slope squared [Z2 L-2 ~> nondim]
@@ -1208,15 +1277,14 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                         ! bathymetric depth for certain calculations.
   integer :: is, ie, js, je, nz
   integer :: i, j, k
-  integer :: l_seg
 
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_slope_functions_using_just_e: "// &
          "Module must be initialized before it is used.")
 
   if (.not. CS%calculate_Eady_growth_rate) return
-  if (.not. allocated(CS%SN_u)) call MOM_error(FATAL, "calc_slope_function:"// &
+  if (.not. allocated(CS%SN_u)) call MOM_error(FATAL, "calc_slope_function: "// &
          "%SN_u is not associated with use_variable_mixing.")
-  if (.not. allocated(CS%SN_v)) call MOM_error(FATAL, "calc_slope_function:"// &
+  if (.not. allocated(CS%SN_v)) call MOM_error(FATAL, "calc_slope_function: "// &
          "%SN_v is not associated with use_variable_mixing.")
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -1303,9 +1371,10 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     else
       do I=is-1,ie
-        if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
-          CS%SN_u(I,j) = G%OBCmaskCu(I,j) * sqrt( CS%SN_u(I,j) / &
-                                                  (max(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref) )
+        h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
+        h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
+        if ( min(h1, h2) > dZ_cutoff ) then
+          CS%SN_u(I,j) = G%OBCmaskCu(I,j) * sqrt( CS%SN_u(I,j) / max(h1, h2) )
         else
           CS%SN_u(I,j) = 0.0
         endif
@@ -1328,9 +1397,10 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
         ! if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
-        if ( min(G%bathyT(i,j), G%bathyT(i,j+1)) + G%Z_ref > dZ_cutoff ) then
-          CS%SN_v(i,J) = G%OBCmaskCv(i,J) * sqrt( CS%SN_v(i,J) / &
-                                                  (max(G%bathyT(i,j), G%bathyT(i,j+1)) + G%Z_ref) )
+        h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
+        h2 = max(G%meanSL(i,j+1) + G%bathyT(i,j+1), 0.0)
+        if ( min(h1, h2) > dZ_cutoff ) then
+          CS%SN_v(i,J) = G%OBCmaskCv(i,J) * sqrt( CS%SN_v(i,J) / max(h1, h2) )
         else
           CS%SN_v(i,J) = 0.0
         endif
@@ -1355,13 +1425,32 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   type(ocean_OBC_type),                         pointer       :: OBC !< Open boundaries control structure
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1)  :: e    ! The interface heights relative to mean sea level [Z ~> m]
+  integer :: niblock, njblock, nkblock
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_QG_slopes: "//&
          "Module must be initialized before it is used.")
 
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  if (nkblock == 0) nkblock = GV%ke
+
+  !$omp target update to(h)
+  !$omp target enter data map(alloc: e)
   call find_eta(h, tv, G, GV, US, e, halo_size=3)
+  !$omp target enter data map(to: tv%T, tv%S)
+  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                              slope_x, slope_y, halo=2, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                              slope_x, slope_y, niblock, njblock, nkblock, halo=2, OBC=OBC, &
+                              OBC_N2=CS%OBC_friendly)
+  !$omp target exit data map(release: tv%T, tv%S)
+  !$omp target exit data map(delete: e)
+  !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
 
 end subroutine calc_QG_slopes
 
@@ -1562,6 +1651,16 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   integer :: number_of_OBC_segments
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 0
+  integer, parameter :: default_nkblock = 0
+#else
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 1
+  integer, parameter :: default_nkblock = 1
+#endif
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
@@ -1592,7 +1691,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "when the first baroclinic deformation radius is well "//&
                  "resolved.", default=.false.)
   call get_param(param_file, mdl, "DEPTH_SCALED_KHTH", CS%Depth_scaled_KhTh, &
-                 "If true, KHTH is scaled away when the depth is shallower"//&
+                 "If true, KHTH is scaled away when the depth is shallower "//&
                  "than a reference depth: KHTH = MIN(1,H/H0)**N * KHTH, "//&
                  "where H0 is a reference depth, controlled via DEPTH_SCALED_KHTH_H0, "//&
                  "and the exponent (N) is controlled via DEPTH_SCALED_KHTH_EXP.",&
@@ -1613,7 +1712,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (.not.use_MEKE) Resoln_scaled_MEKE_visc = .false.
   call get_param(param_file, mdl, "RESOLN_USE_EBT", CS%Resoln_use_ebt, &
                  "If true, uses the equivalent barotropic wave speed instead "//&
-                 "of first baroclinic wave for calculating the resolution fn.",&
+                 "of first baroclinic wave for calculating the resolution function.",&
                  default=.false.)
   call get_param(param_file, mdl, "BACKSCAT_EBT_POWER", CS%BS_EBT_power, &
                  "Power to raise EBT vertical structure to when backscatter "// &
@@ -1677,6 +1776,34 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, default=.false., do_not_log=.true.)
 
+  ! Isopycnal blocking parameters
+  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, or when running with OpenMP offload, "//&
+                 "the full computational domain width is used. "//&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NIBLOCK cannot equal 1.", &
+                 default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when running with OpenMP offload, "//&
+                 "in which case the full computational domain height is used. " //&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NJBLOCK cannot equal 1.", &
+                 default=default_njblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The k-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain depth is used.", default=default_nkblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NKBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+
   call get_param(param_file, mdl, "USE_STANLEY_ISO", CS%use_stanley_iso, &
                  "If true, turn on Stanley SGS T variance parameterization "// &
                  "in isopycnal slope code.", default=.false.)
@@ -1686,6 +1813,16 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=-1.0, do_not_log=.true.)
     if (Stanley_coeff < 0.0) call MOM_error(FATAL, &
                  "STANLEY_COEFF must be set >= 0 if USE_STANLEY_ISO is true.")
+    if (CS%njblock == 1) then
+      call MOM_error(WARNING, "ISOPYCNAL_NJBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
+                    " Changing block size from 1 to 2 for this run.")
+      CS%njblock = 2
+    endif
+    if (CS%niblock == 1) then
+      call MOM_error(WARNING, "ISOPYCNAL_NIBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
+                    " Changing block size from 1 to 2 for this run.")
+      CS%niblock = 2
+    endif
   endif
   call get_param(param_file, mdl, "OBC_NUMBER_OF_SEGMENTS", number_of_OBC_segments, &
                  default=0, do_not_log=.true.)
@@ -1790,7 +1927,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                    "that avoids division by layer thickness. Recommended.", default=.false.)
     if (CS%use_simpler_Eady_growth_rate) then
       if (.not. CS%use_stored_slopes) call MOM_error(FATAL, &
-           "MOM_lateral_mixing_coeffs.F90, VarMix_init:"//&
+           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
            "When USE_SIMPLER_EADY_GROWTH_RATE=True, USE_STORED_SLOPES must also be True.")
       call get_param(param_file, mdl, "EADY_GROWTH_RATE_D_SCALE", CS%Eady_GR_D_scale, &
                      "The depth from surface over which to average SN when calculating "//&
@@ -1955,10 +2092,10 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "function independently at each point.", default=.false.)
     if (CS%interpolate_Res_fn) then
       if (CS%Res_coef_visc /= CS%Res_coef_khth) call MOM_error(FATAL, &
-           "MOM_lateral_mixing_coeffs.F90, VarMix_init:"//&
+           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
            "When INTERPOLATE_RES_FN=True, VISC_RES_FN_POWER must equal KH_RES_SCALE_COEF.")
       if (CS%Res_fn_power_visc /= CS%Res_fn_power_khth) call MOM_error(FATAL, &
-           "MOM_lateral_mixing_coeffs.F90, VarMix_init:"//&
+           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
            "When INTERPOLATE_RES_FN=True, VISC_RES_FN_POWER must equal KH_RES_FN_POWER.")
     endif
     call get_param(param_file, mdl, "GILL_EQUATORIAL_LD", Gill_equatorial_Ld, &
@@ -2115,12 +2252,13 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     enddo ; enddo
 
     if (.not. CS%use_stored_slopes) call MOM_error(FATAL, &
-           "MOM_lateral_mixing_coeffs.F90, VarMix_init:"//&
+           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
            "USE_STORED_SLOPES must be True when using QG Leith.")
   endif
 
   ! Re-enable variable mixing if one of the schemes was enabled
   CS%use_variable_mixing = in_use .or. CS%use_variable_mixing
+
 end subroutine VarMix_init
 
 !> Destructor for VarMix control structure

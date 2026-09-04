@@ -65,10 +65,6 @@ type, public :: diabatic_aux_CS ; private
   logical :: use_calving_heat_content !< If true, assumes that ice-ocean boundary
                              !! has provided a calving heat content. Otherwise, calving
                              !! is added with a temperature of the local SST.
-  logical :: runoff_calving_heat_content_bug !< If true, recover a bug in which the
-                             !! use_river_heat_content/use_calving_heat_content
-                             !! corrections are applied even when the full enthalpy
-                             !! budget is already supplied via the coupler
   logical :: var_pen_sw      !<   If true, use one of the CHL_A schemes to determine the
                              !! e-folding depth of incoming shortwave radiation.
   type(external_field) :: sbc_chl   !< A handle used in time interpolation of
@@ -546,11 +542,11 @@ subroutine find_uv_at_h(u, v, h, u_h, v_h, G, GV, US, ea, eb, zero_mix)
       "in call to find_uv_at_h.")
   zero_mixing = .false. ; if (present(zero_mix)) zero_mixing = zero_mix
   if (zero_mixing) mix_vertically = .false.
-  !$OMP parallel do default(none) shared(is,ie,js,je,G,GV,mix_vertically,zero_mixing,h, &
-  !$OMP                                  h_neglect,ea,eb,u_h,u,v_h,v,nz)                &
-  !$OMP                          private(sum_area,Idenom,a_w,a_e,a_s,a_n,b_denom_1,b1,d1,c1)
+  !$omp target enter data map(alloc: a_w,a_e,a_s,a_n,b1,d1,c1)
+  !$omp target teams loop private(sum_area,Idenom,a_w,a_e,a_s,a_n,b_denom_1,b1,d1,c1) &
+  !$omp   map(to: ea, eb, h) map(from: u_h, v_h)
   do j=js,je
-    do i=is,ie
+    do concurrent (i=is:ie)
       sum_area = G%areaCu(I-1,j) + G%areaCu(I,j)
       if (sum_area > 0.0) then
         ! If this were a simple area weighted average, this would just be I_denom = 1.0 / sum_area.
@@ -577,14 +573,14 @@ subroutine find_uv_at_h(u, v, h, u_h, v_h, G, GV, US, ea, eb, zero_mix)
     enddo
 
     if (mix_vertically) then
-      do i=is,ie
+      do concurrent (i=is:ie)
         b_denom_1 = h(i,j,1) + h_neglect
         b1(i) = 1.0 / (b_denom_1 + eb(i,j,1))
         d1(i) = b_denom_1 * b1(i)
         u_h(i,j,1) = (h(i,j,1)*b1(i)) * ((a_e(i)*u(I,j,1)) + (a_w(i)*u(I-1,j,1)))
         v_h(i,j,1) = (h(i,j,1)*b1(i)) * ((a_n(i)*v(i,J,1)) + (a_s(i)*v(i,J-1,1)))
       enddo
-      do k=2,nz ; do i=is,ie
+      do k=2,nz ; do concurrent (i=is:ie)
         c1(i,k) = eb(i,j,k-1) * b1(i)
         b_denom_1 = h(i,j,k) + d1(i)*ea(i,j,k) + h_neglect
         b1(i) = 1.0 / (b_denom_1 + eb(i,j,k))
@@ -594,28 +590,29 @@ subroutine find_uv_at_h(u, v, h, u_h, v_h, G, GV, US, ea, eb, zero_mix)
         v_h(i,j,k) = (h(i,j,k) * ((a_n(i)*v(i,J,k)) + (a_s(i)*v(i,J-1,k))) + &
                       ea(i,j,k)*v_h(i,j,k-1))*b1(i)
       enddo ; enddo
-      do k=nz-1,1,-1 ; do i=is,ie
+      do k=nz-1,1,-1 ; do concurrent (i=is:ie)
         u_h(i,j,k) = u_h(i,j,k) + c1(i,k+1)*u_h(i,j,k+1)
         v_h(i,j,k) = v_h(i,j,k) + c1(i,k+1)*v_h(i,j,k+1)
       enddo ; enddo
     elseif (zero_mixing) then
-      do i=is,ie
+      do concurrent (i=is:ie)
         b1(i) = 1.0 / (h(i,j,1) + h_neglect)
         u_h(i,j,1) = (h(i,j,1)*b1(i)) * ((a_e(i)*u(I,j,1)) + (a_w(i)*u(I-1,j,1)))
         v_h(i,j,1) = (h(i,j,1)*b1(i)) * ((a_n(i)*v(i,J,1)) + (a_s(i)*v(i,J-1,1)))
       enddo
-      do k=2,nz ; do i=is,ie
+      do concurrent (k=2:nz, i=is:ie)
         b1(i) = 1.0 / (h(i,j,k) + h_neglect)
         u_h(i,j,k) = (h(i,j,k) * ((a_e(i)*u(I,j,k)) + (a_w(i)*u(I-1,j,k)))) * b1(i)
         v_h(i,j,k) = (h(i,j,k) * ((a_n(i)*v(i,J,k)) + (a_s(i)*v(i,J-1,k)))) * b1(i)
-      enddo ; enddo
+      enddo
     else
-      do k=1,nz ; do i=is,ie
+      do concurrent (k=1:nz, i=is:ie)
         u_h(i,j,k) = (a_e(i)*u(I,j,k)) + (a_w(i)*u(I-1,j,k))
         v_h(i,j,k) = (a_n(i)*v(i,J,k)) + (a_s(i)*v(i,J-1,k))
-      enddo ; enddo
+      enddo
     endif
   enddo
+  !$omp target exit data map(release: a_w,a_e,a_s,a_n,b1,d1,c1)
 
   call cpu_clock_end(id_clock_uv_at_h)
 end subroutine find_uv_at_h
@@ -960,7 +957,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     if (calculate_buoyancy) then
       call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt,          &
                   H_limit_fluxes, CS%use_river_heat_content, CS%use_calving_heat_content, &
-                  CS%runoff_calving_heat_content_bug, &
                   h2d, T2d, netMassInOut, netMassOut, netHeat, netSalt,                   &
                   Pen_SW_bnd, tv, aggregate_FW_forcing, nonpenSW=nonpenSW,                &
                   net_Heat_rate=netheat_rate, net_salt_rate=netsalt_rate,                 &
@@ -968,7 +964,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     else
       call extractFluxes1d(G, GV, US, fluxes, optics, nsw, j, dt,          &
                   H_limit_fluxes, CS%use_river_heat_content, CS%use_calving_heat_content, &
-                  CS%runoff_calving_heat_content_bug, &
                   h2d, T2d, netMassInOut, netMassOut, netHeat, netSalt,                   &
                   Pen_SW_bnd, tv, aggregate_FW_forcing, nonpenSW=nonpenSW)
     endif
@@ -1378,7 +1373,6 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
                                  ! when var_pen_sw is defined and reading from file.
   character(len=32)  :: chl_varname ! Name of chl_a variable in chl_file.
   logical :: use_temperature     ! True if thermodynamics are enabled.
-  logical :: enable_bugs         ! If true, bugs are enabled by default.
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB, nz
   isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -1445,18 +1439,9 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
                    "If true, use the fluxes%calving_Hflx field to set the "//&
                    "heat carried by runoff, instead of using SST*CP*froz_runoff.", &
                    default=.false., do_not_log=.not.use_temperature)
-    call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
-                   default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
-    call get_param(param_file, mdl, "RUNOFF_CALVING_HEAT_CONTENT_BUG", CS%runoff_calving_heat_content_bug, &
-                   "If true, recover a bug in which the USE_RIVER_HEAT_CONTENT / "//&
-                   "USE_CALVING_HEAT_CONTENT corrections are applied even when the full "//&
-                   "enthalpy budget is already supplied via the coupler (e.g. with "//&
-                   "ENTHALPY_FROM_COUPLER=True).", default=enable_bugs, &
-                   do_not_log=.not.(CS%use_river_heat_content .or. CS%use_calving_heat_content))
   else
     CS%use_river_heat_content = .false.
     CS%use_calving_heat_content = .false.
-    CS%runoff_calving_heat_content_bug = .true.
   endif
 
   call get_param(param_file, mdl, "DO_BRINE_PLUME", CS%do_brine_plume, &

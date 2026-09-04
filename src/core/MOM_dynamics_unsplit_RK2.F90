@@ -68,7 +68,7 @@ use MOM_error_handler, only : MOM_error, MOM_mesg, FATAL, WARNING, is_root_pe
 use MOM_error_handler, only : MOM_set_verbosity
 use MOM_file_parser, only : get_param, log_param, log_version, param_file_type
 use MOM_get_input, only : directories
-use MOM_time_manager, only : time_type, time_type_to_real, operator(+)
+use MOM_time_manager, only : time_type, operator(+)
 use MOM_time_manager, only : operator(-), operator(>), operator(*), operator(/)
 
 use MOM_ALE, only : ALE_CS
@@ -79,7 +79,7 @@ use MOM_CoriolisAdv, only : CorAdCalc, CoriolisAdv_init, CoriolisAdv_CS, Corioli
 use MOM_debugging, only : check_redundant
 use MOM_grid, only : ocean_grid_type
 use MOM_hor_index, only : hor_index_type
-use MOM_hor_visc, only : horizontal_viscosity, hor_visc_init, hor_visc_CS
+use MOM_hor_visc, only : horizontal_viscosity, hor_visc_nkblock, hor_visc_init, hor_visc_CS
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_lateral_mixing_coeffs, only : VarMix_CS
 use MOM_MEKE_types, only : MEKE_type
@@ -260,7 +260,7 @@ subroutine step_MOM_dyn_unsplit_RK2(u_in, v_in, h_in, tv, visc, Time_local, dt, 
   dt_pred = dt * CS%BE
   cor_stencil = CoriolisAdv_stencil(CS%CoriolisAdv)
 
-  h_av(:,:,:) = 0; hp(:,:,:) = 0
+  h_av(:,:,:) = 0 ; hp(:,:,:) = 0
   up(:,:,:) = 0
   vp(:,:,:) = 0
 
@@ -282,7 +282,7 @@ subroutine step_MOM_dyn_unsplit_RK2(u_in, v_in, h_in, tv, visc, Time_local, dt, 
   call enable_averages(dt,Time_local, CS%diag)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_in, v_in, h_in, uh, vh, CS%diffu, CS%diffv, MEKE, VarMix, &
-                            G, GV, US, CS%hor_visc, tv, dt, STOCH=STOCH)
+                            G, GV, US, CS%hor_visc, hor_visc_nkblock(CS%hor_visc, GV), tv, dt, STOCH=STOCH)
   call cpu_clock_end(id_clock_horvisc)
   call disable_averaging(CS%diag)
   call pass_vector(CS%diffu, CS%diffv, G%Domain, clock=id_clock_pass)
@@ -609,7 +609,7 @@ subroutine initialize_dyn_unsplit_RK2(u, v, h, tv, Time, G, GV, US, param_file, 
   call log_version(param_file, mdl, version, "")
   call get_param(param_file, mdl, "BE", CS%be, &
                  "If SPLIT is true, BE determines the relative weighting "//&
-                 "of a  2nd-order Runga-Kutta baroclinic time stepping "//&
+                 "of a 2nd-order Runga-Kutta baroclinic time stepping "//&
                  "scheme (0.5) and a backward Euler scheme (1) that is "//&
                  "used for the Coriolis and inertial terms.  BE may be "//&
                  "from 0.5 to 1, but instability may occur near 0.5. "//&
@@ -660,6 +660,8 @@ subroutine initialize_dyn_unsplit_RK2(u, v, h, tv, Time, G, GV, US, param_file, 
   call PressureForce_init(Time, G, GV, US, param_file, diag, CS%PressureForce_CSp, CS%ADp, &
                           CS%SAL_CSp, CS%tides_CSp)
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc)
+
+  allocate(CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp)
   CS%set_visc_CSp => set_visc

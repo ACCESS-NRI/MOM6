@@ -199,7 +199,7 @@ subroutine PressureForce_Mont_nonBouss(h, tv, PFu, PFv, G, GV, US, CS, p_atm, pb
     ! of self-attraction and loading.
     !$OMP parallel do default(shared)
     do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-      SSH(i,j) = min(-G%bathyT(i,j) - G%Z_ref, 0.0)
+      SSH(i,j) = min(-G%bathyT(i,j) - G%meanSL(i,j), 0.0)
     enddo ; enddo
     if (use_EOS) then
       !$OMP parallel do default(shared)
@@ -478,7 +478,7 @@ subroutine PressureForce_Mont_Bouss(h, tv, PFu, PFv, G, GV, US, CS, p_atm, pbce,
     ! barotropic tides.
     !$OMP parallel do default(shared)
     do j=Jsq,Jeq+1
-      do i=Isq,Ieq+1 ; SSH(i,j) = min(-G%bathyT(i,j) - G%Z_ref, 0.0) ; enddo
+      do i=Isq,Ieq+1 ; SSH(i,j) = min(-G%bathyT(i,j) - G%meanSL(i,j), 0.0) ; enddo
       do k=1,nz ; do i=Isq,Ieq+1
         SSH(i,j) = SSH(i,j) + h(i,j,k)*GV%H_to_Z
       enddo ; enddo
@@ -575,7 +575,7 @@ subroutine PressureForce_Mont_Bouss(h, tv, PFu, PFv, G, GV, US, CS, p_atm, pbce,
   endif ! use_EOS
 
   if (present(pbce)) then
-    call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star)
+    call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star, 1)
   endif
 
 !    Calculate the pressure force. On a Cartesian grid,
@@ -648,7 +648,7 @@ end subroutine PressureForce_Mont_Bouss
 
 !> Determines the partial derivative of the acceleration due
 !! to pressure forces with the free surface height.
-subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
+subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star, nkblock)
   type(ocean_grid_type),                intent(in)  :: G    !< Ocean grid structure
   type(verticalGrid_type),              intent(in)  :: GV   !< Vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in) :: e !< Interface height [Z ~> m].
@@ -665,88 +665,108 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               optional, intent(in)  :: rho_star !< The layer densities (maybe compressibility
                                                             !! compensated), times g/rho_0 [L2 Z-1 T-2 ~> m s-2].
-
-  ! Local variables
-  real :: Ihtot(SZI_(G))     ! The inverse of the sum of the layer thicknesses [H-1 ~> m-1 or m2 kg-1].
-  real :: press(SZI_(G))     ! Interface pressure [R L2 T-2 ~> Pa].
-  real :: T_int(SZI_(G))     ! Interface temperature [C ~> degC]
-  real :: S_int(SZI_(G))     ! Interface salinity [S ~> ppt]
-  real :: dR_dT(SZI_(G))     ! Partial derivative of density with temperature [R C-1 ~> kg m-3 degC-1]
-  real :: dR_dS(SZI_(G))     ! Partial derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
-  real :: rho_in_situ(SZI_(G)) ! In-situ density at the top of a layer [R ~> kg m-3].
+  integer, intent(in) :: nkblock !< The number of vertical levels in each block for the variable density
+                                 !! near-surface layer.  This is needed to determine whether rho_star is
+                                 !! compressibility compensated or not.
+  real :: Ihtot(SZI_(G),SZJ_(G))  ! The inverse of the sum of the layer thicknesses [H-1 ~> m-1 or m2 kg-1].
+  real :: press(SZI_(G),SZJ_(G),nkblock)  ! Interface pressure [R L2 T-2 ~> Pa].
+  real :: T_int(SZI_(G),SZJ_(G),nkblock)  ! Interface temperature [C ~> degC]
+  real :: S_int(SZI_(G),SZJ_(G),nkblock)  ! Interface salinity [S ~> ppt]
+  real :: dR_dT(SZI_(G),SZJ_(G),nkblock)  ! Partial derivative of density with temperature [R C-1 ~> kg m-3 degC-1]
+  real :: dR_dS(SZI_(G),SZJ_(G),nkblock)  ! Partial derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
+  real :: rho_in_situ(SZI_(G),SZJ_(G))  ! In-situ density at the top of a layer [R ~> kg m-3].
   real :: G_Rho0             ! A scaled version of g_Earth / Rho0 [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
   real :: Rho0xG             ! g_Earth * Rho0 [R L2 Z-1 T-2 ~> kg s-2 m-2]
   logical :: use_EOS         ! If true, density is calculated from T & S using
                              ! an equation of state.
-  real :: dz_neglect          ! A vertical distance that is so small it is usually lost
+  real :: dz_neglect         ! A vertical distance that is so small it is usually lost
                              ! in roundoff and can be neglected [Z ~> m].
-  integer, dimension(2) :: EOSdom ! The computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k
+  integer :: EOSdom(3,2)     ! The computational domain for the equation of state
+  integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k, kstart, kend, kk
 
+  !$omp target data map(alloc: Ihtot)
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
-  EOSdom(1) = Isq - (G%isd-1) ;  EOSdom(2) = G%iec+1 - (G%isd-1)
 
-  Rho0xG = Rho0 * GV%g_Earth
-  G_Rho0 = GV%g_Earth / GV%Rho0
   use_EOS = associated(tv%eqn_of_state)
   dz_neglect = GV%dZ_subroundoff
 
   if (use_EOS) then
     if (present(rho_star)) then
-     !$OMP parallel do default(shared) private(Ihtot)
-      do j=Jsq,Jeq+1
-        do i=Isq,Ieq+1
-          Ihtot(i) = GV%H_to_Z / ((e(i,j,1)-e(i,j,nz+1)) + dz_neglect)
+      do concurrent (j=Jsq:Jeq+1)
+        do concurrent (i=Isq:Ieq+1)
+          Ihtot(i,j) = GV%H_to_Z / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
           pbce(i,j,1) = GFS_scale * rho_star(i,j,1) * GV%H_to_Z
         enddo
-        do k=2,nz ; do i=Isq,Ieq+1
-          pbce(i,j,k) = pbce(i,j,k-1) + (rho_star(i,j,k)-rho_star(i,j,k-1)) * &
-                        ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i))
-        enddo ; enddo
-      enddo ! end of j loop
-    else
-      !$OMP parallel do default(shared) private(Ihtot,press,rho_in_situ,T_int,S_int,dR_dT,dR_dS)
-      do j=Jsq,Jeq+1
-        do i=Isq,Ieq+1
-          Ihtot(i) = GV%H_to_Z / ((e(i,j,1)-e(i,j,nz+1)) + dz_neglect)
-          press(i) = -Rho0xG*(e(i,j,1) - G%Z_ref)
-        enddo
-        call calculate_density(tv%T(:,j,1), tv%S(:,j,1), press, rho_in_situ, &
-                               tv%eqn_of_state, EOSdom)
-        do i=Isq,Ieq+1
-          pbce(i,j,1) = G_Rho0*(GFS_scale * rho_in_situ(i)) * GV%H_to_Z
-        enddo
+
         do k=2,nz
-          do i=Isq,Ieq+1
-            press(i) = -Rho0xG*(e(i,j,K) - G%Z_ref)
-            T_int(i) = 0.5*(tv%T(i,j,k-1)+tv%T(i,j,k))
-            S_int(i) = 0.5*(tv%S(i,j,k-1)+tv%S(i,j,k))
-          enddo
-          call calculate_density_derivs(T_int, S_int, press, dR_dT, dR_dS, &
-                                        tv%eqn_of_state, EOSdom)
-          do i=Isq,Ieq+1
-            pbce(i,j,k) = pbce(i,j,k-1) + G_Rho0 * &
-               ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i)) * &
-               (dR_dT(i)*(tv%T(i,j,k)-tv%T(i,j,k-1)) + &
-                dR_dS(i)*(tv%S(i,j,k)-tv%S(i,j,k-1)))
+          do concurrent (i=Isq:Ieq+1)
+            pbce(i,j,k) = pbce(i,j,k-1) + (rho_star(i,j,k) - rho_star(i,j,k-1)) &
+                * ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i,j))
           enddo
         enddo
-      enddo ! end of j loop
+      enddo
+    else
+      !$omp target data &
+      !$omp   map(alloc: EOSdom, press, T_int, S_int, rho_in_situ) &
+      !$omp   map(alloc: dR_dT, dR_dS)
+
+      Rho0xG = Rho0 * GV%g_Earth
+      G_Rho0 = GV%g_Earth / GV%Rho0
+
+      EOSdom(1,:) = [Isq - (G%isd-1), G%iec+1 - (G%isd-1)]
+      EOSdom(2,:) = [Jsq - (G%jsd-1), G%jec+1 - (G%jsd-1)]
+      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        Ihtot(i,j) = GV%H_to_Z / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
+        press(i,j,1) = -Rho0xG * (e(i,j,1) - G%meanSL(i,j))
+      enddo
+
+      call calculate_density(tv%T(:,:,1), tv%S(:,:,1), press(:,:,1), rho_in_situ, &
+                             tv%eqn_of_state, EOSdom(1:2,:))
+
+      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        pbce(i,j,1) = G_Rho0 * (GFS_scale * rho_in_situ(i,j)) * GV%H_to_Z
+      enddo
+
+      EOSdom(3,1) = 1
+      do kstart=2,nz,nkblock
+        kend = min(kstart+nkblock-1, nz)
+        do concurrent (k=kstart:kend, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+          kk=k-kstart+1
+          press(i,j,kk) = -Rho0xG * (e(i,j,K) - G%meanSL(i,j))
+          T_int(i,j,kk) = 0.5 * (tv%T(i,j,k-1) + tv%T(i,j,k))
+          S_int(i,j,kk) = 0.5 * (tv%S(i,j,k-1) + tv%S(i,j,k))
+        enddo
+        EOSdom(3,2) = kend-kstart+1
+        call calculate_density_derivs(T_int, S_int, press, dR_dT, dR_dS, &
+                                      tv%eqn_of_state, EOSdom)
+
+        do concurrent(j=Jsq:Jeq+1)
+          do k=kstart,kend ; do concurrent (i=Isq:Ieq+1)
+          kk=k-kstart+1
+          pbce(i,j,k) = pbce(i,j,k-1) + G_Rho0 * &
+             ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i,j)) * &
+             (dR_dT(i,j,kk) * (tv%T(i,j,k) - tv%T(i,j,k-1)) + &
+              dR_dS(i,j,kk) * (tv%S(i,j,k) - tv%S(i,j,k-1)))
+          enddo ; enddo
+        enddo
+      enddo
+      !$omp end target data
     endif
-  else ! not use_EOS
-    !$OMP parallel do default(shared) private(Ihtot)
-    do j=Jsq,Jeq+1
-      do i=Isq,Ieq+1
-        Ihtot(i) = 1.0 / ((e(i,j,1)-e(i,j,nz+1)) + dz_neglect)
+  else
+    do concurrent (j=Jsq:Jeq+1)
+      do concurrent (i=Isq:Ieq+1)
+        Ihtot(i,j) = 1.0 / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
         pbce(i,j,1) = GV%g_prime(1) * GV%H_to_Z
       enddo
-      do k=2,nz ; do i=Isq,Ieq+1
-        pbce(i,j,k) = pbce(i,j,k-1) + &
-                      (GV%g_prime(K)*GV%H_to_Z) * ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i))
-      enddo ; enddo
-    enddo ! end of j loop
-  endif ! use_EOS
-
+      do k=2,nz
+        do concurrent (i=Isq:Ieq+1)
+          pbce(i,j,k) = pbce(i,j,k-1) + (GV%g_prime(K) * GV%H_to_Z) &
+              * ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i,j))
+        enddo
+      enddo
+    enddo
+  endif
+  !$omp end target data
 end subroutine Set_pbce_Bouss
 
 !> Determines the partial derivative of the acceleration due
@@ -892,7 +912,7 @@ subroutine PressureForce_Mont_init(Time, G, GV, US, param_file, diag, CS, SAL_CS
   call get_param(param_file, mdl, "RHO_0", CS%Rho0, &
                  "The mean ocean density used with BOUSSINESQ true to "//&
                  "calculate accelerations and the mass for conservation "//&
-                 "properties, or with BOUSSINSEQ false to convert some "//&
+                 "properties, or with BOUSSINESQ false to convert some "//&
                  "parameters from vertical units of m to kg m-2.", &
                  units="kg m-3", default=1035.0, scale=US%R_to_kg_m3)
   call get_param(param_file, mdl, "TIDES", CS%tides, &
