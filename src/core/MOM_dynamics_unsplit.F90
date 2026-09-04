@@ -80,7 +80,7 @@ use MOM_CoriolisAdv, only : CorAdCalc, CoriolisAdv_init, CoriolisAdv_CS, Corioli
 use MOM_debugging, only : check_redundant
 use MOM_grid, only : ocean_grid_type
 use MOM_hor_index, only : hor_index_type
-use MOM_hor_visc, only : horizontal_viscosity, hor_visc_init, hor_visc_CS
+use MOM_hor_visc, only : horizontal_viscosity, hor_visc_nkblock, hor_visc_init, hor_visc_CS
 use MOM_interface_heights, only : find_eta, thickness_to_dz
 use MOM_lateral_mixing_coeffs, only : VarMix_CS
 use MOM_MEKE_types, only : MEKE_type
@@ -248,9 +248,9 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   dt_pred = dt / 3.0
   cor_stencil = CoriolisAdv_stencil(CS%CoriolisAdv)
 
-  h_av(:,:,:) = 0; hp(:,:,:) = 0
-  up(:,:,:) = 0; upp(:,:,:) = 0
-  vp(:,:,:) = 0; vpp(:,:,:) = 0
+  h_av(:,:,:) = 0 ; hp(:,:,:) = 0
+  up(:,:,:) = 0 ; upp(:,:,:) = 0
+  vp(:,:,:) = 0 ; vpp(:,:,:) = 0
 
   dyn_p_surf = associated(p_surf_begin) .and. associated(p_surf_end)
   if (dyn_p_surf) then
@@ -269,8 +269,8 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
 ! diffu = horizontal viscosity terms (u,h)
   call enable_averages(dt, Time_local, CS%diag)
   call cpu_clock_begin(id_clock_horvisc)
-  call horizontal_viscosity(u, v, h, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
-    STOCH=STOCH)
+  call horizontal_viscosity(u, v, h, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, &
+    hor_visc_nkblock(CS%hor_visc, GV), tv, dt, STOCH=STOCH)
   call cpu_clock_end(id_clock_horvisc)
   call disable_averaging(CS%diag)
 
@@ -282,7 +282,7 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   call pass_var(hp, G%Domain, clock=id_clock_pass)
   call pass_vector(uh, vh, G%Domain, clock=id_clock_pass)
 
-  call enable_averages(0.5*dt, Time_local-real_to_time(0.5*US%T_to_s*dt), CS%diag)
+  call enable_averages(0.5*dt, Time_local-real_to_time(0.5*dt, unscale=US%T_to_s), CS%diag)
 !   Here the first half of the thickness fluxes are offered for averaging.
   if (CS%id_uh > 0) call post_data(CS%id_uh, uh, CS%diag)
   if (CS%id_vh > 0) call post_data(CS%id_vh, vh, CS%diag)
@@ -694,6 +694,8 @@ subroutine initialize_dyn_unsplit(u, v, h, tv, Time, G, GV, US, param_file, diag
   call PressureForce_init(Time, G, GV, US, param_file, diag, CS%PressureForce_CSp, CS%ADp, &
                           CS%SAL_CSp, CS%tides_CSp)
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc)
+
+  allocate(CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp)
   CS%set_visc_CSp => set_visc
