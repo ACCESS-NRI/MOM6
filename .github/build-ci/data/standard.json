@@ -1,0 +1,5 @@
+{
+  "oneapi_compiler_version": "2025.2.0",
+  "nvhpc_compiler_version": "25.9",
+  "target": "x86_64"
+}

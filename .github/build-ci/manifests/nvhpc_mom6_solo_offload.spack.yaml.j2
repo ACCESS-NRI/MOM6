@@ -1,0 +1,27 @@
+spack:
+  specs:
+  - 'access-mom6@git.{{ ref }}=2026.05.001 ~access3 +mom6_solo ~openmp +openmp_offload offload_mem_model=separate offload_cc=70,80,90 ^openmpi'
+  packages:
+    fms:
+      require:
+      # includes openmp offload changes
+      - '@git.2026.02-alpha3'
+      # must match MOM6's offload + reproducibility flags -- no -stdpar here
+      - fflags='-mp=gpu -acc=gpu -gpu=mem:separate,cc70,cc80,cc90 -Mnofma -Mnovect'
+    access-generic-tracers:
+      require:
+      # this commit or newer needed for NVHPC cmake support
+      - '@git.739874992bf1855dd7fd26c9fd89b058f0a59a18'
+    nvhpc:
+      require:
+      - '@{{ nvhpc_compiler_version }}'
+    all:
+      require:
+      - '%nvhpc'
+      - 'target={{ target }}'
+  config:
+    # needed so GPU kernel names don't get truncated, leading to name clashes
+    stage_name: 'spack-stage-{name}-{hash:7}'
+  concretizer:
+    unify: false
+  view: false
