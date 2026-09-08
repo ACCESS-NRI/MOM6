@@ -4034,6 +4034,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
   logical :: use_iceshelves
   character(240) :: msg
   integer :: turns    ! Number of quarter turns
+  real :: frac_shelf_u, frac_shelf_v
 
   call callTree_enter("extract_surface_state(), MOM.F90")
   G => CS%G ; G_in => CS%G_in ; GV => CS%GV ; US => CS%US
@@ -4118,6 +4119,9 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo
 
       do k=1,nz ; do i=is,ie
+        if (use_iceshelves) then
+          depth_ml = CS%frac_shelf_h(i,j) * CS%Hmix_shelf + (1. - CS%frac_shelf_h(i,j)) * CS%Hmix
+        endif
         if (depth(i) + h(i,j,k)*H_rescale < depth_ml) then
           dh = h(i,j,k)*H_rescale
         elseif (depth(i) < depth_ml) then
@@ -4182,6 +4186,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
           sfc_state%v(i,J) = 0.0
         enddo
         do k=1,nz ; do i=is,ie
+          if (use_iceshelves) then
+            frac_shelf_v = 0.0
+            if (G%areaT(i,j) + G%areaT(i,j+1) > 0.0) &
+              frac_shelf_v = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
+                               + CS%frac_shelf_h(i,j+1) * G%areaT(i,j+1))&
+                             / (G%areaT(i,j) + G%areaT(i,j+1))
+            depth_ml = frac_shelf_v * CS%Hmix_UV_shelf + (1. - frac_shelf_v) * CS%Hmix_UV
+          endif
           hv = 0.5 * (h(i,j,k) + h(i,j+1,k)) * H_rescale
           if (depth(i) + hv < depth_ml) then
             dh = hv
@@ -4206,6 +4218,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
           sfc_state%u(I,j) = 0.0
         enddo
         do k=1,nz ; do I=is-1,ie
+          if (use_iceshelves) then
+            frac_shelf_u = 0.0
+            if (G%areaT(i,j) + G%areaT(i+1,j) > 0.0) &
+              frac_shelf_u = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
+                               + CS%frac_shelf_h(i+1,j) * G%areaT(i+1,j))&
+                             / (G%areaT(i+1,j) + G%areaT(i+1,j))
+            depth_ml = frac_shelf_u * CS%Hmix_UV_shelf + (1. - frac_shelf_u) * CS%Hmix_UV
+          endif
           hu = 0.5 * (h(i,j,k) + h(i+1,j,k)) * H_rescale
           if (depth(i) + hu < depth_ml) then
             dh = hu
