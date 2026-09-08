@@ -161,6 +161,8 @@ type, public :: diabatic_CS ; private
                                      !! near the bottom [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real    :: minimum_forcing_depth   !< The smallest depth over which heat and freshwater
                                      !! fluxes are applied [H ~> m or kg m-2].
+  real    :: shelf_forcing_depth     !< The smallest depth over which heat and freshwater
+                                     !! fluxes are applied under shelves [H ~> m or kg m-2].
   real    :: evap_CFL_limit = 0.8    !< The largest fraction of a layer that can be
                                      !! evaporated in one time-step [nondim].
   integer :: halo_TS_diff = 0        !< The temperature, salinity and thickness halo size that
@@ -277,7 +279,7 @@ contains
 !>  This subroutine imposes the diapycnal mass fluxes and the
 !!  accompanying diapycnal advection of momentum and tracers.
 subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                    G, GV, US, CS, stoch_CS, OBC, Waves)
+                    G, GV, US, CS, stoch_CS, OBC, Waves, frac_shelf_h)
   type(ocean_grid_type),                      intent(inout) :: G        !< ocean grid structure
   type(verticalGrid_type),                    intent(in)    :: GV       !< ocean vertical grid structure
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: u        !< zonal velocity [L T-1 ~> m s-1]
@@ -301,6 +303,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(ocean_OBC_type),                       pointer       :: OBC      !< Open boundaries control structure.
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
+  real, dimension(:,:), optional, intent(in) :: frac_shelf_h
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
@@ -410,7 +413,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                       G, GV, US, CS, stoch_CS, Waves)
   elseif (CS%useALEalgorithm) then
     call diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                      G, GV, US, CS, stoch_CS, Waves)
+                      G, GV, US, CS, stoch_CS, Waves, frac_shelf_h)
   else
     call layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                           G, GV, US, CS, Waves)
@@ -1243,7 +1246,7 @@ end subroutine diabatic_ALE_legacy
 !>  This subroutine imposes the diapycnal mass fluxes and the
 !!  accompanying diapycnal advection of momentum and tracers.
 subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                        G, GV, US, CS, stoch_CS, Waves)
+                        G, GV, US, CS, stoch_CS, Waves, frac_shelf_h)
   type(ocean_grid_type),                      intent(inout) :: G        !< ocean grid structure
   type(verticalGrid_type),                    intent(in)    :: GV       !< ocean vertical grid structure
   type(unit_scale_type),                      intent(in)    :: US       !< A dimensional unit scaling type
@@ -1266,6 +1269,7 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   type(diabatic_CS),                          pointer       :: CS       !< module control structure
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
+  real, dimension(:,:), optional, intent(in) :: frac_shelf_h
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
@@ -1543,9 +1547,16 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   if (CS%use_energetic_PBL) then
 
     skinbuoyflux(:,:) = 0.0
-    call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
+    if (present(frac_shelf_h)) then
+      call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
+              optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
+              CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML, &
+              frac_shelf_h=frac_shelf_h, shelf_forcing_depth=CS%shelf_forcing_depth)
+    else
+      call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
             optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
             CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML)
+    endif
 
     if (CS%debug) then
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_MKS)
@@ -3214,7 +3225,8 @@ end subroutine adiabatic_driver_init
 !> This routine initializes the diabatic driver module.
 subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, diag, &
                                 ADp, CDp, CS, tracer_flow_CSp, sponge_CSp, &
-                                ALE_sponge_CSp, oda_incupd_CSp, int_tide_CSp)
+                                ALE_sponge_CSp, oda_incupd_CSp, int_tide_CSp, &
+                                frac_shelf_h)
   type(time_type), target                :: Time             !< model time
   type(ocean_grid_type),   intent(inout) :: G                !< model grid structure
   type(verticalGrid_type), intent(in)    :: GV               !< model vertical grid structure
@@ -3233,6 +3245,7 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
   type(oda_incupd_CS),     pointer       :: oda_incupd_CSp   !< pointer to the ocean data assimilation incremental
                                                              !! update module control structure
   type(int_tide_CS),       pointer       :: int_tide_CSp     !< pointer to the internal tide structure
+  real, dimension(:,:), optional, intent(in) :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
 
   ! Local variables
   real    :: Kd  ! A diffusivity used in the default for other tracer diffusivities [Z2 T-1 ~> m2 s-1]
@@ -3380,6 +3393,15 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "relative to this scale, in which case the forcing tendencies "//&
                  "scaled down by distributing the forcing over this depth scale.", &
                  units="m", default=0.001, scale=GV%m_to_H)
+  if (present(frac_shelf_h)) then
+    call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
+                   "The smallest depth over which forcing can be applied under an "//&
+                   "ice shelf. This only takes effect under ice shelves, and when "//&
+                   "near-surface layers become thin relative to this scale, in "//&
+                   "which case the forcing tendencies are scaled down by "//&
+                   "distributing the forcing over this depth scale.", &
+                   units="m", default=0.001, scale=GV%m_to_H)
+  endif
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
                  "The largest fraction of a layer than can be lost to forcing "//&
                  "(e.g. evaporation, sea-ice formation) in one time-step. The unused "//&
