@@ -1617,7 +1617,8 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
   logical :: debug_redundant ! If true, check redundant values on PE boundaries when debugging.
   logical :: showCallTree
-  type(group_pass_type) :: pass_T_S
+  logical :: use_ice_shelf
+  type(group_pass_type) :: pass_T_S, pass_T_S_h, pass_uv_T_S_h
   integer :: dynamics_stencil  ! The computational stencil for the calculations
                                ! in the dynamic core.
   integer :: halo_sz ! The size of a halo where data must be valid.
@@ -1625,6 +1626,8 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("step_MOM_thermo(), MOM.F90")
   if (CS%debug) call query_debugging_checks(do_redundant=debug_redundant)
+  use_ice_shelf = .false.
+  if (associated(CS%frac_shelf_h)) use_ice_shelf = .true.
 
   call enable_averages(dtdia, Time_end_thermo, CS%diag)
 
@@ -1681,8 +1684,14 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
     call cpu_clock_begin(id_clock_diabatic)
 
-    call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
-                  Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves)
+    if (use_ice_shelf) then
+      call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
+                    Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves, &
+                    CS%frac_shelf_h)
+    else
+      call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
+                    Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves)
+    endif
     fluxes%fluxes_used = .true.
 
     if (CS%stoch_CS%do_skeb) then
@@ -3611,9 +3620,16 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call adiabatic_driver_init(Time, G, param_file, diag, CS%diabatic_CSp, &
                                CS%tracer_flow_CSp)
   else
-    call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
-                              CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
-                              CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp)
+    if (use_ice_shelf) then
+      call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
+                                CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
+                                CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp, &
+                                CS%frac_shelf_h)
+    else
+      call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
+                                CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
+                                CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp)
+    endif
   endif
 
   CS%vertex_shear = kappa_shear_at_vertex(param_file)
