@@ -281,7 +281,7 @@ contains
 !>  This subroutine imposes the diapycnal mass fluxes and the
 !!  accompanying diapycnal advection of momentum and tracers.
 subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                    G, GV, US, CS, stoch_CS, OBC, Waves)
+                    G, GV, US, CS, stoch_CS, OBC, Waves, frac_shelf_h)
   type(ocean_grid_type),                      intent(inout) :: G        !< ocean grid structure
   type(verticalGrid_type),                    intent(in)    :: GV       !< ocean vertical grid structure
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: u        !< zonal velocity [L T-1 ~> m s-1]
@@ -305,6 +305,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(ocean_OBC_type),                       pointer       :: OBC      !< Open boundaries control structure.
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
+  real, dimension(:,:), optional, intent(in) :: frac_shelf_h
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
@@ -419,7 +420,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                       G, GV, US, CS, stoch_CS, Waves)
   elseif (CS%useALEalgorithm) then
     call diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                      G, GV, US, CS, stoch_CS, Waves)
+                      G, GV, US, CS, stoch_CS, Waves, frac_shelf_h)
   else
     call layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                           G, GV, US, CS, Waves)
@@ -1256,7 +1257,7 @@ end subroutine diabatic_ALE_legacy
 !>  This subroutine imposes the diapycnal mass fluxes and the
 !!  accompanying diapycnal advection of momentum and tracers.
 subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
-                        G, GV, US, CS, stoch_CS, Waves)
+                        G, GV, US, CS, stoch_CS, Waves, frac_shelf_h)
   type(ocean_grid_type),                      intent(inout) :: G        !< ocean grid structure
   type(verticalGrid_type),                    intent(in)    :: GV       !< ocean vertical grid structure
   type(unit_scale_type),                      intent(in)    :: US       !< A dimensional unit scaling type
@@ -1279,6 +1280,7 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   type(diabatic_CS),                          pointer       :: CS       !< module control structure
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
+  real, dimension(:,:), optional, intent(in) :: frac_shelf_h
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
@@ -1555,9 +1557,16 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   if (CS%use_energetic_PBL) then
 
     skinbuoyflux(:,:) = 0.0
-    call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
+    if (present(frac_shelf_h)) then
+      call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
+              optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
+              CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML, &
+              frac_shelf_h=frac_shelf_h, shelf_forcing_depth=CS%shelf_forcing_depth)
+    else
+      call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
             optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
             CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML)
+    endif
 
     if (CS%debug) then
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_MKS)
