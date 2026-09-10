@@ -512,6 +512,7 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
   real :: r_p            ! aspect ratio for division count p.                       [nondim]
   real :: m_to_Z         ! A conversion factor from m to height units           [Z m-1 ~> 1]
   integer :: nx, ny      ! global domain sizes
+  integer :: n_ocean     ! The number of ocean points in the global domain          [nondim]
   integer, parameter :: ibuf=2, jbuf=2
   real, parameter :: r_extreme = 4.0 ! aspect ratio limit (>1) for a layout to be considered [nondim]
   integer :: num_masked_blocks
@@ -591,10 +592,12 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
     mask(:, jbuf+ny) = 1
   endif
 
-  glob_ocn_frac = real(sum(mask(1+ibuf:nx+ibuf, 1+jbuf:ny+jbuf))) / (nx * ny)
+  n_ocean = sum(mask(1+ibuf:nx+ibuf, 1+jbuf:ny+jbuf))
+  glob_ocn_frac = real(n_ocean) / (nx * ny)
 
   ! Iteratively check for all possible division counts starting from the upper bound of npes/glob_ocn_frac,
   ! which is over-optimistic for realistic domains, but may be satisfied with idealized domains.
+  num_masked_blocks = 0
   do p = ceiling(npes/glob_ocn_frac), npes, -1
 
     ! compute the layout for the current division count, p
@@ -616,8 +619,13 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
   enddo
 
   if (num_masked_blocks == 0) then
-    call MOM_error(FATAL, "Couldn't auto-eliminate any land blocks. Try to increase the number "//&
-        "of MOM6 PEs or set AUTO_MASKTABLE to False.")
+    if (n_ocean == nx*ny) then
+      call MOM_error(NOTE, "This domain has no land, so there are no land blocks to "//&
+          "auto-eliminate. Proceeding with an unmasked layout.")
+    else
+      call MOM_error(FATAL, "Couldn't auto-eliminate any land blocks. Try to increase the "//&
+          "number of MOM6 PEs or set AUTO_MASKTABLE to False.")
+    endif
   endif
 
   ! Call determine_land_blocks once again, this time to retrieve and write out the mask_table.
