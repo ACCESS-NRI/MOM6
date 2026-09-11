@@ -4,4 +4,4 @@ include:
     # FIXME: Remove after merging into api-v2
     branch: 484-top-level-includes
     paths:
-    - .github/build-ci/include/ci
+    - .github/build-ci/config/include
