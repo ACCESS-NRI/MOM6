@@ -52,9 +52,6 @@ type, public :: file_dye_tracer_CS ; private
   !> Array of non-zero source points
   real, pointer :: tr_mask(:,:,:,:) => NULL()
 
-  !> Restoring rate (dt/tau, nondimensional) for each tracer, set each call
-  real, allocatable :: damp(:)
-  
   !> Restoring timescale for each tracer [T ~> s]
   real, allocatable :: tau(:)
 
@@ -131,7 +128,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
   allocate(CS%tr_mask(isd:ied,jsd:jed,nz,CS%ntr), source=1.0)
 
   allocate(CS%tau(CS%ntr))
-  allocate(CS%damp(CS%ntr))
+
   call get_param(param_file, mdl, "FILE_DYE_TRACERS_TAU", CS%tau, &
                 "Restoring timescale for each file dye tracer's sponge region. "// &
                 "One value per tracer, comma-separated.", &
@@ -228,6 +225,9 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
 
   integer :: m
   integer :: is, ie, js, je, nz
+
+  real :: damp   ! nondimensional restoring rate (dt/tau) for the current tracer
+
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_work
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -249,14 +249,12 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
     end do
   end if
 
-  do m = 1, CS%ntr 
-    CS%damp(m) = dt / CS%tau(m)
-  end do
 
   ! relax tracer towards tr_source within the sponge region, elsewhere leave unchanged
   do m = 1, CS%ntr
+    damp = dt / CS%tau(m)
     CS%tr(is:ie,js:je,1:nz,m) = CS%tr(is:ie,js:je,1:nz,m) &
-         + (1.0 - CS%tr_mask(is:ie,js:je,1:nz,m)) * CS%damp(m) * &
+         + (1.0 - CS%tr_mask(is:ie,js:je,1:nz,m)) * damp * &
            (CS%tr_source(is:ie,js:je,1:nz,m) - CS%tr(is:ie,js:je,1:nz,m))
   end do
 end subroutine file_dye_tracer_column_physics
