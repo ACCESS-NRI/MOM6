@@ -19,7 +19,7 @@ use MOM_variables,        only : thermo_var_ptrs
 use MOM_verticalGrid,     only : verticalGrid_type
 !use random_numbers_mod,  only : getRandomNumbers, initializeRandomNumberStream, randomNumberStream
 
-implicit none; private
+implicit none ; private
 #include <MOM_memory.h>
 
 public MOM_stoch_eos_init
@@ -33,9 +33,9 @@ public MOM_calc_varT
 type, public :: MOM_stoch_eos_CS ; private
   real, allocatable :: l2_inv(:,:)  !< One over sum of the T cell side side lengths squared [L-2 ~> m-2]
   real, allocatable :: rgauss(:,:)  !< nondimensional random Gaussian [nondim]
-  real        :: tfac=0.27          !< Nondimensional decorrelation time factor, ~1/3.7 [nondim]
-  real        :: amplitude=0.624499 !< Nondimensional standard deviation of Gaussian [nondim]
-  integer     :: seed               !< PRNG seed
+  real      :: tfac = 0.27          !< Nondimensional decorrelation time factor, ~1/3.7 [nondim]
+  real      :: amplitude = 0.624499 !< Nondimensional standard deviation of Gaussian [nondim]
+  integer   :: seed                 !< PRNG seed
   type(PRNG)  ::  rn_CS             !< PRNG control structure
   real, allocatable :: pattern(:,:) !< Random pattern for stochastic EOS [nondim]
   real, allocatable :: phi(:,:)     !< temporal correlation stochastic EOS [nondim]
@@ -224,7 +224,11 @@ subroutine MOM_calc_varT(G, GV, US, h, tv, CS, dt)
   ! extreme gradients along layers which are vanished against topography. It is
   ! still a poor approximation in the interior when coordinates are strongly tilted.
   if (.not. associated(tv%varT)) allocate(tv%varT(G%isd:G%ied, G%jsd:G%jed, GV%ke), source=0.0)
+  !$omp target enter data map(to: h, tv%T, tv%S)
+  !$omp target enter data map(alloc: T, S)
   call vert_fill_TS(h, tv%T, tv%S, CS%kappa_smooth*dt, T, S, G, GV, US, halo_here=1, larger_h_denom=.true.)
+  !$omp target exit data map(from: T, S)
+  !$omp target exit data map(release: h, tv%T, tv%S)
 
   do k=1,G%ke
     do j=G%jsc,G%jec

@@ -6,9 +6,9 @@
 module coord_hycom
 
 use MOM_error_handler, only : MOM_error, is_root_pe, FATAL, NOTE
-use MOM_variables,     only : ocean_grid_type, thermo_var_ptrs
 use MOM_EOS,           only : EOS_type, calculate_density
 use MOM_remapping,     only : remapping_CS, remapping_core_h
+use MOM_variables,     only : ocean_grid_type
 use regrid_interp,     only : interp_CS_type, build_and_interpolate_grid, regridding_set_ppolys
 use regrid_interp,     only : DEGREE_MAX
 
@@ -98,7 +98,7 @@ subroutine init_3d_coord_hycom(CS, G, nk, coordinateResolution, target_density, 
   CS%use_3d    = .true.
   CS%interp_CS = interp_CS
 
-  do i=G%isc-1,G%iec+1; do j=G%jsc-1,G%jec+1
+  do i=G%isc-1,G%iec+1 ; do j=G%jsc-1,G%jec+1
     if (G%mask2dT(i,j)>0.) then
       do k= 1,nk
         CS%coordinateResolution_3d(k,i,j) = coordinateResolution(i,j,k)
@@ -106,7 +106,7 @@ subroutine init_3d_coord_hycom(CS, G, nk, coordinateResolution, target_density, 
       enddo
       CS%target_density_3d(nk+1,i,j) = target_density(i,j,nk+1)
     endif !mask2dT
-  enddo; enddo
+  enddo ; enddo
 
   if (is_root_pe()) call MOM_error(NOTE, "init_3d_coord_hycom: use_3d = .true.")
 

@@ -1,0 +1,35 @@
+spack:
+  specs:
+  - 'access-mom6@git.{{ ref }}=2026.05.001 ~access3 +mom6_solo ~openmp +openmp_offload offload_mem_model=separate offload_cc=70,80,90 %nvhpc ^openmpi%nvhpc'
+  packages:
+    fms:
+      require:
+      # includes openmp offload changes
+      - '@git.2026.02-alpha3'
+      # must match MOM6's offload + reproducibility flags -- no -stdpar here
+      - fflags='-mp=gpu -acc=gpu -gpu=mem:separate,cc70,cc80,cc90 -Mnofma -Mnovect'
+      - '%nvhpc'
+    access-generic-tracers:
+      require:
+      # this commit or newer needed for NVHPC cmake support
+      - '@git.739874992bf1855dd7fd26c9fd89b058f0a59a18'
+      - '%nvhpc'
+    nvhpc:
+      require:
+      - '@{{ nvhpc_compiler_version }}'
+    all:
+      require:
+      # x86_64_v4 (AVX-512) is NOT viable here: dgxa100's AMD EPYC 7742
+      # (Zen 2) has no AVX-512 support at all, unlike gpuvolta (Cascade
+      # Lake) and gpuhopper (Emerald Rapids), which both do. v3 is the
+      # common denominator across all three GPU queues -- also why
+      # spack-config's own site-wide default (packages.yaml) pins to v3.
+      - 'target=x86_64_v3'
+  config:
+    # needed so GPU kernel names don't get truncated, leading to name clashes
+    stage_name: 'spack-stage-{name}-{hash:7}'
+  concretizer:
+    unify: false
+    compiler_mixing: true # reuse deps because nvhpc can't compile zstd
+  view: false
+

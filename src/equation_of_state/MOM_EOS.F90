@@ -52,7 +52,9 @@ public calculate_specific_vol_derivs
 public calculate_TFreeze
 public convert_temp_salt_for_TEOS10
 public cons_temp_to_pot_temp
+public pot_temp_to_cons_temp
 public abs_saln_to_prac_saln
+public prac_saln_to_abs_saln
 public gsw_sp_from_sr
 public gsw_sr_from_sp
 public gsw_pt_from_ct
@@ -68,8 +70,11 @@ public get_EOS_name
 interface calculate_density
   module procedure calculate_density_scalar
   module procedure calculate_density_1d
+  module procedure calculate_density_2d
+  module procedure calculate_density_3d
   module procedure calculate_stanley_density_scalar
   module procedure calculate_stanley_density_1d
+  module procedure calculate_stanley_density_2d
 end interface calculate_density
 
 !> Calculates specific volume of sea water from T, S and P
@@ -82,6 +87,8 @@ end interface calculate_spec_vol
 interface calculate_density_derivs
   module procedure calculate_density_derivs_scalar, calculate_density_derivs_array
   module procedure calculate_density_derivs_1d
+  module procedure calculate_density_derivs_2d
+  module procedure calculate_density_derivs_3d
 end interface calculate_density_derivs
 
 !> Calculate the derivatives of specific volume with temperature and salinity from T, S, and P
@@ -93,6 +100,7 @@ end interface calculate_specific_vol_derivs
 !! salinity, and pressure from T, S and P
 interface calculate_density_second_derivs
   module procedure calculate_density_second_derivs_scalar, calculate_density_second_derivs_1d
+  module procedure calculate_density_second_derivs_2d
 end interface calculate_density_second_derivs
 
 !> Calculates the freezing point of sea water from T, S and P
@@ -355,6 +363,128 @@ subroutine calculate_density_1d(T, S, pressure, rho, EOS, dom, rho_ref, scale)
 
 end subroutine calculate_density_1d
 
+
+!> 2D version...
+subroutine calculate_density_2d(T, S, pressure, rho, EOS, dom, rho_ref)
+  real, intent(in) :: T(:,:)
+    !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)
+    !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:)
+    !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: rho(:,:)
+    !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS
+    !< Equation of state structure
+  integer, optional, intent(in) :: dom(2,2)
+    !< The domain of indices to work on, taking into account that arrays start
+    !! at 1.
+  real, optional, intent(in) :: rho_ref
+    !< A reference density [R ~> kg m-3]
+
+  real, dimension(size(rho,1), size(rho,2)) :: pres
+    ! Pressure converted to [Pa]
+  real, dimension(size(rho,1), size(rho,2)) :: Ta
+    ! Temperature converted to [degC]
+  real, dimension(size(rho,1), size(rho,2)) :: Sa
+    ! Salinity converted to [ppt]
+  integer :: is, ie, js, je, npts
+  integer :: domain(2,2)
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(rho,1)]
+    domain(2,:) = [1, size(rho,2)]
+  endif
+
+  if ((EOS%RL2_T2_to_Pa == 1.0) .and. (EOS%R_to_kg_m3 == 1.0) .and. &
+      (EOS%C_to_degC == 1.0) .and. (EOS%S_to_ppt == 1.0)) then
+    call EOS%type%calculate_density_array_2d(T, S, pressure, rho, domain, &
+        rho_ref=rho_ref)
+  else ! This is the same as above, but with some extra work to rescale variables.
+    is = domain(1,1) ; ie = domain(1,2)
+    js = domain(2,1) ; je = domain(2,2)
+
+    pres(is:ie, js:je) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je)
+    Ta(is:ie, js:je) = EOS%C_to_degC * T(is:ie, js:je)
+    Sa(is:ie, js:je) = EOS%S_to_ppt * S(is:ie, js:je)
+
+    if (present(rho_ref)) then
+      call EOS%type%calculate_density_array_2d(Ta, Sa, pres, rho, domain, &
+          rho_ref=EOS%R_to_kg_m3*rho_ref)
+    else
+      call EOS%type%calculate_density_array_2d(Ta, Sa, pres, rho, domain)
+    endif
+  endif
+
+  if (EOS%kg_m3_to_R /= 1.) &
+    rho(is:ie, js:je) = EOS%kg_m3_to_R * rho(is:ie, js:je)
+end subroutine calculate_density_2d
+
+
+!> Calls the appropriate subroutine to calculate density of sea water for 3-D array inputs.
+subroutine calculate_density_3d(T, S, pressure, rho, EOS, dom, rho_ref)
+  real, intent(in) :: T(:,:,:)
+    !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)
+    !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:)
+    !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: rho(:,:,:)
+    !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS
+    !< Equation of state structure
+  integer, optional, intent(in) :: dom(3,2)
+    !< The domain of indices to work on, taking into account that arrays start
+    !! at 1.  The first index is the rank (i, j, k) and the second is the bound
+    !! (1 = lower, 2 = upper).
+  real, optional, intent(in) :: rho_ref
+    !< A reference density [R ~> kg m-3]
+
+  real, dimension(size(rho,1), size(rho,2), size(rho,3)) :: pres
+    ! Pressure converted to [Pa]
+  real, dimension(size(rho,1), size(rho,2), size(rho,3)) :: Ta
+    ! Temperature converted to [degC]
+  real, dimension(size(rho,1), size(rho,2), size(rho,3)) :: Sa
+    ! Salinity converted to [ppt]
+  integer :: is, ie, js, je, ks, ke
+  integer :: domain(3,2)
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(rho,1)]
+    domain(2,:) = [1, size(rho,2)]
+    domain(3,:) = [1, size(rho,3)]
+  endif
+
+  is = domain(1,1) ; ie = domain(1,2)
+  js = domain(2,1) ; je = domain(2,2)
+  ks = domain(3,1) ; ke = domain(3,2)
+
+  if ((EOS%RL2_T2_to_Pa == 1.0) .and. (EOS%R_to_kg_m3 == 1.0) .and. &
+      (EOS%C_to_degC == 1.0) .and. (EOS%S_to_ppt == 1.0)) then
+    call EOS%type%calculate_density_array_3d(T, S, pressure, rho, domain, &
+        rho_ref=rho_ref)
+  else ! This is the same as above, but with some extra work to rescale variables.
+    pres(is:ie, js:je, ks:ke) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je, ks:ke)
+    Ta(is:ie, js:je, ks:ke) = EOS%C_to_degC * T(is:ie, js:je, ks:ke)
+    Sa(is:ie, js:je, ks:ke) = EOS%S_to_ppt * S(is:ie, js:je, ks:ke)
+
+    if (present(rho_ref)) then
+      call EOS%type%calculate_density_array_3d(Ta, Sa, pres, rho, domain, &
+          rho_ref=EOS%R_to_kg_m3*rho_ref)
+    else
+      call EOS%type%calculate_density_array_3d(Ta, Sa, pres, rho, domain)
+    endif
+  endif
+
+  if (EOS%kg_m3_to_R /= 1.) &
+    rho(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * rho(is:ie, js:je, ks:ke)
+end subroutine calculate_density_3d
+
+
 !> Calls the appropriate subroutine to calculate the density of sea water for 1-D array inputs
 !! including the variance of T, S and covariance of T-S,
 !! potentially limiting the domain of indices that are worked on.
@@ -404,6 +534,39 @@ subroutine calculate_stanley_density_1d(T, S, pressure, Tvar, TScov, Svar, rho, 
 
 end subroutine calculate_stanley_density_1d
 
+!> Calls the Stanley density routine for each row of 2-D array inputs.
+subroutine calculate_stanley_density_2d(T, S, pressure, Tvar, TScov, Svar, rho, EOS, dom, rho_ref, scale)
+  real, dimension(:,:),  intent(in)    :: T        !< Potential temperature referenced to the surface [C ~> degC]
+  real, dimension(:,:),  intent(in)    :: S        !< Salinity [S ~> ppt]
+  real, dimension(:,:),  intent(in)    :: pressure !< Pressure [R L2 T-2 ~> Pa]
+  real, dimension(:,:),  intent(in)    :: Tvar     !< Variance of potential temperature [C2 ~> degC2]
+  real, dimension(:,:),  intent(in)    :: TScov    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, dimension(:,:),  intent(in)    :: Svar     !< Variance of salinity [S2 ~> ppt2]
+  real, dimension(:,:),  intent(inout) :: rho      !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type),        intent(in)    :: EOS      !< Equation of state structure
+  integer, dimension(2,2), optional, intent(in) :: dom !< The domain of indices to work on, taking
+                                                       !! into account that arrays start at 1.
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  integer :: j, js, je
+  integer, dimension(2) :: dom_row
+
+  if (present(dom)) then
+    js = dom(2,1) ; je = dom(2,2)
+    dom_row = [dom(1,1), dom(1,2)]
+  else
+    js = 1 ; je = size(rho,2)
+    dom_row = [1, size(rho,1)]
+  endif
+
+  do j=js,je
+    call calculate_stanley_density_1d(T(:,j), S(:,j), pressure(:,j), &
+                                      Tvar(:,j), TScov(:,j), Svar(:,j), &
+                                      rho(:,j), EOS, dom_row, rho_ref, scale)
+  enddo
+end subroutine calculate_stanley_density_2d
+
 !> Calls the appropriate subroutine to calculate the specific volume of sea water
 !! for 1-D array inputs.
 subroutine calculate_spec_vol_array(T, S, pressure, specvol, start, npts, EOS, spv_ref, scale)
@@ -418,7 +581,6 @@ subroutine calculate_spec_vol_array(T, S, pressure, specvol, start, npts, EOS, s
   real,     optional, intent(in)    :: scale    !< A multiplicative factor by which to scale specific
                                                 !! volume in combination with scaling stored in EOS [various]
 
-  real, dimension(size(specvol))  :: rho   ! Density [kg m-3]
   integer :: j
 
   if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
@@ -831,6 +993,126 @@ subroutine calculate_density_derivs_1d(T, S, pressure, drho_dT, drho_dS, EOS, do
 end subroutine calculate_density_derivs_1d
 
 
+!> Calls the appropriate subroutine to calculate density derivatives for 1-D array inputs.
+subroutine calculate_density_derivs_2d(T, S, pressure, drho_dT, drho_dS, EOS, dom)
+  real, intent(in) :: T(:,:)
+    !< Potential temperature referenced to the surface [degC]
+  real, intent(in) :: S(:,:)
+    !< Salinity [ppt]
+  real, intent(in) :: pressure(:,:)
+    !< Pressure [Pa]
+  real, intent(inout) :: drho_dT(:,:)
+    !< The partial derivative of density with potential temperature
+    !! [kg m-3 degC-1] or other units determinedby the optional scale argument
+  real, intent(inout) :: drho_dS(:,:)
+    !< The partial derivative of density with salinity, in [kg m-3 ppt-1] or
+    !! other units determined by the optional scale argument
+  type(EOS_type), intent(in) :: EOS
+    !< Equation of state structure
+  integer, optional, intent(in) :: dom(2,2)
+    !< The domain of indices to work on, taking into account that arrays start
+
+  ! Local variables
+  real :: Ta(size(T,1), size(T,2))
+    ! Temperature converted to [degC]
+  real :: Sa(size(S,1), size(S,2))
+    ! Salinity converted to [ppt]
+  real :: press(size(pressure,1), size(pressure,2))
+    ! Pressure converted to [Pa]
+  integer :: is, ie, js, je, npts
+  integer :: domain(2,2)
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(drho_dT, 1)]
+    domain(2,:) = [1, size(drho_dT, 2)]
+  endif
+  is = domain(1,1) ; ie = domain(1,2)
+  js = domain(2,1) ; je = domain(2,2)
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+      "calculate_density_derivs_array: EOS%form_of_EOS is not valid.")
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.)) then
+    call EOS%type%calculate_density_derivs_2d(T, S, pressure, drho_dT, drho_dS, domain)
+  else
+    press(is:ie, js:je) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je)
+    Ta(is:ie, js:je) = EOS%C_to_degC * T(is:ie, js:je)
+    Sa(is:ie, js:je) = EOS%S_to_ppt * S(is:ie, js:je)
+
+    call EOS%type%calculate_density_derivs_2d(Ta, Sa, press, drho_dT, drho_dS, domain)
+  endif
+
+  if (EOS%kg_m3_to_R * EOS%C_to_degC /= 1.) &
+    drho_dT(is:ie, js:je) = EOS%kg_m3_to_R * EOS%C_to_degC * drho_dT(is:ie, js:je)
+  if (EOS%kg_m3_to_R * EOS%S_to_ppt /= 1.) &
+    drho_dS(is:ie, js:je) = EOS%kg_m3_to_R * EOS%S_to_ppt * drho_dS(is:ie, js:je)
+end subroutine calculate_density_derivs_2d
+
+
+!> Calls the appropriate subroutine to calculate density derivatives for 3-D array inputs.
+subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, dom)
+  real, intent(in) :: T(:,:,:)
+    !< Potential temperature referenced to the surface [degC]
+  real, intent(in) :: S(:,:,:)
+    !< Salinity [ppt]
+  real, intent(in) :: pressure(:,:,:)
+    !< Pressure [Pa]
+  real, intent(inout) :: drho_dT(:,:,:)
+    !< The partial derivative of density with potential temperature
+    !! [kg m-3 degC-1] or other units determined by the optional scale argument
+  real, intent(inout) :: drho_dS(:,:,:)
+    !< The partial derivative of density with salinity, in [kg m-3 ppt-1] or
+    !! other units determined by the optional scale argument
+  type(EOS_type), intent(in) :: EOS
+    !< Equation of state structure
+  integer, optional, intent(in) :: dom(3,2)
+    !< The domain of indices to work on, taking into account that arrays start
+    !! at 1.  The first index is the rank (i, j, k) and the second is the bound
+    !! (1 = lower, 2 = upper).
+
+  ! Local variables
+  real :: Ta(size(T,1), size(T,2), size(T,3))
+    ! Temperature converted to [degC]
+  real :: Sa(size(S,1), size(S,2), size(S,3))
+    ! Salinity converted to [ppt]
+  real :: press(size(pressure,1), size(pressure,2), size(pressure,3))
+    ! Pressure converted to [Pa]
+  integer :: is, ie, js, je, ks, ke
+  integer :: domain(3,2)
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(drho_dT, 1)]
+    domain(2,:) = [1, size(drho_dT, 2)]
+    domain(3,:) = [1, size(drho_dT, 3)]
+  endif
+  is = domain(1,1) ; ie = domain(1,2)
+  js = domain(2,1) ; je = domain(2,2)
+  ks = domain(3,1) ; ke = domain(3,2)
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+      "calculate_density_derivs_3d: EOS%form_of_EOS is not valid.")
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.)) then
+    call EOS%type%calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, domain)
+  else
+    press(is:ie, js:je, ks:ke) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je, ks:ke)
+    Ta(is:ie, js:je, ks:ke) = EOS%C_to_degC * T(is:ie, js:je, ks:ke)
+    Sa(is:ie, js:je, ks:ke) = EOS%S_to_ppt * S(is:ie, js:je, ks:ke)
+
+    call EOS%type%calculate_density_derivs_3d(Ta, Sa, press, drho_dT, drho_dS, domain)
+  endif
+
+  if (EOS%kg_m3_to_R * EOS%C_to_degC /= 1.) &
+    drho_dT(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%C_to_degC * drho_dT(is:ie, js:je, ks:ke)
+  if (EOS%kg_m3_to_R * EOS%S_to_ppt /= 1.) &
+    drho_dS(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%S_to_ppt * drho_dS(is:ie, js:je, ks:ke)
+end subroutine calculate_density_derivs_3d
+
+
 !> Calls the appropriate subroutines to calculate density derivatives by promoting a scalar
 !! to a one-element array
 subroutine calculate_density_derivs_scalar(T, S, pressure, drho_dT, drho_dS, EOS, scale)
@@ -853,8 +1135,6 @@ subroutine calculate_density_derivs_scalar(T, S, pressure, drho_dT, drho_dS, EOS
   real :: pres(1)  ! Pressure converted to [Pa]
   real :: Ta(1)    ! Temperature converted to [degC]
   real :: Sa(1)    ! Salinity converted to [ppt]
-  real :: dR_dT(1) ! A copy of drho_dT in mks units [kg m-3 degC-1]
-  real :: dR_dS(1) ! A copy of drho_dS in mks units [kg m-3 ppt-1]
 
   pres(1) = EOS%RL2_T2_to_Pa*pressure
   Ta(1) = EOS%C_to_degC * T
@@ -951,6 +1231,86 @@ subroutine calculate_density_second_derivs_1d(T, S, pressure, drho_dS_dS, drho_d
   enddo ; endif
 
 end subroutine calculate_density_second_derivs_1d
+
+!> Calls the appropriate subroutine to calculate density second derivatives for 2D array inputs.
+subroutine calculate_density_second_derivs_2d(T, S, pressure, drho_dS_dS, drho_dS_dT, drho_dT_dT, &
+                                              drho_dS_dP, drho_dT_dP, EOS, dom, scale)
+  real, intent(in) :: T(:,:)         !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)         !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:)  !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: drho_dS_dS(:,:) !< Partial derivative of beta with respect to S
+                                         !! [R S-2 ~> kg m-3 ppt-2]
+  real, intent(inout) :: drho_dS_dT(:,:) !< Partial derivative of beta with respect to T
+                                         !! [R S-1 C-1 ~> kg m-3 ppt-1 degC-1]
+  real, intent(inout) :: drho_dT_dT(:,:) !< Partial derivative of alpha with respect to T
+                                         !! [R C-2 ~> kg m-3 degC-2]
+  real, intent(inout) :: drho_dS_dP(:,:) !< Partial derivative of beta with respect to pressure
+                                         !! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+  real, intent(inout) :: drho_dT_dP(:,:) !< Partial derivative of alpha with respect to pressure
+                                         !! [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+  type(EOS_type), intent(in) :: EOS      !< Equation of state structure
+  integer, optional, intent(in) :: dom(2,2) !< The domain of indices to work on
+  real,    optional, intent(in) :: scale    !< A multiplicative factor by which to scale density [various]
+
+  ! Local variables
+  real :: Ta(size(T,1), size(T,2))       ! Temperature converted to [degC]
+  real :: Sa(size(S,1), size(S,2))       ! Salinity converted to [ppt]
+  real :: press(size(pressure,1), size(pressure,2)) ! Pressure converted to [Pa]
+  real :: rho_scale  ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+  integer :: is, ie, js, je
+  integer :: domain(2,2)
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+      "calculate_density_second_derivs_2d: EOS%form_of_EOS is not valid.")
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(drho_dT_dT, 1)]
+    domain(2,:) = [1, size(drho_dT_dT, 2)]
+  endif
+  is = domain(1,1) ; ie = domain(1,2)
+  js = domain(2,1) ; je = domain(2,2)
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.)) then
+    call EOS%type%calculate_density_second_derivs_2d(T, S, pressure, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, domain)
+  else
+    press(is:ie, js:je) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je)
+    Ta(is:ie, js:je) = EOS%C_to_degC * T(is:ie, js:je)
+    Sa(is:ie, js:je) = EOS%S_to_ppt * S(is:ie, js:je)
+    call EOS%type%calculate_density_second_derivs_2d(Ta, Sa, press, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, domain)
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+  if (rho_scale /= 1.0) then
+    drho_dS_dS(is:ie, js:je) = rho_scale * drho_dS_dS(is:ie, js:je)
+    drho_dS_dT(is:ie, js:je) = rho_scale * drho_dS_dT(is:ie, js:je)
+    drho_dT_dT(is:ie, js:je) = rho_scale * drho_dT_dT(is:ie, js:je)
+    drho_dS_dP(is:ie, js:je) = rho_scale * drho_dS_dP(is:ie, js:je)
+    drho_dT_dP(is:ie, js:je) = rho_scale * drho_dT_dP(is:ie, js:je)
+  endif
+
+  if (EOS%RL2_T2_to_Pa /= 1.0) then
+    drho_dS_dP(is:ie, js:je) = EOS%RL2_T2_to_Pa * drho_dS_dP(is:ie, js:je)
+    drho_dT_dP(is:ie, js:je) = EOS%RL2_T2_to_Pa * drho_dT_dP(is:ie, js:je)
+  endif
+
+  if (EOS%C_to_degC /= 1.0) then
+    drho_dS_dT(is:ie, js:je) = EOS%C_to_degC * drho_dS_dT(is:ie, js:je)
+    drho_dT_dT(is:ie, js:je) = EOS%C_to_degC**2 * drho_dT_dT(is:ie, js:je)
+    drho_dT_dP(is:ie, js:je) = EOS%C_to_degC * drho_dT_dP(is:ie, js:je)
+  endif
+
+  if (EOS%S_to_ppt /= 1.0) then
+    drho_dS_dS(is:ie, js:je) = EOS%S_to_ppt**2 * drho_dS_dS(is:ie, js:je)
+    drho_dS_dT(is:ie, js:je) = EOS%S_to_ppt * drho_dS_dT(is:ie, js:je)
+    drho_dS_dP(is:ie, js:je) = EOS%S_to_ppt * drho_dS_dP(is:ie, js:je)
+  endif
+
+end subroutine calculate_density_second_derivs_2d
 
 !> Calls the appropriate subroutine to calculate density second derivatives for scalar inputs.
 subroutine calculate_density_second_derivs_scalar(T, S, pressure, drho_dS_dS, drho_dS_dT, drho_dT_dT, &
@@ -1958,7 +2318,6 @@ subroutine abs_saln_to_prac_saln(S, prSaln, EOS, dom, scale)
                                                 !! while the default is equivalent to EOS%ppt_to_S.
 
   ! Local variables
-  real, dimension(size(S)) :: Sa    ! Salinity converted to [ppt]
   real :: S_scale ! A factor to convert practical salinity from ppt to the desired units [S PSU-1 ~> 1]
   real, parameter :: Sprac_Sref = (35.0/35.16504) ! The TEOS 10 conversion factor to go from
                                     ! reference salinity to practical salinity [PSU ppt-1]
@@ -1999,7 +2358,6 @@ subroutine prac_saln_to_abs_saln(S, absSaln, EOS, dom, scale)
                                                 !! while the default is equivalent to EOS%ppt_to_S.
 
   ! Local variables
-  real, dimension(size(S)) :: Sp    ! Salinity converted to [ppt]
   real :: S_scale ! A factor to convert absolute salinity from ppt to the desired units [S ppt-1 ~> 1]
   real, parameter :: Sref_Sprac = (35.16504/35.0) ! The TEOS 10 conversion factor to go from
                                     ! practical salinity to reference salinity [PSU ppt-1]
@@ -2188,7 +2546,6 @@ logical function test_TS_conversion_consistency(T_cons, S_abs, T_pot, S_prac, EO
   real :: Ttol     ! Roundoff error on a typical value of temperatures [degC]
   logical :: test_OK ! True if a particular test is consistent.
   logical :: OK      ! True if all checks so far are consistent.
-  integer :: i, j, n
 
   OK = .true.
 
@@ -2236,7 +2593,6 @@ logical function test_TFr_consistency(S_test, p_test, EOS, verbose, EOS_name, TF
   real, dimension(-3:3,-3:3) :: S ! Salinities at the test value and perturbed points [S ~> ppt]
   real, dimension(-3:3,-3:3) :: P ! Pressures at the test value and perturbed points [R L2 T-2 ~> Pa]
   real, dimension(-3:3,-3:3,2) :: TFr ! Freezing point at the test value and perturbed points [C ~> degC]
-  character(len=200) :: mesg
   real :: dS         ! Magnitude of salinity perturbations [S ~> ppt]
   real :: dp         ! Magnitude of pressure perturbations [R L2 T-2 ~> Pa]
   ! real :: tol        ! The nondimensional tolerance from roundoff [nondim]
