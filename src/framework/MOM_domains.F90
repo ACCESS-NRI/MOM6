@@ -469,17 +469,24 @@ subroutine MOM_define_layout(n_global, ndivs, layout)
   integer, dimension(2), intent(out) :: layout   !< The generated layout of PEs
 
   ! Local variables
-  integer :: isz, jsz, idiv, jdiv
+  integer :: isz, jsz, idiv, jdiv, div
 
-  ! At present, this algorithm is a copy of mpp_define_layout, but it could perhaps be improved?
+  ! At present, this algorithm is a copy of mpp_define_layout, modified to always assign the larger number of PEs to the larger dimension. 
 
   isz = n_global(1) ; jsz = n_global(2)
   ! First try to divide ndivs to match the domain aspect ratio.  If this is not an even
   ! divisor of ndivs, reduce idiv until a factor is found.
-  idiv = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
+  div = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
   do while( mod(ndivs,idiv) /= 0 )
-    idiv = idiv - 1
+    div = div - 1
   enddo ! This will terminate at idiv=1 if not before
+
+  ! Assign the larger factor to the larger dimension
+  if (isz > jsz) then
+    idiv = max(div, ndivs/div)
+  else
+    idiv = min(div, ndivs/div)
+  endif
   jdiv = ndivs / idiv
 
   layout = (/ idiv, jdiv /)
