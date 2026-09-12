@@ -349,6 +349,9 @@ type, public :: MOM_control_struct ; private
   logical :: p_surf_prev_set    !< If true, p_surf_prev has been properly set from
                                 !! a previous time-step or the ocean restart file.
                                 !! This is only valid when interp_p_surf is true.
+  logical :: nonblocking_p_surf_bug !< If true, recover a bug in which the non-blocking halo
+                                    !! update of the surface pressure is not completed before the
+                                    !! halo points of forces%p_surf are copied into tv%p_surf.
   real, dimension(:,:), pointer :: &
     p_surf_prev  => NULL(), &   !< surface pressure [R L2 T-2 ~> Pa] at end  previous call to step_MOM
     p_surf_begin => NULL(), &   !< surface pressure [R L2 T-2 ~> Pa] at start of step_MOM_dyn_...
@@ -717,8 +720,16 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     ! forces%p_surf are copied into CS%tv%p_surf below, and before calling
     ! calc_resoln_function among other routines if the surface pressure is used in the
     ! equation of state.
-    nonblocking_p_surf_update = G%nonblocking_updates .and. &
-        .not.(associated(CS%tv%p_surf) .and. associated(forces%p_surf))
+    if (CS%nonblocking_p_surf_bug) then
+      ! Recover a bug in which the halo update is only completed when SpV_avg is in use, so that
+      ! the halo points of CS%tv%p_surf are copied before the update has completed otherwise.
+      nonblocking_p_surf_update = G%nonblocking_updates .and. &
+          .not.(associated(CS%tv%p_surf) .and. associated(forces%p_surf) .and. &
+                allocated(CS%tv%SpV_avg) .and. associated(CS%tv%T))
+    else
+      nonblocking_p_surf_update = G%nonblocking_updates .and. &
+          .not.(associated(CS%tv%p_surf) .and. associated(forces%p_surf))
+    endif
     if (.not.associated(forces%taux) .or. .not.associated(forces%tauy)) &
          call MOM_error(FATAL,'step_MOM:forces%taux,tauy not associated')
     call create_group_pass(pass_tau_ustar_psurf, forces%taux, forces%tauy, G%Domain)
@@ -2658,6 +2669,14 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "density.  (1 Pa = 1e4 dbar, so 2e7 is commonly used.) "//&
                  "This is only used if USE_EOS and ENABLE_THERMODYNAMICS are true.", &
                  units="Pa", default=2.0e7, scale=US%Pa_to_RL2_T2)
+
+  call get_param(param_file, "MOM", "NONBLOCKING_P_SURF_BUG", CS%nonblocking_p_surf_bug, &
+                 "If true, recover a bug in which the non-blocking halo update of the surface "//&
+                 "pressure is not completed before the halo points of forces%p_surf are copied "//&
+                 "into tv%p_surf, so that those halo points hold the surface pressure from the "//&
+                 "previous coupling step, or zeros on the first step after a restart.  This is "//&
+                 "only used if NONBLOCKING_UPDATES and USE_PSURF_IN_EOS are true", &
+                  default=enable_bugs)
 
   if (bulkmixedlayer) then
     call get_param(param_file, "MOM", "NKML", nkml, &
