@@ -623,8 +623,9 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
       call MOM_error(NOTE, "This domain has no land, so there are no land blocks to "//&
           "auto-eliminate. Proceeding with an unmasked layout.")
     else
-      call MOM_error(FATAL, "Couldn't auto-eliminate any land blocks. Try to increase the "//&
-          "number of MOM6 PEs or set AUTO_MASKTABLE to False.")
+      call MOM_error(WARNING, "Couldn't auto-eliminate any land blocks, but domain contains land."//&
+          "Increasing number of MOM6 PEs may allow land block elimination for better efficienty."//&
+          "Proceeding with an unmasked layout.")
     endif
   endif
 
