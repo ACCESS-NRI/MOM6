@@ -470,19 +470,29 @@ subroutine MOM_define_layout(n_global, ndivs, layout)
 
   ! Local variables
   integer :: isz, jsz, idiv, jdiv
+  real :: squareness      ! A measure of the squareness of a candidate layout [gridpoints]
+  real :: best_squareness ! The largest squareness found so far [gridpoints]
 
-  ! At present, this algorithm is a copy of mpp_define_layout, but it could perhaps be improved?
+  ! This algorithm differs from mpp_define_layout, which searches only downwards from the
+  ! idiv that would make the subdomains exactly square.  That search can miss a better
+  ! divisor just above the target, so all divisors of ndivs are examined here instead.
 
   isz = n_global(1) ; jsz = n_global(2)
-  ! First try to divide ndivs to match the domain aspect ratio.  If this is not an even
-  ! divisor of ndivs, reduce idiv until a factor is found.
-  idiv = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
-  do while( mod(ndivs,idiv) /= 0 )
-    idiv = idiv - 1
-  enddo ! This will terminate at idiv=1 if not before
-  jdiv = ndivs / idiv
-
-  layout = (/ idiv, jdiv /)
+  layout(1) = 1
+  best_squareness = 0.0
+  ! Loop over all divisors and find the one that gives the highest squareness
+  do idiv=1,ndivs
+    if (mod(ndivs, idiv) /= 0) cycle
+    jdiv = ndivs / idiv
+    ! The shorter of the two side lengths gives a measure of the squareness since the
+    ! product of the two side lengths is isz*jsz/ndivs for every candidate layout
+    squareness = min(real(isz) / real(idiv), real(jsz) / real(jdiv))
+    if (squareness > best_squareness) then
+      best_squareness = squareness
+      layout(1) = idiv
+    endif
+  enddo
+  layout(2) = ndivs / layout(1)
 end subroutine MOM_define_layout
 
 !> Given a desired number of active npes, generate a layout and mask_table
