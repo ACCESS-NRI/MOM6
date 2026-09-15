@@ -20,7 +20,6 @@ target_sources(mom6lib PRIVATE
   time_utils.F90
   mom_cap.F90
   mom_cap_methods.F90
-  mom_cap_gtracer_flux.F90
   mom_ocean_model_nuopc.F90
   mom_cap_outputlog.F90
   mom_cap_profiling.F90

@@ -35,7 +35,6 @@ use MOM_variables,         only : vertvisc_type, thermo_var_ptrs
 use MOM_verticalGrid,      only : verticalGrid_type
 use MOM_MEKE_types,        only : MEKE_type
 
-
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -167,6 +166,11 @@ type, public :: MEKE_CS ; private
   integer :: id_slope_x = -1 !< Diagnostic id for isopycnal slope in the x-direction
   integer :: id_slope_y = -1 !< Diagnostic id for isopycnal slope in the y-direction
   integer :: id_rv      = -1 !< Diagnostic id for surface relative vorticity
+
+  ! Isoneutral blocking parameters
+  integer :: niblock         !< The i block size used in calc_isoneutral_slopes [nondim].
+  integer :: njblock         !< The j block size used in calc_isoneutral_slopes [nondim].
+  integer :: nkblock         !< The k block size used in calc_isoneutral_slopes [nondim].
 
 end type MEKE_CS
 
@@ -375,12 +379,12 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       if (GV%Boussinesq) then
         !$OMP parallel do default(shared)
         do j=js-1,je+1 ; do i=is-1,ie+1
-          depth_tot(i,j) = (G%bathyT(i,j) + G%Z_ref) * GV%Z_to_H
+          depth_tot(i,j) = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0) * GV%Z_to_H
         enddo ; enddo
       else
         !$OMP parallel do default(shared)
         do j=js-1,je+1 ; do i=is-1,ie+1
-          depth_tot(i,j) = (G%bathyT(i,j) + G%Z_ref) * CS%rho_fixed_total_depth * GV%RZ_to_H
+          depth_tot(i,j) = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0) * CS%rho_fixed_total_depth * GV%RZ_to_H
         enddo ; enddo
       endif
     else
@@ -620,7 +624,7 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       !$OMP parallel do default(shared)
       do j=js-1,je+1 ; do I=is-2,ie+1
         ! MEKE_uflux is used here as workspace with units of [L2 T-2 ~> m2 s-2].
-        MEKE_uflux(I,j) = ((G%dy_Cu(I,j)*G%IdxCu(I,j)) * G%OBCmaskCu(I,j)) * &
+        MEKE_uflux(I,j) = (G%dy_Cu(I,j)*G%IdxCu_OBCmask(I,j)) * &
             (MEKE%MEKE(i+1,j) - MEKE%MEKE(i,j))
       ! This would have units of [R Z L2 T-2 ~> kg s-2]
       ! MEKE_uflux(I,j) = ((G%dy_Cu(I,j)*G%IdxCu(I,j)) * &
@@ -630,7 +634,7 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       !$OMP parallel do default(shared)
       do J=js-2,je+1 ; do i=is-1,ie+1
         ! MEKE_vflux is used here as workspace with units of [L2 T-2 ~> m2 s-2].
-        MEKE_vflux(i,J) = ((G%dx_Cv(i,J)*G%IdyCv(i,J)) * G%OBCmaskCv(i,J)) * &
+        MEKE_vflux(i,J) = (G%dx_Cv(i,J)*G%IdyCv_OBCmask(i,J)) * &
             (MEKE%MEKE(i,j+1) - MEKE%MEKE(i,j))
       ! This would have units of [R Z L2 T-2 ~> kg s-2]
       ! MEKE_vflux(i,J) = ((G%dx_Cv(i,J)*G%IdyCv(i,J)) * &
@@ -1367,7 +1371,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   if (.not. MEKE_init) return
   CS%initialized = .true.
   call get_param(param_file, mdl, "MEKE_IN_DYNAMICS", meke_in_dynamics, &
-                 "If true, step MEKE forward with the dynamics"// &
+                 "If true, step MEKE forward with the dynamics "// &
                  "otherwise with the tracer timestep.", &
                  default=.true.)
 
@@ -1431,7 +1435,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
                    "The nondimensional coefficient governing the efficiency of the GEOMETRIC \n"//&
                    "thickness diffusion.", units="nondim", default=0.05)
     call get_param(param_file, mdl, "MEKE_EQUILIBRIUM_ALT", CS%MEKE_equilibrium_alt, &
-                   "If true, use an alternative formula for computing the (equilibrium)"//&
+                   "If true, use an alternative formula for computing the (equilibrium) "//&
                    "initial value of MEKE.", default=.false.)
     call get_param(param_file, mdl, "MEKE_EQUILIBRIUM_RESTORING", CS%MEKE_equilibrium_restoring, &
                    "If true, restore MEKE back to its equilibrium value, which is calculated at "//&
@@ -1525,15 +1529,15 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
                  "the deformation radius or grid-spacing. Only used if "//&
                  "MEKE_OLD_LSCALE=True", default=.false.)
   call get_param(param_file, mdl, "MEKE_VISCOSITY_COEFF_KU", CS%viscosity_coeff_Ku, &
-                 "If non-zero, is the scaling coefficient in the expression for"//&
-                 "viscosity used to parameterize harmonic lateral momentum mixing by"//&
-                 "unresolved eddies represented by MEKE. Can be negative to"//&
+                 "If non-zero, is the scaling coefficient in the expression for "//&
+                 "viscosity used to parameterize harmonic lateral momentum mixing by "//&
+                 "unresolved eddies represented by MEKE. Can be negative to "//&
                  "represent backscatter from the unresolved eddies.", &
                  units="nondim", default=0.0)
   call get_param(param_file, mdl, "MEKE_VISCOSITY_COEFF_AU", CS%viscosity_coeff_Au, &
-                 "If non-zero, is the scaling coefficient in the expression for"//&
-                 "viscosity used to parameterize biharmonic lateral momentum mixing by"//&
-                 "unresolved eddies represented by MEKE. Can be negative to"//&
+                 "If non-zero, is the scaling coefficient in the expression for "//&
+                 "viscosity used to parameterize biharmonic lateral momentum mixing by "//&
+                 "unresolved eddies represented by MEKE. Can be negative to "//&
                  "represent backscatter from the unresolved eddies.", &
                  units="nondim", default=0.0)
   call get_param(param_file, mdl, "MEKE_FIXED_MIXING_LENGTH", CS%Lfixed, &
@@ -1542,7 +1546,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
                  units="m", default=0.0, scale=US%m_to_L)
   call get_param(param_file, mdl, "MEKE_FIXED_TOTAL_DEPTH", CS%fixed_total_depth, &
                  "If true, use the nominal bathymetric depth as the estimate of the "//&
-                 "time-varying ocean depth.  Otherwise base the depth on the total ocean mass"//&
+                 "time-varying ocean depth.  Otherwise base the depth on the total ocean mass "//&
                  "per unit area.", default=.true.)
   call get_param(param_file, mdl, "MEKE_TOTAL_DEPTH_RHO", CS%rho_fixed_total_depth, &
                  "A density used to translate the nominal bathymetric depth into an estimate "//&
@@ -1763,6 +1767,15 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   character(len=200)  :: inputdir, backend, model_filename
   integer :: db_return_code, batch_size
   character(len=40) :: mdl = "MOM_ML_MEKE"
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 0
+  integer, parameter :: default_nkblock = 0
+#else
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 1
+  integer, parameter :: default_nkblock = 1
+#endif
 
   ! Store pointers in control structure
   write(CS%key_suffix, '(A,I6.6)') '_', PE_here()
@@ -1825,6 +1838,36 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   CS%id_rv = register_diag_field('ocean_model', 'MEKE_RV', diag%axesT1, Time, &
      'Surface relative vorticity used in MEKE', 's-1', conversion=US%s_to_T)
 
+  ! Isoneutral blocking parameters
+  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, or when running with OpenMP offload, "//&
+                 "the full computational domain width is used. "//&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NIBLOCK cannot equal 1.", &
+                 default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when running with OpenMP offload, "//&
+                 "in which case the full computational domain height is used. " //&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NJBLOCK cannot equal 1.", &
+                 default=default_njblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The k-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain depth is used.", default=default_nkblock, layoutParam=.true.)
+
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NKBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+
+
 end subroutine ML_MEKE_init
 
 !> Calculate the various features used for the machine learning prediction
@@ -1865,6 +1908,11 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   real :: sum_area  ! A sum of adjacent cell areas [L2 ~> m2]
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: niblock, njblock, nkblock
+
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -1875,9 +1923,26 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
     h_u(I,j,k) = 0.5*(h(i,j,k)*G%mask2dT(i,j) + h(i+1,j,k)*G%mask2dT(i+1,j)) + GV%Angstrom_H
     h_v(i,J,k) = 0.5*(h(i,j,k)*G%mask2dT(i,j) + h(i,j+1,k)*G%mask2dT(i,j+1)) + GV%Angstrom_H
   enddo ; enddo ; enddo
+
+  if (niblock == 0) niblock = ie - is + 1
+  if (njblock == 0) njblock = je - js + 1
+  if (nkblock == 0) nkblock = nz
+
+  !$omp target update to(h)
+  !$omp target enter data map(alloc: e)
   call find_eta(h, tv, G, GV, US, e, halo_size=2)
   ! Note the hard-coded dimenisional constant in the following line.
-  call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)
+  ! UMW: Below is untested
+  !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y)
+  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
+  call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y, &
+                              niblock, njblock, nkblock )
+  !$omp target exit data map(release: tv, tv%T, tv%S)
+  !$omp target exit data map(delete: e)
+  !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
+  !$omp target exit data map(from: slope_x, slope_y)
   call pass_vector(slope_x, slope_y, G%Domain)
   do j=js-1,je+1 ; do i=is-1,ie+1
     slope_x_vert_avg(I,j) = vertical_average_interface(slope_x(i,j,:), h_u(i,j,:), GV%H_subroundoff)

@@ -143,7 +143,11 @@ subroutine set_int_tide_input(u, v, h, tv, fluxes, itide, dt, G, GV, US, CS)
 
   ! Smooth the properties through massless layers.
   if (use_EOS) then
+    !$omp target enter data map(to: h, tv%T, tv%S)
+    !$omp target enter data map(alloc: T_f, S_f)
     call vert_fill_TS(h, tv%T, tv%S, CS%kappa_fill*dt, T_f, S_f, G, GV, US, larger_h_denom=.true.)
+    !$omp target exit data map(from: T_f, S_f)
+    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   call find_N2_bottom(G, GV, US, tv, fluxes, h, T_f, S_f, itide%h2, N2_bot, Rho_bot, h_bot, k_bot)
@@ -553,13 +557,13 @@ subroutine int_tide_input_init(Time, G, GV, US, param_file, diag, CS, itide)
 
   do fr=1,num_freq ; do j=js,je ; do i=is,ie
     mask_itidal = 1.0
-    if (G%bathyT(i,j) + G%Z_ref < min_zbot_itides) mask_itidal = 0.0
+    if (G%meanSL(i,j) + G%bathyT(i,j) < min_zbot_itides) mask_itidal = 0.0
 
     CS%tideamp(i,j,fr) = CS%tideamp(i,j,fr) * mask_itidal * G%mask2dT(i,j)
 
     ! Restrict rms topo to a fraction (often 10 percent) of the column depth.
     if (max_frac_rough >= 0.0) &
-      itide%h2(i,j) = min((max_frac_rough*(G%bathyT(i,j)+G%Z_ref))**2, itide%h2(i,j))
+      itide%h2(i,j) = min((max_frac_rough * max(G%meanSL(i,j) + G%bathyT(i,j), 0.0))**2, itide%h2(i,j))
 
     ! Compute the fixed part of internal tidal forcing; units are [R Z4 H-1 T-2 ~> J m-2 or J m kg-1] here.
     CS%TKE_itidal_coef(i,j,fr) = 0.5*US%L_to_Z*kappa_h2_factor * GV%H_to_RZ * &

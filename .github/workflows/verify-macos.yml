@@ -20,13 +20,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j PKG= build/deps/lib/libgsw.a
+          make -C .testing -j PKG= build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with symmetric indexing
         run: make -C .testing -j build/symmetric/MOM6
@@ -45,13 +46,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j PKG= build/deps/lib/libgsw.a
+          make -C .testing -j PKG= build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with asymmetric indexing
         run: make -C .testing -j build/asymmetric/MOM6
@@ -70,13 +72,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j PKG= build/deps/lib/libgsw.a
+          make -C .testing -j PKG= build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with bit-reproducible optimization
         run: make -C .testing -j build/repro/MOM6
@@ -95,13 +98,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j PKG= build/deps/lib/libgsw.a
+          make -C .testing -j PKG= build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 supporting OpenMP
         run: make -C .testing -j build/openmp/MOM6
@@ -115,39 +119,39 @@ jobs:
           path: mom6-openmp.tar
           retention-days: 1
 
-  build-target:
-    if: github.event_name == 'pull_request'
-    runs-on: macOS-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/macos-setup/
-
-      - name: Compile target FMS
-        run: |
-          make -C .testing \
-          DO_REGRESSION_TESTS=1 \
-          build/target_codebase
-          make -C .testing/build/target_codebase/.testing -j \
-          build/deps/lib/libFMS.a
-
-      - name: Compile target MOM6
-        run: |
-          make -C .testing -j \
-          DO_REGRESSION_TESTS=1 \
-          build/target/MOM6
-
-      - name: Prepare artifact
-        run: tar -cf mom6-target.tar .testing/build/target/MOM6
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mom6-target-artifact
-          path: mom6-target.tar
-          retention-days: 1
+  # Disabled along with test-regression, which was its only consumer: nothing
+  # now needs mom6-target-artifact, so this build would be dead weight.
+  #build-target:
+  #  if: github.event_name == 'pull_request'
+  #  runs-on: macOS-latest
+  #
+  #  steps:
+  #    - uses: actions/checkout@v4
+  #
+  #    - uses: ./.github/actions/macos-setup/
+  #
+  #    - name: Compile target dependencies
+  #      run: |
+  #        make -C .testing \
+  #        DO_REGRESSION_TESTS=1 \
+  #        build/target_codebase
+  #        make -C .testing/build/target_codebase/.testing -j \
+  #        build/deps/lib/libFMS.a
+  #
+  #    - name: Compile target MOM6
+  #      run: |
+  #        make -C .testing -j \
+  #        DO_REGRESSION_TESTS=1 \
+  #        build/target/MOM6
+  #
+  #    - name: Prepare artifact
+  #      run: tar -cf mom6-target.tar .testing/build/target/MOM6
+  #
+  #    - uses: actions/upload-artifact@v4
+  #      with:
+  #        name: mom6-target-artifact
+  #        path: mom6-target.tar
+  #        retention-days: 1
 
   # Tests
 
@@ -159,8 +163,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -192,8 +194,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -217,8 +217,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -242,8 +240,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -267,8 +263,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -302,8 +296,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -329,8 +321,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -364,8 +354,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: ./.github/actions/macos-setup
 
@@ -391,42 +379,45 @@ jobs:
           -o build/repro/MOM6 \
           test.repro
 
-  test-regression:
-    if: github.event_name == 'pull_request'
-    runs-on: macOS-latest
-    needs:
-      - build-symmetric
-      - build-target
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/macos-setup
-
-      - name: Download symmetric MOM6
-        uses: actions/download-artifact@v4
-        with:
-          name: mom6-symmetric-artifact
-
-      - name: Download target MOM6
-        uses: actions/download-artifact@v4
-        with:
-          name: mom6-target-artifact
-
-      - name: Unpack artifacts
-        run: |
-          tar -xpvf mom6-symmetric.tar
-          tar -xpvf mom6-target.tar
-
-      - name: Check for regressions
-        run: |
-          make -C .testing -j \
-          -o build/symmetric/MOM6 \
-          -o build/target/MOM6 \
-          DO_REGRESSION_TESTS=1 \
-          test.regression
+  # The regression tests are disabled on this branch: some of the GPU code
+  # changes answers, so comparing ocean.stats and the diagnostics against the
+  # target branch (e.g. tc1.regression.diag) fails by construction rather than
+  # signalling a bug.  Re-enable together with the build-target job once the
+  # intended answer changes have been accepted.
+  #test-regression:
+  #  if: github.event_name == 'pull_request'
+  #  runs-on: macOS-latest
+  #  needs:
+  #    - build-symmetric
+  #    - build-target
+  #
+  #  steps:
+  #    - uses: actions/checkout@v4
+  #
+  #    - uses: ./.github/actions/macos-setup
+  #
+  #    - name: Download symmetric MOM6
+  #      uses: actions/download-artifact@v4
+  #      with:
+  #        name: mom6-symmetric-artifact
+  #
+  #    - name: Download target MOM6
+  #      uses: actions/download-artifact@v4
+  #      with:
+  #        name: mom6-target-artifact
+  #
+  #    - name: Unpack artifacts
+  #      run: |
+  #        tar -xpvf mom6-symmetric.tar
+  #        tar -xpvf mom6-target.tar
+  #
+  #    - name: Check for regressions
+  #      run: |
+  #        make -C .testing -j \
+  #        -o build/symmetric/MOM6 \
+  #        -o build/target/MOM6 \
+  #        DO_REGRESSION_TESTS=1 \
+  #        test.regression
 
   # Cleanup
 
@@ -487,7 +478,7 @@ jobs:
       - test-grid
       - test-openmp
       - test-repro
-      - test-regression
+      #- test-regression
 
     steps:
       - uses: geekyeggo/delete-artifact@v5

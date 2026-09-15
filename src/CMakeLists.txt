@@ -2,10 +2,13 @@
 
 add_fortran_target(mom6shared LIB mod STATIC)
 
-target_link_libraries(mom6shared PUBLIC 
-  FMS::fms_r8 
-  GFDLGTracers::gtracers
+target_link_libraries(mom6shared PUBLIC
+  FMS::fms_r8
 )
+
+if(MOM6_USE_GENERIC_TRACER)
+  target_link_libraries(mom6shared PUBLIC GFDLGTracers::gtracers)
+endif()
 
 if(OpenMP_Fortran_FOUND)
     target_link_libraries(mom6shared PRIVATE OpenMP::OpenMP_Fortran)
@@ -48,6 +51,7 @@ target_sources(mom6shared PRIVATE
   ALE/Recon1d_PLM_CW.F90
   ALE/Recon1d_PLM_CWK.F90
   ALE/Recon1d_PLM_hybgen.F90
+  ALE/Recon1d_PLM_WLS.F90
   ALE/Recon1d_PPM_CW.F90
   ALE/Recon1d_PPM_CWK.F90
   ALE/Recon1d_PPM_H4_2018.F90
@@ -152,6 +156,7 @@ target_sources(mom6shared PRIVATE
   framework/MOM_coms.F90
   framework/MOM_cpu_clock.F90
   framework/MOM_data_override.F90
+  framework/MOM_diag_buffers.F90
   framework/MOM_diag_mediator.F90
   framework/MOM_diag_remap.F90
   framework/MOM_document.F90
@@ -214,7 +219,7 @@ target_sources(mom6shared PRIVATE
   parameterizations/lateral/MOM_interface_filter.F90
   parameterizations/lateral/MOM_internal_tides.F90
   parameterizations/lateral/MOM_lateral_mixing_coeffs.F90
-  parameterizations/lateral/MOM_load_love_numbers.F90
+  parameterizations/lateral/MOM_load_Love_numbers.F90
   parameterizations/lateral/MOM_MEKE.F90
   parameterizations/lateral/MOM_MEKE_types.F90
   parameterizations/lateral/MOM_mixed_layer_restrat.F90
@@ -257,11 +262,9 @@ target_sources(mom6shared PRIVATE
   tracer/DOME_tracer.F90
   tracer/dyed_obc_tracer.F90
   tracer/dye_example.F90
-  tracer/file_dye_tracer.F90
   tracer/ideal_age_example.F90
   tracer/ISOMIP_tracer.F90
   tracer/MOM_CFC_cap.F90
-  tracer/MOM_generic_tracer.F90
   tracer/MOM_hor_bnd_diffusion.F90
   tracer/MARBL_forcing_mod.F90
   tracer/MARBL_tracers.F90
@@ -274,7 +277,6 @@ target_sources(mom6shared PRIVATE
   tracer/MOM_tracer_diabatic.F90
   tracer/MOM_tracer_flow_control.F90
   tracer/MOM_tracer_hor_diff.F90
-  tracer/MOM_tracer_numerical_mixing.F90
   tracer/MOM_tracer_registry.F90
   tracer/MOM_tracer_types.F90
   tracer/MOM_tracer_Z_init.F90
@@ -333,6 +335,8 @@ target_sources(mom6shared PRIVATE
 
   ../config_src/external/stochastic_physics/get_stochy_pattern.F90
   ../config_src/external/stochastic_physics/stochastic_physics.F90
+
+  ../config_src/external/GFDL_ocean_BGC/MOM_generic_tracer.F90
 
   ../config_src/infra/FMS2/MOM_coms_infra.F90
   ../config_src/infra/FMS2/MOM_constants.F90

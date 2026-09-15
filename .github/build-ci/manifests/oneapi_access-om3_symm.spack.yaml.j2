@@ -11,6 +11,15 @@ spack:
     access-mom6:
       require:
       - '@git.{{ ref }}=stable ~asymmetric_mem +mom6_solo'
+    fms:
+      require:
+      # MOM6's GPU halo exchange passes a 4th omp_offload argument to
+      # mpp_do_group_update (config_src/infra/FMS2/MOM_domain_infra.F90), which
+      # exists only in the offload-enabled FMS.  A released FMS has a
+      # 3-argument interface, so ifx fails with error #6285 "no matching
+      # specific subroutine".  Deliberately no offload fflags here: those are
+      # NVHPC-only, see nvhpc_mom6_solo_offload.spack.yaml.j2.
+      - '@git.2026.02-alpha3'
     gcc-runtime:
       require:
       - '%access_gcc'
