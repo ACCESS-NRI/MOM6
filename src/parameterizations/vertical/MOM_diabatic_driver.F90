@@ -333,6 +333,16 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   if (dt < 0.0) call MOM_error(FATAL, "MOM_diabatic_driver: "// &
         "diabatic was called with a negative timestep.")
 
+  if (associated(fluxes%brunoff)) then
+    ! KPP code does not account for basal-melt contributions to the surface buoyancy fluxes.
+    if (CS%useKPP) call MOM_error(FATAL, &
+        "MOM_diabatic_driver: basal melt (brunoff) coupling is not supported with USE_KPP=True.")
+
+    ! Distribution of basal melt does not handle negative values, which is not physical anyway.
+    if (any(fluxes%brunoff(G%isc:G%iec,G%jsc:G%jec) < 0.0)) call MOM_error(FATAL, &
+        "MOM_diabatic_driver: coupled basal melt (brunoff) contains negative values.")
+  endif
+
   showCallTree = callTree_showQuery()
 
   ! Offer diagnostics of various state variables at the start of diabatic
@@ -1999,6 +2009,10 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("layered_diabatic(), MOM_diabatic_driver.F90")
 
+  if (associated(fluxes%brunoff)) call MOM_error(FATAL, &
+    "layered_diabatic: basal runoff (brunoff) coupling requires the ALE algorithm; "//&
+    "it is not supported with the layered (non-ALE) diabatic driver.")
+
   ! set equivalence between the same bits of memory for these arrays
   eaml => eatr ; ebml => ebtr
 
@@ -3334,7 +3348,8 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "and applied as either incoming or outgoing depending on the sign of the net. "//&
                  "If false, the net incoming fresh water flux is added to the model and "//&
                  "thereafter the net outgoing is removed from the topmost non-vanished "//&
-                 "layers of the updated state.", default=.true.)
+                 "layers of the updated state. This does not apply to basal melt (brunoff) "//&
+                 "which is handle separately.", default=.true.)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
