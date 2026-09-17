@@ -688,7 +688,7 @@ end subroutine set_pen_shortwave
 subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, tv, &
                                     aggregate_FW_forcing, evap_CFL_limit, &
                                     minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, &
-                                    SkinBuoyFlux, MLD_h)
+                                    SkinBuoyFlux, MLD_h, frac_shelf_h, shelf_forcing_depth)
   type(diabatic_aux_CS),   pointer       :: CS !< Control structure for diabatic_aux
   type(ocean_grid_type),   intent(in)    :: G  !< Grid structure
   type(verticalGrid_type), intent(in)    :: GV !< ocean vertical grid structure
@@ -720,6 +720,9 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                  optional, intent(out)   :: SkinBuoyFlux !< Buoyancy flux at surface [Z2 T-3 ~> m2 s-3].
   real, dimension(:,:), &
                  optional, pointer       :: MLD_h !< Mixed layer thickness for brine plumes [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G)), &
+                  optional, intent(in)   :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
+  real, optional, intent(in)             :: shelf_forcing_depth !< Flux depth for shelf regions
 
   ! Local variables
   integer, parameter :: maxGroundings = 5
@@ -1086,7 +1089,13 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
           ! Place forcing into this layer if this layer has nontrivial thickness.
           ! For layers thin relative to 1/IforcingDepthScale, then distribute
           ! forcing into deeper layers.
-          IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut(i) )
+          if (present(frac_shelf_h)) then
+            IforcingDepthScale = 1. / max(GV%H_subroundoff, &
+              frac_shelf_h(i,j) * (shelf_forcing_depth - netMassOut(i)) &
+              + (1. - frac_shelf_h(i,j)) * (minimum_forcing_depth - netMassOut(i)))
+          else
+            IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut(i) )
+          endif
           ! fractionOfForcing = 1.0, unless h2d is less than IforcingDepthScale.
           fractionOfForcing = min(1.0, h2d(i,k)*IforcingDepthScale)
 
