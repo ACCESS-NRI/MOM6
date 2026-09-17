@@ -58,7 +58,6 @@ type, public :: diagnostics_CS ; private
                                        !! barotropic wave speed [nondim].
   real :: mono_N2_depth = -1.          !< The depth below which N2 is limited as monotonic for the purposes of
                                        !! calculating the equivalent barotropic wave speed [H ~> m or kg m-2].
-
   type(diag_ctrl), pointer :: diag => NULL() !< A structure that is used to
                                        !! regulate the timing of diagnostic output.
 
@@ -339,10 +338,18 @@ subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
   ! mass of liquid ocean (for Bouss, use Rho0). The reproducing sum requires the use of MKS units.
   if (CS%id_masso > 0) then
     mass_cell(:,:) = 0.0
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      if (G%mask2dT(i,j) > 0.0) &
+
+    if (G%masked_land_values_bug) then
+      do k=1,nz ; do j=js,je ; do i=is,ie
         mass_cell(i,j) = mass_cell(i,j) + (GV%H_to_RZ*h(i,j,k)) * G%areaT(i,j)
-    enddo ; enddo ; enddo
+      enddo ; enddo ; enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) &
+          mass_cell(i,j) = mass_cell(i,j) + (GV%H_to_RZ*h(i,j,k)) * G%areaT(i,j)
+      enddo ; enddo ; enddo
+    endif
+
     masso = reproducing_sum(mass_cell, unscale=US%RZL2_to_kg)
     call post_data(CS%id_masso, masso, CS%diag)
   endif

@@ -77,12 +77,19 @@ function global_area_mean(var, G, scale, tmp_scale, unscale)
   elseif (present(scale)) then ; scalefac = scale ; endif
 
   tmpForSumming(:,:) = 0.
-  do j=js,je ; do i=is,ie
-    if (G%mask2dT(i,j) > 0.0) then
-      tmpForSumming(i,j) = var(i,j) * &
-          (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
-    endif
-  enddo ; enddo
+
+  if (G%masked_land_values_bug) then
+    do j=js,je ; do i=is,ie
+      tmpForSumming(i,j) = var(i,j) * (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
+    enddo ; enddo
+  else
+    do j=js,je ; do i=is,ie
+      if (G%mask2dT(i,j) > 0.0) &
+        tmpForSumming(i,j) = var(i,j) * &
+                             (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
+    enddo ; enddo
+  endif
+
 
   global_area_mean = reproducing_sum(tmpForSumming, unscale=temp_scale*G%US%L_to_m**2) * G%IareaT_global
 
@@ -229,12 +236,16 @@ function global_area_integral(var, G, scale, area, tmp_scale, unscale)
       tmpForSumming(i,j) = var(i,j) * (scalefac * area(i,j))
     enddo ; enddo
   else
-    do j=js,je ; do i=is,ie
-      if (G%mask2dT(i,j) > 0.0) then
-        tmpForSumming(i,j) = var(i,j) * &
-            (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
-      endif
-    enddo ; enddo
+    if (G%masked_land_values_bug) then
+      do j=js,je ; do i=is,ie
+        tmpForSumming(i,j) = var(i,j) * (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
+      enddo ; enddo
+    else
+      do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) &
+          tmpForSumming(i,j) = var(i,j) * (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
+      enddo ; enddo
+    endif
   endif
 
   global_area_integral = reproducing_sum(tmpForSumming, unscale=temp_scale)
@@ -311,12 +322,19 @@ function global_layer_mean(var, h, G, GV, scale, tmp_scale, unscale)
   elseif (present(scale)) then ; scalefac = scale ; endif
   tmpForSumming(:,:,:) = 0. ; weight(:,:,:) = 0.
 
-  do k=1,nz ; do j=js,je ; do i=is,ie
-    if (G%mask2dT(i,j) > 0.0) then
+  if (G%masked_land_values_bug) then
+    do k=1,nz ; do j=js,je ; do i=is,ie
       weight(i,j,k) = (GV%H_to_MKS * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j))
       tmpForSumming(i,j,k) = scalefac * var(i,j,k) * weight(i,j,k)
-    endif
-  enddo ; enddo ; enddo
+    enddo ; enddo ; enddo
+  else
+    do k=1,nz ; do j=js,je ; do i=is,ie
+      if (G%mask2dT(i,j) > 0.0) then
+        weight(i,j,k) = (GV%H_to_MKS * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j))
+        tmpForSumming(i,j,k) = scalefac * var(i,j,k) * weight(i,j,k)
+      endif
+    enddo ; enddo ; enddo
+  endif
 
   global_temp_scalar = reproducing_sum(tmpForSumming, EFP_lay_sums=laysums(1:nz), only_on_PE=.true., &
                                        unscale=temp_scale*G%US%L_to_m**2)
@@ -380,13 +398,22 @@ function global_volume_mean(var, h, G, GV, scale, tmp_scale, unscale)
   elseif (present(scale)) then ; scalefac = scale ; endif
   tmpForSumming(:,:) = 0. ; sum_weight(:,:) = 0.
 
-  do k=1,nz ; do j=js,je ; do i=is,ie
-    if (G%mask2dT(i,j) > 0.0) then
+  if (G%masked_land_values_bug) then
+    do k=1,nz ; do j=js,je ; do i=is,ie
       weight_here  =  (GV%H_to_MKS * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j))
       tmpForSumming(i,j) = tmpForSumming(i,j) + scalefac * var(i,j,k) * weight_here
       sum_weight(i,j) = sum_weight(i,j) + weight_here
-    endif
-  enddo ; enddo ; enddo
+    enddo ; enddo ; enddo
+  else
+    do k=1,nz ; do j=js,je ; do i=is,ie
+      if (G%mask2dT(i,j) > 0.0) then
+        weight_here = (GV%H_to_MKS * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j))
+        tmpForSumming(i,j) = tmpForSumming(i,j) + scalefac * var(i,j,k) * weight_here
+        sum_weight(i,j) = sum_weight(i,j) + weight_here
+      endif
+    enddo ; enddo ; enddo
+  endif
+
   global_volume_mean = (reproducing_sum(tmpForSumming, unscale=temp_scale*G%US%L_to_m**2)) / &
                        (reproducing_sum(sum_weight, unscale=G%US%L_to_m**2))
 
@@ -466,21 +493,37 @@ function global_mass_integral(h, G, GV, var, on_PE_only, scale, tmp_scale, unsca
   endif
 
   tmpForSumming(:,:) = 0.0
-  if (present(var)) then
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      if (G%mask2dT(i,j) > 0.0) then
+
+  if (G%masked_land_values_bug) then
+    if (present(var)) then
+      do k=1,nz ; do j=js,je ; do i=is,ie
         tmpForSumming(i,j) = tmpForSumming(i,j) + var(i,j,k) * &
-            ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
-      endif
-    enddo ; enddo ; enddo
-  else
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      if (G%mask2dT(i,j) > 0.0) then
+                  ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
         tmpForSumming(i,j) = tmpForSumming(i,j) + &
-            ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
-      endif
-    enddo ; enddo ; enddo
+                  ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    endif
+  else
+    if (present(var)) then
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) then
+          tmpForSumming(i,j) = tmpForSumming(i,j) + var(i,j,k) * &
+                    ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
+        endif
+      enddo ; enddo ; enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) then
+          tmpForSumming(i,j) = tmpForSumming(i,j) + &
+                    ((GV%H_to_RZ * h(i,j,k)) * (scalefac*G%areaT(i,j) * G%mask2dT(i,j)))
+        endif
+      enddo ; enddo ; enddo
+    endif
   endif
+
   global_sum = .true. ; if (present(on_PE_only)) global_sum = .not.on_PE_only
   if (global_sum) then
     global_mass_integral = reproducing_sum(tmpForSumming, unscale=temp_scale)
@@ -532,16 +575,33 @@ function global_mass_int_EFP(h, G, GV, var, on_PE_only, scale, unscale)
   elseif (present(scale)) then ; scalefac = scale * scalefac ; endif
 
   tmpForSum(:,:) = 0.0
-  if (present(var)) then
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      tmpForSum(i,j) = tmpForSum(i,j) + var(i,j,k) * &
-                ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
-    enddo ; enddo ; enddo
+
+  if (G%masked_land_values_bug) then
+    if (present(var)) then
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        tmpForSum(i,j) = tmpForSum(i,j) + var(i,j,k) * &
+                  ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        tmpForSum(i,j) = tmpForSum(i,j) + &
+                  ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    endif
   else
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      tmpForSum(i,j) = tmpForSum(i,j) + &
-                ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
-    enddo ; enddo ; enddo
+    if (present(var)) then
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) &
+          tmpForSum(i,j) = tmpForSum(i,j) + var(i,j,k) * &
+                    ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        if (G%mask2dT(i,j) > 0.0) &
+          tmpForSum(i,j) = tmpForSum(i,j) + &
+                    ((scalefac * h(i,j,k)) * (G%areaT(i,j) * G%mask2dT(i,j)))
+      enddo ; enddo ; enddo
+    endif
   endif
 
   global_mass_int_EFP = reproducing_sum_EFP(tmpForSum, isr, ier, jsr, jer, only_on_PE=on_PE_only)
