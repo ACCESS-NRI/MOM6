@@ -1173,14 +1173,14 @@ subroutine State_SetExport(state, fldname, isc, iec, jsc, jec, input, ocean_grid
         do i = isc, iec
           ig = i + ocean_grid%isc - isc
           n = n+1
-          dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
+          if (ocean_grid%mask2dT(ig,jg) > 0.0) then
+            dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
+            if (present(areacor)) dataPtr1d(n) = dataPtr1d(n) * areacor(n)
+          else
+            dataPtr1d(n) = 0.0
+          endif
         enddo
       enddo
-      if (present(areacor)) then
-        do n = 1,(size(dataPtr1d))
-          dataPtr1d(n) = dataPtr1d(n) * areacor(n)
-        enddo
-      endif
 
       ! if a maskmap is provided, set exports of all eliminated cells to zero.
       if (associated(ocean_grid%Domain%maskmap)) then
@@ -1203,7 +1203,11 @@ subroutine State_SetExport(state, fldname, isc, iec, jsc, jec, input, ocean_grid
         do i = isc, iec
           i1 = i + lbnd1 - isc
           ig = i + ocean_grid%isc - isc
-          dataPtr2d(i1,j1)  = input(i,j) * ocean_grid%mask2dT(ig,jg)
+          if (ocean_grid%mask2dT(ig,jg) > 0.0) then
+            dataPtr2d(i1,j1) = input(i,j) * ocean_grid%mask2dT(ig,jg)
+          else
+            dataPtr2d(i1,j1) = 0.0
+          endif
         enddo
       enddo
 
