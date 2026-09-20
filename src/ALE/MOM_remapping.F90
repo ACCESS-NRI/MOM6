@@ -20,6 +20,7 @@ use PPM_functions, only : PPM_reconstruction, PPM_boundary_extrapolation
 use PPM_functions, only : PPM_monotonicity
 use PQM_functions, only : PQM_reconstruction, PQM_boundary_extrapolation_v1
 use MOM_hybgen_remap, only : hybgen_plm_coefs, hybgen_ppm_coefs, hybgen_weno_coefs
+use MOM_tracer_numerical_mixing, only : remapping_variance_production
 
 use Recon1d_type, only : Recon1d
 use Recon1d_PCM, only : PCM
@@ -234,7 +235,7 @@ end subroutine extract_member_remapping_CS
 !!
 !! \todo Remove h_neglect argument by moving into remapping_CS
 !! \todo Remove PCM_cell argument by adding new method in Recon1D class
-subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
+subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, remap_variance, col_var_production)
   type(remapping_CS),  intent(in)  :: CS !< Remapping control structure
   integer,             intent(in)  :: n0 !< Number of cells on source grid
   real, dimension(n0), intent(in)  :: h0 !< Cell widths on source grid [H]
@@ -245,6 +246,8 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
   real, optional,      intent(out) :: net_err !< Error in total column [A H]
   logical, dimension(n0), optional, intent(in) :: PCM_cell !< If present, use PCM remapping for
                                          !! cells in the source grid where this is true.
+  logical,             optional, intent(in)    :: remap_variance !< If true compute the remap variance
+  real, dimension(n1), optional, intent(inout) :: col_var_production !< Remap variance production for a column
   ! Local variables
   real, dimension(n0+n1+1) :: h_sub ! Width of each each sub-cell [H]
   real, dimension(n0+n1+1) :: uh_sub ! Integral of u*h over each sub-cell [A H]
@@ -334,6 +337,10 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
   endif
 
  if (present(net_err)) net_err = uh_err
+
+  if (present(remap_variance)) then &
+    if (remap_variance) call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
+                                                         isrc_start, isrc_end, h_sub, u_sub, col_var_production)
 
 end subroutine remapping_core_h
 
