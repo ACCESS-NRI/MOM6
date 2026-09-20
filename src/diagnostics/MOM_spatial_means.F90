@@ -85,8 +85,7 @@ function global_area_mean(var, G, scale, tmp_scale, unscale)
   else
     do j=js,je ; do i=is,ie
       if (G%mask2dT(i,j) > 0.0) &
-        tmpForSumming(i,j) = var(i,j) * &
-                             (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
+        tmpForSumming(i,j) = var(i,j) * (scalefac * G%areaT(i,j) * G%mask2dT(i,j))
     enddo ; enddo
   endif
 

@@ -1191,13 +1191,17 @@ subroutine State_SetExport(state, fldname, isc, iec, jsc, jec, input, ocean_grid
             n = n+1
             if (ocean_grid%mask2dT(ig,jg) > 0.0) then
               dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
-              if (present(areacor)) dataPtr1d(n) = dataPtr1d(n) * areacor(n)
             else
               dataPtr1d(n) = 0.0
             endif
           enddo
         enddo
 
+        if (present(areacor)) then
+          do k = 1,n
+            dataPtr1d(k) = dataPtr1d(k) * areacor(k)
+          enddo
+        endif
       endif
 
       ! if a maskmap is provided, set exports of all eliminated cells to zero.
