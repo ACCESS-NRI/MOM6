@@ -858,7 +858,7 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
         endif
 
         ! Diagnostics for variance production due to remapping
-        if compute_remapping_variance then
+        if (compute_remapping_variance) then
           rvp = rvp * Idt
           call post_data(Tr%id_remap_variance_production, rvp, CS%diag)
         endif
