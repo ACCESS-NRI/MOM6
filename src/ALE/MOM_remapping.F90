@@ -338,9 +338,10 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, remap
 
  if (present(net_err)) net_err = uh_err
 
-  if (present(remap_variance)) then &
+  if (present(remap_variance)) then
     if (remap_variance) call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
                                                          isrc_start, isrc_end, h_sub, u_sub, col_var_production)
+  endif
 
 end subroutine remapping_core_h
 
