@@ -1168,40 +1168,18 @@ subroutine State_SetExport(state, fldname, isc, iec, jsc, jec, input, ocean_grid
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
       n = 0
-
-      if (ocean_grid%masked_land_values_bug) then
-        do j = jsc, jec
-          jg = j + ocean_grid%jsc - jsc
-          do i = isc, iec
-            ig = i + ocean_grid%isc - isc
-            n = n+1
-            dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
-          enddo
+      do j = jsc, jec
+        jg = j + ocean_grid%jsc - jsc
+        do i = isc, iec
+          ig = i + ocean_grid%isc - isc
+          n = n+1
+          dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
         enddo
-        if (present(areacor)) then
-          do n = 1,(size(dataPtr1d))
-            dataPtr1d(n) = dataPtr1d(n) * areacor(n)
-          enddo
-        endif
-      else
-        do j = jsc, jec
-          jg = j + ocean_grid%jsc - jsc
-          do i = isc, iec
-            ig = i + ocean_grid%isc - isc
-            n = n+1
-            if (ocean_grid%mask2dT(ig,jg) > 0.0) then
-              dataPtr1d(n) = input(i,j) * ocean_grid%mask2dT(ig,jg)
-            else
-              dataPtr1d(n) = 0.0
-            endif
-          enddo
+      enddo
+      if (present(areacor)) then
+        do n = 1,(size(dataPtr1d))
+          dataPtr1d(n) = dataPtr1d(n) * areacor(n)
         enddo
-
-        if (present(areacor)) then
-          do k = 1,n
-            dataPtr1d(k) = dataPtr1d(k) * areacor(k)
-          enddo
-        endif
       endif
 
       ! if a maskmap is provided, set exports of all eliminated cells to zero.
@@ -1219,32 +1197,15 @@ subroutine State_SetExport(state, fldname, isc, iec, jsc, jec, input, ocean_grid
       lbnd1 = lbound(dataPtr2d,1)
       lbnd2 = lbound(dataPtr2d,2)
 
-      if (ocean_grid%masked_land_values_bug) then
-        do j = jsc, jec
-          j1 = j + lbnd2 - jsc
-          jg = j + ocean_grid%jsc - jsc
-          do i = isc, iec
-            i1 = i + lbnd1 - isc
-            ig = i + ocean_grid%isc - isc
-            dataPtr2d(i1,j1) = input(i,j) * ocean_grid%mask2dT(ig,jg)
-          enddo
+      do j = jsc, jec
+        j1 = j + lbnd2 - jsc
+        jg = j + ocean_grid%jsc - jsc
+        do i = isc, iec
+          i1 = i + lbnd1 - isc
+          ig = i + ocean_grid%isc - isc
+          dataPtr2d(i1,j1)  = input(i,j) * ocean_grid%mask2dT(ig,jg)
         enddo
-      else
-        do j = jsc, jec
-          j1 = j + lbnd2 - jsc
-          jg = j + ocean_grid%jsc - jsc
-          do i = isc, iec
-            i1 = i + lbnd1 - isc
-            ig = i + ocean_grid%isc - isc
-            if (ocean_grid%mask2dT(ig,jg) > 0.0) then
-              dataPtr2d(i1,j1) = input(i,j) * ocean_grid%mask2dT(ig,jg)
-            else
-              dataPtr2d(i1,j1) = 0.0
-            endif
-          enddo
-        enddo
-
-      endif
+      enddo
 
     endif
 
