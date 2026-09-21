@@ -599,7 +599,7 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
     ! preserves ocean beneath ice shelves even where the surface coupling mask excludes those cells.
     do k=1,nz ; do j=jsd,jed ; do i=isd,ied
       if (G%mask2dT(i,j) == 0.0) then
-        h(i,j,k) = GV%Angstrom_H
+        ! h(i,j,k) = GV%Angstrom_H
         if (use_temperature) then
           tv%T(i,j,k) = 0.0
           tv%S(i,j,k) = 0.0
