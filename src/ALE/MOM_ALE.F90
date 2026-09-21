@@ -857,12 +857,6 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
           endif
         endif
 
-        ! Diagnostics for variance production due to remapping
-        if (compute_remapping_variance) then
-          rvp = rvp * Idt
-          call post_data(Tr%id_remap_variance_production, rvp, CS%diag)
-        endif
-
         ! update tracer concentration
         Tr%t(i,j,:) = tr_column(:)
       endif ; enddo ; enddo
@@ -885,7 +879,14 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
           enddo ; enddo
           call post_data(Tr%id_remap_cont_2d, work_2d, CS%diag)
         endif
+
+        ! Diagnostic for variance production due to remapping
+        if (Tr%id_remap_variance_production > 0) then
+          rvp = rvp * Idt
+          call post_data(Tr%id_remap_variance_production, rvp, CS%diag)
+        endif
       endif
+
     enddo ! m=1,ntr
 
   endif  ! endif for ntr > 0
