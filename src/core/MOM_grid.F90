@@ -69,8 +69,6 @@ type, public :: ocean_grid_type
   logical :: symmetric  !< True if symmetric memory is used.
   logical :: nonblocking_updates  !< If true, non-blocking halo updates are
                                   !! allowed.  The default is .false. (for now).
-  logical :: masked_land_values_bug !< If true, retain older behavior that can
-                                     !! evaluate values at masked land points.
   integer :: first_direction !< An integer that indicates which direction is
                              !! to be updated first in directionally split
                              !! parts of the calculation.  This can be altered
@@ -232,8 +230,6 @@ subroutine MOM_grid_init(G, param_file, US, HI, global_indexing, bathymetry_at_v
   logical :: local_indexing  ! If false use global index values instead of having
                              ! the data domain on each processor start at 1.
   ! This include declares and sets the variable "version".
-  logical :: enable_bugs      ! If true, the defaults for recently added bug-fix flags are set to
-                              ! recreate the bugs, or if false bugs are only used if actively selected.
 # include "version_variable.h"
 
   integer, allocatable, dimension(:) :: ibegin, iend, jbegin, jend
@@ -247,14 +243,7 @@ subroutine MOM_grid_init(G, param_file, US, HI, global_indexing, bathymetry_at_v
   call log_version(param_file, mod_nm, version, &
                    "Parameters providing information about the lateral grid.", &
                    log_to_all=.true., layout=.true., all_default=(G%Z_ref==0.0))
-  call get_param(param_file, mod_nm, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
-                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
-  call get_param(param_file, mod_nm, "MASKED_LAND_VALUES_BUG", &
-                 G%masked_land_values_bug, &
-                 "If true, retain older behavior that allows masked land values to "//&
-                 "participate in selected reductions, conversions, and exports. If false, "//&
-                 "exclude masked land values from these operations.", &
-                 default=enable_bugs)
+
   call get_param(param_file, mod_nm, "NIBLOCK", niblock, "The number of blocks "// &
                  "in the x-direction on each processor (for openmp).", default=1, &
                  layoutParam=.true.)
