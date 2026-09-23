@@ -169,7 +169,7 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
   logical :: new_sim, rotate_index
   logical :: use_temperature, use_sponge, use_oda_incupd
   logical :: verify_restart_time
-  logical :: land_state_init_bug ! If true, retain the initialised or restored T, S, and h on land.
+  logical :: land_ts_init_bug ! If true, retain the initialised or restored T and S on land.
   logical :: OBC_reservoir_init_bug  ! If true, set the OBC tracer reservoirs at the startup of a new
                          ! run from the interior tracer concentrations regardless of properties that
                          ! may be explicitly specified for the reservoir concentrations.
@@ -587,23 +587,21 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
 
   call get_param(PF, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
                  default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
-  call get_param(PF, mdl, "LAND_STATE_INIT_BUG", land_state_init_bug, &
-                 "If true, recover a bug that leaves potentially invalid temperature, salinity, "//&
-                 "and thickness values on land after state initialization. If false, set land "//&
-                 "T and S to zero and h to the small positive thickness used at allocation.", &
+  call get_param(PF, mdl, "LAND_TS_INIT_BUG", land_ts_init_bug, &
+                 "If true, recover a bug that leaves potentially invalid temperature and salinity "//&
+                 "values on land after state initialisation. If false, reset land temperature "//&
+                 "and salinity to zero.", &
                  default=enable_bugs)
-  if (.not.land_state_init_bug) then
+  if (.not.land_ts_init_bug .and. use_temperature) then
     ! A change in processor decomposition can bring land from an ommitted all land tile into an active tile,
-    ! exposing restart fill values. Reset physical land before halo exchange or calculations with T, S, and h.
+    ! exposing restart fill values.
+    !Reset thermodynamic state on physical land before halo exchange or calculations with T and S.
     ! Include land halos that may have no active neighbours to supply values. The physical ocean mask
     ! preserves ocean beneath ice shelves even where the surface coupling mask excludes those cells.
     do k=1,nz ; do j=jsd,jed ; do i=isd,ied
       if (G%mask2dT(i,j) == 0.0) then
-        h(i,j,k) = GV%Angstrom_H
-        ! if (use_temperature) then
-        !   tv%T(i,j,k) = 0.0
-        !   tv%S(i,j,k) = 0.0
-        ! endif
+        tv%T(i,j,k) = 0.0
+        tv%S(i,j,k) = 0.0
       endif
     enddo ; enddo ; enddo
   endif
