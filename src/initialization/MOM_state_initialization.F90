@@ -562,6 +562,15 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
     call restart_registry_lock(restart_CS)
   endif
 
+  call get_param(PF, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+
+  call get_param(PF, mdl, "LAND_TS_INIT_BUG", land_ts_init_bug, &
+                "If true, recover a bug that leaves potentially invalid temperature and salinity "//&
+                "values on physical land after restoring model state. If false, reset land "//&
+                "temperature and salinity to zero.", &
+                default=enable_bugs, do_not_log=new_sim)
+
   if (.not.new_sim) then ! This block restores the state from a restart file.
     !    This line calls a subroutine that reads the initial conditions
     !  from a previously generated file.
@@ -582,28 +591,19 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
         call copy_restart_var(tv%T, "Temp", restart_CS, .true.)
         call copy_restart_var(tv%S, "Salt", restart_CS, .true.)
       endif
+    if (.not.land_ts_init_bug .and. use_temperature) then
+      ! A change in processor decomposition can expose restart fill values on physical land that was
+      ! previously part of an omitted all-land tile. Reset land T and S to safe values before
+      ! halo exchange or subsequent thermodynamic calculations.
+      ! Apply this to the full data domain, including land halos that may have no active neighbours.
+      ! Use the physical ocean mask so ocean beneath ice shelves is preserved.
+      do k=1,nz ; do j=jsd,jed ; do i=isd,ied
+        if (G%mask2dT(i,j) == 0.0) then
+          tv%T(i,j,k) = 0.0
+          tv%S(i,j,k) = 0.0
+        endif
+      enddo ; enddo ; enddo
     endif
-  endif
-
-  call get_param(PF, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
-                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
-  call get_param(PF, mdl, "LAND_TS_INIT_BUG", land_ts_init_bug, &
-                 "If true, recover a bug that leaves potentially invalid temperature and salinity "//&
-                 "values on land after state initialisation. If false, reset land temperature "//&
-                 "and salinity to zero.", &
-                 default=enable_bugs)
-  if (.not.land_ts_init_bug .and. use_temperature) then
-    ! A change in processor decomposition can bring land from an ommitted all land tile into an active tile,
-    ! exposing restart fill values.
-    !Reset thermodynamic state on physical land before halo exchange or calculations with T and S.
-    ! Include land halos that may have no active neighbours to supply values. The physical ocean mask
-    ! preserves ocean beneath ice shelves even where the surface coupling mask excludes those cells.
-    do k=1,nz ; do j=jsd,jed ; do i=isd,ied
-      if (G%mask2dT(i,j) == 0.0) then
-        tv%T(i,j,k) = 0.0
-        tv%S(i,j,k) = 0.0
-      endif
-    enddo ; enddo ; enddo
   endif
 
   if ( use_temperature ) then
