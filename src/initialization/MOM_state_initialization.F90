@@ -591,6 +591,8 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
         call copy_restart_var(tv%T, "Temp", restart_CS, .true.)
         call copy_restart_var(tv%S, "Salt", restart_CS, .true.)
       endif
+    endif
+
     if (.not.land_ts_init_bug .and. use_temperature) then
       ! A change in processor decomposition can expose restart fill values on physical land that was
       ! previously part of an omitted all-land tile. Reset land T and S to safe values before
