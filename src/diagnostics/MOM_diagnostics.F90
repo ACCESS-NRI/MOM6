@@ -7,7 +7,6 @@
 !! Diagnostic quantities are requested by allocating them memory.
 module MOM_diagnostics
 
-use MOM_coms,              only : reproducing_sum
 use MOM_coupler_types,     only : coupler_type_send_data
 use MOM_density_integrals, only : int_density_dz
 use MOM_diag_mediator,     only : post_data, get_diag_time_end
@@ -28,7 +27,7 @@ use MOM_file_parser,       only : get_param, log_version, param_file_type
 use MOM_grid,              only : ocean_grid_type
 use MOM_interface_heights, only : find_eta, find_col_mass
 use MOM_spatial_means,     only : global_area_mean, global_layer_mean
-use MOM_spatial_means,     only : global_volume_mean, global_area_integral
+use MOM_spatial_means,     only : global_volume_mean, global_area_integral, global_mass_integral
 use MOM_tracer_registry,   only : tracer_registry_type, post_tracer_transport_diagnostics
 use MOM_unit_scaling,      only : unit_scale_type
 use MOM_variables,         only : thermo_var_ptrs, ocean_internal_state, p3d
@@ -212,7 +211,6 @@ subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
                                             ! including [nondim] and [H ~> m or kg m-2].
   real :: uh_tmp(SZIB_(G),SZJ_(G),SZK_(GV)) ! A temporary zonal transport [H L2 T-1 ~> m3 s-1 or kg s-1]
   real :: vh_tmp(SZI_(G),SZJB_(G),SZK_(GV)) ! A temporary meridional transport [H L2 T-1 ~> m3 s-1 or kg s-1]
-  real :: mass_cell(SZI_(G),SZJ_(G))       ! The vertically integrated mass in a grid cell [R Z L2 ~> kg]
   real :: rho_in_situ(SZI_(G))             ! In situ density [R ~> kg m-3]
   real :: cg1(SZI_(G),SZJ_(G))             ! First baroclinic gravity wave speed [L T-1 ~> m s-1]
   real :: Rd1(SZI_(G),SZJ_(G))             ! First baroclinic deformation radius [L ~> m]
@@ -336,13 +334,9 @@ subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
     call post_data(CS%id_masscello, h, CS%diag)
   endif
 
-  ! mass of liquid ocean (for Bouss, use Rho0). The reproducing sum requires the use of MKS units.
+  ! mass of liquid ocean (for Bouss, use Rho0).
   if (CS%id_masso > 0) then
-    mass_cell(:,:) = 0.0
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      mass_cell(i,j) = mass_cell(i,j) + (GV%H_to_RZ*h(i,j,k)) * G%areaT(i,j)
-    enddo ; enddo ; enddo
-    masso = reproducing_sum(mass_cell, unscale=US%RZL2_to_kg)
+    masso = global_mass_integral(h, G, GV, tmp_scale=US%RZL2_to_kg)
     call post_data(CS%id_masso, masso, CS%diag)
   endif
 
