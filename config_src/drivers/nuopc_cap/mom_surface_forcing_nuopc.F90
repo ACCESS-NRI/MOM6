@@ -37,6 +37,7 @@ use MOM_string_functions, only : uppercase
 use MOM_spatial_means,    only : adjust_area_mean_to_zero
 use MOM_unit_scaling,     only : unit_scale_type
 use MOM_variables,        only : surface
+use MOM_verticalGrid,     only : verticalGrid_type
 use user_revise_forcing,  only : user_alter_forcing, user_revise_forcing_init
 use user_revise_forcing,  only : user_revise_forcing_CS
 use iso_fortran_env,      only : int64
@@ -93,7 +94,7 @@ type, public :: surface_forcing_CS ; private
                                 !! temperature.
   real :: srunoff_depth         !< The depth over which the mass and heat from coupled submarine melt
                                 !! are spread, distributed uniformly by thickness. If 0, srunoff
-                                !! is applied entirely within the top layer [m].
+                                !! is applied entirely within the top layer [H ~> m or kg m-2].
   real :: gust_const            !< constant unresolved background gustiness for ustar [R L Z T-2 ~> Pa]
   logical :: read_gust_2d       !< If true, use a 2-dimensional gustiness supplied
                                 !! from an input file.
@@ -1172,9 +1173,10 @@ subroutine forcing_save_restart(CS, G, Time, directory, time_stamped, &
 end subroutine forcing_save_restart
 
 !> Initialize the surface forcing, including setting parameters and allocating permanent memory.
-subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, restore_salt, restore_temp, use_waves)
+subroutine surface_forcing_init(Time, G, GV, US, param_file, diag, CS, restore_salt, restore_temp, use_waves)
   type(time_type),          intent(in)    :: Time !< The current model time
   type(ocean_grid_type),    intent(in)    :: G    !< The ocean's grid structure
+  type(verticalGrid_type),  intent(in)    :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),    intent(in)    :: US   !< A dimensional unit scaling type
   type(param_file_type),    intent(in)    :: param_file !< A structure to parse for run-time parameters
   type(diag_ctrl), target,  intent(inout) :: diag !< A structure that is used to regulate
@@ -1247,7 +1249,7 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, restore_salt,
   call get_param(param_file, mdl, "SRUNOFF_DEPTH", CS%srunoff_depth, &
                  "The depth over which the mass and heat from coupled submarine melt are spread, "//&
                  "distributed uniformly by thickness. If 0, srunoff is applied entirely "//&
-                 "within the top layer.", units="m", default=0.0)
+                 "within the top layer.", units="m", default=0.0, scale=GV%m_to_H)
   call get_param(param_file, mdl, "MAX_P_SURF", CS%max_p_surf, &
                  "The maximum surface pressure that can be exerted by the "//&
                  "atmosphere and floating sea-ice or ice shelves. This is "//&

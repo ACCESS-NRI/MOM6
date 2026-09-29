@@ -390,7 +390,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
                               do_integrals=.true., gas_fields_ocn=gas_fields_ocn, &
                               use_meltpot=use_melt_pot, use_marbl_tracers=OS%use_MARBL)
 
-  call surface_forcing_init(Time_in, OS%grid, OS%US, param_file, OS%diag, &
+  call surface_forcing_init(Time_in, OS%grid, OS%GV, OS%US, param_file, OS%diag, &
                             OS%forcing_CSp, OS%restore_salinity, OS%restore_temp, OS%use_waves)
 
   if (OS%use_ice_shelf)  then
