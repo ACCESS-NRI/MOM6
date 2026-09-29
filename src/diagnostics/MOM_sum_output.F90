@@ -1061,11 +1061,11 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
             (((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
               (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))))
       enddo ; enddo
-      ! fluxes%brunoff is only associated when basal-melt coupling is actually configured,
+      ! fluxes%srunoff is only associated when submarine-melt coupling is actually configured,
       ! unlike the other water-group fields above, so it needs its own guard here.
-      if (associated(fluxes%brunoff)) then
+      if (associated(fluxes%srunoff)) then
         do j=js,je ; do i=is,ie
-          FW_in(i,j) = FW_in(i,j) + dt*G%areaT(i,j)*fluxes%brunoff(i,j)
+          FW_in(i,j) = FW_in(i,j) + dt*G%areaT(i,j)*fluxes%srunoff(i,j)
         enddo ; enddo
       endif
     else
@@ -1109,11 +1109,11 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
                         fluxes%heat_content_cond(i,j) + fluxes%heat_content_fprec(i,j) + &
                         fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j))
       enddo ; enddo
-      ! fluxes%heat_content_brunoff is only associated when basal-melt coupling is actually
+      ! fluxes%heat_content_srunoff is only associated when submarine-melt coupling is actually
       ! configured, unlike the other heat_content fields above, so it needs its own guard here.
-      if (associated(fluxes%heat_content_brunoff)) then
+      if (associated(fluxes%heat_content_srunoff)) then
         do j=js,je ; do i=is,ie
-          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * fluxes%heat_content_brunoff(i,j)
+          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * fluxes%heat_content_srunoff(i,j)
         enddo ; enddo
       endif
     elseif (associated(tv%TempxPmE)) then

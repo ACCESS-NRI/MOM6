@@ -15,7 +15,7 @@ use MOM_EOS,           only : calculate_specific_vol_derivs, calculate_density_d
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, callTree_showQuery
 use MOM_error_handler, only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,   only : get_param, log_param, log_version, param_file_type
-use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint, distribute_brunoff
+use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint, distribute_srunoff
 use MOM_grid,          only : ocean_grid_type
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_interpolate,   only : init_external_field, time_interp_external, time_interp_external_init
@@ -726,7 +726,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   integer :: numberOfGroundings, iGround(maxGroundings), jGround(maxGroundings)
   real :: H_limit_fluxes ! Surface fluxes are scaled down fluxes when the total depth of the ocean
                      ! drops below this value [H ~> m or kg m-2]
-  real :: brunoff_Teff ! The effective temperature carried by brunoff's contribution to
+  real :: srunoff_Teff ! The effective temperature carried by srunoff's contribution to
                      ! net_heat_rate [C ~> degC]
   real :: IforcingDepthScale ! The inverse of the layer thickness below which mass losses are
                      ! shifted to the next deeper layer [H ~> m or kg m-2]
@@ -765,10 +765,10 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     netMassInOut_rate, & ! netmassinout but for dt=1 [H T-1 ~> m s-1 or kg m-2 s-1]
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
     total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
-    dHeat_brunoff, & ! The heat added to each column by brunoff, from distribute_brunoff, for
-                     ! the heat_content_brunoff diagnostic [Q H ~> J m-2]
-    dTempxPmE_brunoff ! The ambient-temperature-weighted mass added to each column by brunoff,
-                     ! from distribute_brunoff, for the tv%TempxPmE diagnostic
+    dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_srunoff, for
+                     ! the heat_content_srunoff diagnostic [Q H ~> J m-2]
+    dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff,
+                     ! from distribute_srunoff, for the tv%TempxPmE diagnostic
                      ! [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
@@ -876,8 +876,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   !$OMP                                  drhodt,drhods,pen_sw_bnd_rate,                    &
   !$OMP                                  pen_TKE_2d,Temp_in,Salin_in,RivermixConst,        &
   !$OMP                                  mixing_depth,A_brine,fraction_left_brine,         &
-  !$OMP                                  plume_fraction,dK,total_h,dHeat_brunoff,          &
-  !$OMP                                  dTempxPmE_brunoff,brunoff_Teff)                   &
+  !$OMP                                  plume_fraction,dK,total_h,dHeat_srunoff,          &
+  !$OMP                                  dTempxPmE_srunoff,srunoff_Teff)                   &
   !$OMP                     firstprivate(SurfPressure,plume_flux)
   do j=js,je
   ! Work in vertical slices for efficiency
@@ -998,36 +998,36 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       endif
     enddo
 
-    if (associated(fluxes%brunoff)) then
-      ! Add brunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
+    if (associated(fluxes%srunoff)) then
+      ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
       ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
-      ! and heat associated with brunoff are treated as if they were applied at the surface,
-      ! analogous to penetrating SW.
+      ! and heat associated with srunoff are treated as if they were applied at the surface,
+      ! analogous to how penetrating SW is handled.
       if (calculate_buoyancy) then
         do i=is,ie
-          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%brunoff(i,j) /= 0.0)) then
-            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%brunoff(i,j)
-            brunoff_Teff = T2d(i,1)
-            if (fluxes%brunoff_latent_heat) &
-              brunoff_Teff = brunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
-            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%brunoff(i,j)) * brunoff_Teff
+          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%srunoff(i,j) /= 0.0)) then
+            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
+            srunoff_Teff = T2d(i,1)
+            if (fluxes%srunoff_latent_heat) &
+              srunoff_Teff = srunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
+            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%srunoff(i,j)) * srunoff_Teff
           endif
         enddo ! i
       endif
 
-      ! Distribute brunoff's mass and heat over a range of depths, if requested,
+      ! Distribute srunoff's mass and heat over a range of depths, if requested,
       ! updating temperature and salinity together. This is done before loops A and B
-      ! below so loop B sees the brunoff-fattened column, making grounding less likely.
-      call distribute_brunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
+      ! below so loop B sees the srunoff-fattened column, making grounding less likely.
+      call distribute_srunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
                                g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
-                               dHeat_total=dHeat_brunoff, dTempxPmE_total=dTempxPmE_brunoff)
+                               dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
 
-      ! Add brunoff's contributions to relevant diagnostics.
+      ! Add srunoff's contributions to relevant diagnostics.
       do i=is,ie
-        if (associated(fluxes%heat_content_brunoff)) &
-          fluxes%heat_content_brunoff(i,j) = dHeat_brunoff(i) * GV%H_to_RZ / dt
+        if (associated(fluxes%heat_content_srunoff)) &
+          fluxes%heat_content_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
         if (associated(tv%TempxPmE)) &
-          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_brunoff(i) * GV%H_to_RZ
+          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
       enddo
     endif
 

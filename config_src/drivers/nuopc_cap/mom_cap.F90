@@ -940,7 +940,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Sa_pslv"        , "will provide")
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofl"      , "will provide") !-> liquid runoff
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofi"      , "will provide") !-> ice runoff
-  call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofb"      , "will provide") !-> basal melt
+  call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofs"      , "will provide") !-> submarine melt
   if (cesm_coupled) then
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofl_glc"  , "will provide") !-> liquid glc runoff
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofi_glc"  , "will provide") !-> frozen glc runoff
@@ -2537,9 +2537,9 @@ subroutine allocate_optional_iob_fields(importState, ice_ocean_boundary, isc, ie
   integer                      , intent(in)    :: jec !< End j-index of the computational domain.
   character(len=*), parameter :: subname = '(MOM_cap:allocate_optional_iob_fields)'
 
-  if (NUOPC_IsConnected(importState, fieldName='Foxx_rofb')) then
-    if (is_root_pe()) write(stdout,*) subname // " Allocating ice_ocean_boundary%brunoff"
-    allocate(ice_ocean_boundary%brunoff(isc:iec,jsc:jec), source=0.0)
+  if (NUOPC_IsConnected(importState, fieldName='Foxx_rofs')) then
+    if (is_root_pe()) write(stdout,*) subname // " Allocating ice_ocean_boundary%srunoff"
+    allocate(ice_ocean_boundary%srunoff(isc:iec,jsc:jec), source=0.0)
   endif
 
 end subroutine allocate_optional_iob_fields
@@ -3103,10 +3103,10 @@ end subroutine shr_log_setLogUnit
 !!     <td></td>
 !! </tr>
 !! <tr>
-!!     <td>Foxx_rofb</td>
+!!     <td>Foxx_rofs</td>
 !!     <td>kg m-2 s-1</td>
 !!     <td>runoff</td>
-!!     <td>mass flux of ice-shelf basal runoff. Only allocated in Ice_ocean_boundary if
+!!     <td>mass flux of submarine melt. Only allocated in Ice_ocean_boundary if
 !!     advertised by the coupler.</td>
 !!     <td></td>
 !! </tr>

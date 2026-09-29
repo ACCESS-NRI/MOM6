@@ -9,7 +9,7 @@ module MOM_tracer_diabatic
 
 use MOM_grid,             only : ocean_grid_type
 use MOM_verticalGrid,     only : verticalGrid_type
-use MOM_forcing_type,     only : forcing, distribute_brunoff
+use MOM_forcing_type,     only : forcing, distribute_srunoff
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
 
 implicit none ; private
@@ -530,10 +530,10 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
       netMassIn(i)  = fluxes%netMassIn(i,j)
     enddo
 
-    ! Distribute basal runoff (brunoff) mass over a range of depths, if requested, diluting
+    ! Distribute submarine melt (srunoff) mass over a range of depths, if requested, diluting
     ! this tracer accordingly. This is done before loops A and B below so loop B sees the
-    ! brunoff-fattened column, making grounding less likely.
-    if (associated(fluxes%brunoff)) call distribute_brunoff(G, GV, dt, fluxes, j, h2d, Tr2d)
+    ! srunoff-fattened column, making grounding less likely.
+    if (associated(fluxes%srunoff)) call distribute_srunoff(G, GV, dt, fluxes, j, h2d, Tr2d)
 
     ! Apply the surface boundary fluxes in three steps:
     ! A/ update concentration from mass entering the ocean
