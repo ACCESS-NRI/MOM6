@@ -1005,7 +1005,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       ! analogous to how penetrating SW is handled.
       if (calculate_buoyancy) then
         do i=is,ie
-          if ((G%mask2dT(i,j) > 0.) .and. (fluxes%srunoff(i,j) /= 0.0)) then
+          if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) > 0.0)) then
             netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
             srunoff_Teff = T2d(i,1)
             if (fluxes%srunoff_latent_heat) &

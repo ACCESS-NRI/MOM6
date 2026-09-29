@@ -238,7 +238,7 @@ type, public :: forcing
   real :: srunoff_depth = 0.0  !< The depth over which the mass and heat from coupled submarine melt
                                 !! are spread, distributed uniformly by thickness. If 0, srunoff
                                 !! is applied entirely within the top layer. The same value as
-                                !! CS%srunoff_depth in surface_forcing_CS [m].
+                                !! CS%srunoff_depth in surface_forcing_CS [H ~> m or kg m-2].
 
   ! arrays needed in the some tracer modules, e.g., MOM_CFC_cap
   real, pointer, dimension(:,:) :: &
@@ -1138,7 +1138,7 @@ subroutine distribute_srunoff(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, US, &
 
       ! When fluxes%srunoff_depth is 0 (the default), fall back to this column's own top layer
       ! thickness as the distribution depth, so srunoff is deposited within the top layer.
-      depth = GV%m_to_H * fluxes%srunoff_depth
+      depth = fluxes%srunoff_depth
       if (depth <= 0.0) depth = max(h2d(i,1), GV%H_subroundoff)
 
       ! Cap the depth actually used at the full column thickness, so that a column shallower
@@ -1181,7 +1181,7 @@ subroutine distribute_srunoff(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, US, &
           if (do_heat) T2d(i,k) = (hOld*T2d(i,k) + dM_k*T_eff) / h2d(i,k)
           C2d(i,k) = (hOld*C2d(i,k)) / h2d(i,k)
         endif
-      enddo
+      enddo ! k-loop for layer distribution
 
       if (present(dHeat_total)) dHeat_total(i) = dHeat
       if (present(dTempxPmE_total)) dTempxPmE_total(i) = dTempxPmE
@@ -3791,10 +3791,6 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
   call myAlloc(fluxes%latent_frunoff_diag,isd,ied,jsd,jed, heat)
   call myAlloc(fluxes%latent_frunoff_glc_diag,isd,ied,jsd,jed, heat)
 
-  if (present(heat) .and. present(srunoff)) then ; if (heat .and. srunoff) then
-    call myAlloc(fluxes%latent_srunoff_diag,isd,ied,jsd,jed, .true.)
-  endif ; endif
-
   call myAlloc(fluxes%salt_flux,isd,ied,jsd,jed, salt)
 
   if (present(heat) .and. present(water)) then ; if (heat .and. water) then
@@ -3805,11 +3801,15 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
     call myAlloc(fluxes%heat_content_vprec,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_lrunoff,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_frunoff,isd,ied,jsd,jed, .true.)
-    call myAlloc(fluxes%heat_content_srunoff,isd,ied,jsd,jed, srunoff)
     call myAlloc(fluxes%heat_content_lrunoff_glc,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_frunoff_glc,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_massout,isd,ied,jsd,jed, enthalpy_mom)
     call myAlloc(fluxes%heat_content_massin,isd,ied,jsd,jed,  enthalpy_mom)
+  endif ; endif
+
+  if (present(heat) .and. present(srunoff)) then ; if (heat .and. srunoff) then
+    call myAlloc(fluxes%latent_srunoff_diag,isd,ied,jsd,jed, .true.)
+    call myAlloc(fluxes%heat_content_srunoff,isd,ied,jsd,jed, .true.)
   endif ; endif
 
   call myAlloc(fluxes%p_surf,isd,ied,jsd,jed, press)
