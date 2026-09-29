@@ -1132,7 +1132,7 @@ subroutine distribute_srunoff(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, US, &
     if (present(dHeat_total)) dHeat_total(i) = 0.0
     if (present(dTempxPmE_total)) dTempxPmE_total(i) = 0.0
 
-    if ((G%mask2dT(i,j) > 0.) .and. (fluxes%srunoff(i,j) /= 0.0)) then
+    if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) > 0.0)) then
 
       dM_tot = GV%RZ_to_H * dt * fluxes%srunoff(i,j)
 
@@ -3519,20 +3519,31 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       call post_data(handles%id_lw_ga, ave_heat_flux, diag)
     endif
 
-    if ((handles%id_lat > 0) .or. (handles%id_total_lat > 0) .or. (handles%id_lat_ga > 0)) then
-      do j=js,je ; do i=is,ie
-        res(i,j) = 0.0
-        if (associated(fluxes%latent))             res(i,j) = res(i,j) + fluxes%latent(i,j)
-        ! Include latent heat from srunoff since it is handled separately from fluxes%latent
-        if (associated(fluxes%latent_srunoff_diag)) res(i,j) = res(i,j) + fluxes%latent_srunoff_diag(i,j)
-      enddo ; enddo
-      if (handles%id_lat > 0) call post_data(handles%id_lat, res, diag)
+    if (associated(fluxes%latent_srunoff_diag)) then
+      if ((handles%id_lat > 0) .or. (handles%id_total_lat > 0) .or. (handles%id_lat_ga > 0)) then
+        ! fluxes%latent is guaranteed to be associated here too, since latent_srunoff_diag
+        ! is only allocated when heat is true, which is also required for fluxes%latent.
+        do j=js,je ; do i=is,ie
+          res(i,j) = fluxes%latent(i,j) + fluxes%latent_srunoff_diag(i,j)
+        enddo ; enddo
+        if (handles%id_lat > 0) call post_data(handles%id_lat, res, diag)
+        if (handles%id_total_lat > 0) then
+          total_heat_flux = global_area_integral(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+          call post_data(handles%id_total_lat, total_heat_flux, diag)
+        endif
+        if (handles%id_lat_ga > 0) then
+          ave_heat_flux = global_area_mean(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+          call post_data(handles%id_lat_ga, ave_heat_flux, diag)
+        endif
+      endif
+    elseif (associated(fluxes%latent)) then
+      if (handles%id_lat > 0) call post_data(handles%id_lat, fluxes%latent, diag)
       if (handles%id_total_lat > 0) then
-        total_heat_flux = global_area_integral(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+        total_heat_flux = global_area_integral(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
         call post_data(handles%id_total_lat, total_heat_flux, diag)
       endif
       if (handles%id_lat_ga > 0) then
-        ave_heat_flux = global_area_mean(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+        ave_heat_flux = global_area_mean(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
         call post_data(handles%id_lat_ga, ave_heat_flux, diag)
       endif
     endif
