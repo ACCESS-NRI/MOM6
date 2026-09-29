@@ -1,0 +1,4 @@
+packages:
+  access3:
+    require:
+    - 'configurations=MOM6,MOM6-CICE6,MOM6-CICE6-WW3'
