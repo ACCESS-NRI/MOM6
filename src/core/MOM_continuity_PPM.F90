@@ -1108,6 +1108,7 @@ end subroutine zonal_BT_mass_flux
 
 
 !> Evaluate the mass or volume flux through a single face of an element.
+!DIR$ ATTRIBUTES FORCEINLINE :: flux_elem
 elemental subroutine flux_elem(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, &
     duhdu, visc_rem, G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
     vol_CFL, por_face_area, h_marg_min)
@@ -1203,6 +1204,7 @@ end subroutine flux_elem
 
 !> Overrides the zonal or meridional mass or volume flux through a single face of an element
 !! with the value set by an open boundary condition.
+!DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_OBC
 elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, &
     por_face_area, G_dy_Cu, OBC, l_seg, h_marg_min)
   real, intent(in) :: u
