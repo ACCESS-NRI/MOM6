@@ -10,12 +10,15 @@ use MOM_couplertype_infra, only : CT_spawn, CT_initialized, CT_destructor, atmos
 use MOM_couplertype_infra, only : CT_set_diags, CT_send_data, CT_write_chksums, CT_data_override
 use MOM_couplertype_infra, only : CT_copy_data, CT_increment_data, CT_rescale_data
 use MOM_couplertype_infra, only : CT_set_data, CT_extract_data, CT_redistribute_data
+use MOM_couplertype_infra, only : CT_num_bcs, CT_is_double_precision, CT_get_bc, CT_get_field
 use MOM_couplertype_infra, only : coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 use MOM_couplertype_infra, only : ind_flux, ind_deltap, ind_kw, ind_flux0
 use MOM_couplertype_infra, only : ind_pcair, ind_u10, ind_psurf
 use MOM_couplertype_infra, only : ind_alpha, ind_csurf, ind_sc_no
 use MOM_couplertype_infra, only : ind_runoff, ind_deposition
 use MOM_domain_infra,      only : domain2D
+use MOM_error_handler,     only : MOM_error, FATAL
+use MOM_restart,           only : MOM_restart_CS, register_restart_field
 use MOM_time_manager,      only : time_type
 
 implicit none ; private
@@ -25,6 +28,7 @@ public :: coupler_type_set_diags, coupler_type_send_data, coupler_type_write_chk
 public :: set_coupler_type_data, extract_coupler_type_data, coupler_type_redistribute_data
 public :: coupler_type_copy_data, coupler_type_increment_data, coupler_type_rescale_data
 public :: atmos_ocn_coupler_flux, coupler_type_data_override
+public :: coupler_type_register_restart_fields
 public :: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 ! These are encoding constant parameters that indicate whether a flux, solubility or
 ! surface ocean concentration are being set or accessed with an inquiry.
@@ -542,6 +546,51 @@ subroutine CT_write_chksums_3d(var, outunit, name_lead)
   call CT_write_chksums(var, outunit, name_lead)
 
 end subroutine CT_write_chksums_3d
+
+!> Register the fields of a coupler_2d_bc_type for restarts with the MOM6 restart infrastructure.
+!!
+!! The arrays in a coupler_2d_bc_type are always at tracer points, span only the computational
+!! domain, and are never rotated, so restart_CS must have been created by calling restart_init
+!! with turns=0.
+subroutine coupler_type_register_restart_fields(var, restart_CS)
+  type(coupler_2d_bc_type), intent(inout) :: var        !< BC_type structure whose fields are registered
+  type(MOM_restart_CS),     intent(inout) :: restart_CS !< The restart control structure to register with
+
+  ! Local variables
+  real, dimension(:,:), pointer :: values ! The data of the field being registered [various]
+  character(len=128) :: name      ! The short name of the field being registered
+  character(len=128) :: long_name ! The long name of the field being registered
+  character(len=128) :: units     ! The units of the field being registered
+  integer :: nfields  ! The number of fields in a boundary condition
+  integer :: n, m
+
+  if (.not.CT_initialized(var)) return
+  if (CT_num_bcs(var) <= 0) return
+
+  ! A coupler type holds its data in one of two arrays, depending on its precision, and only the
+  ! double precision one can be handed to the restart registration interfaces.
+  if (.not.CT_is_double_precision(var)) call MOM_error(FATAL, &
+      "coupler_type_register_restart_fields: "//&
+      "Only a coupler type holding double precision data can be registered for restarts.")
+
+  do n=1,CT_num_bcs(var)
+    call CT_get_bc(var, n, num_fields=nfields)
+    do m=1,nfields
+      call CT_get_field(var, n, m, values=values, name=name, long_name=long_name, units=units)
+
+      if (.not.associated(values)) &
+        call MOM_error(FATAL, "coupler_type_register_restart_fields: The values array for "//&
+                       trim(name)//" is not associated.")
+
+      ! All of the fields are registered as mandatory, so reading a restart file that does not
+      ! hold every one of them is a fatal error.
+      call register_restart_field(values, name, .true., restart_CS, longname=long_name, &
+                                  units=units, hor_grid='h', z_grid='1', t_grid='s', &
+                                  comp_domain_only=.true.)
+    enddo
+  enddo ! n- and m-loops over boundary conditions and their fields
+
+end subroutine coupler_type_register_restart_fields
 
 !> Indicate whether a coupler_1d_bc_type has been initialized.
 logical function CT_initialized_1d(var)
