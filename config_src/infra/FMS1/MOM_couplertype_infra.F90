@@ -26,6 +26,7 @@ public :: CT_spawn, CT_initialized, CT_destructor
 public :: CT_set_diags, CT_send_data, CT_data_override, CT_write_chksums
 public :: CT_set_data,  CT_increment_data, CT_rescale_data
 public :: CT_copy_data, CT_extract_data, CT_redistribute_data
+public :: CT_num_bcs, CT_is_double_precision, CT_get_bc, CT_get_field
 public :: atmos_ocn_coupler_flux
 public :: ind_flux, ind_deltap, ind_kw, ind_flux0
 public :: ind_pcair, ind_u10, ind_psurf
@@ -505,5 +506,58 @@ subroutine CT_destructor_2d(var)
   call coupler_type_destructor(var)
 
 end subroutine CT_destructor_2d
+
+!> Return the number of boundary conditions in a coupler_2d_bc_type.
+integer function CT_num_bcs(var)
+  type(coupler_2d_bc_type), intent(in) :: var  !< BC_type structure being queried
+
+  CT_num_bcs = var%num_bcs
+end function CT_num_bcs
+
+!> Return the metadata of one of the boundary conditions of a coupler_2d_bc_type.
+subroutine CT_get_bc(var, bc_index, name, flux_type, num_fields)
+  type(coupler_2d_bc_type), intent(in)    :: var  !< BC_type structure being queried
+  integer,                  intent(in)    :: bc_index !< The index of the boundary condition being
+                                                     !! queried
+  character(len=*), optional, intent(out) :: name !< The name of the boundary condition
+  character(len=*), optional, intent(out) :: flux_type !< The type of flux that the boundary
+                                                     !! condition describes
+  integer,          optional, intent(out) :: num_fields !< The number of fields that the boundary
+                                                     !! condition holds
+
+  if (present(name)) name = var%bc(bc_index)%name
+  if (present(flux_type)) flux_type = var%bc(bc_index)%flux_type
+  if (present(num_fields)) num_fields = var%bc(bc_index)%num_fields
+end subroutine CT_get_bc
+
+!> Indicate whether a coupler_2d_bc_type holds its data in double precision.  A coupler type
+!! holds its data in one of two arrays, depending on its precision, and only the double precision
+!! one can be reached by the accessors here.
+logical function CT_is_double_precision(var)
+  type(coupler_2d_bc_type), intent(in) :: var  !< BC_type structure being queried
+
+  CT_is_double_precision = associated(var%bc)
+end function CT_is_double_precision
+
+!> Return the metadata of one field of one boundary condition of a coupler_2d_bc_type, and a
+!! pointer to its data.  The pointer aliases the data in the type, so that the field can be read
+!! or written in place, and it is returned unassociated if the field has no data.
+subroutine CT_get_field(var, bc_index, field_index, values, name, long_name, units)
+  type(coupler_2d_bc_type), intent(in) :: var  !< BC_type structure being queried
+  integer,                  intent(in) :: bc_index !< The index of the boundary condition that the
+                                               !! field belongs to
+  integer,                  intent(in) :: field_index !< The index of the field within that
+                                               !! boundary condition
+  real, dimension(:,:), optional, pointer :: values !< A pointer to the data of the field, in
+                                               !! arbitrary units [various]
+  character(len=*), optional, intent(out) :: name !< The short name of the field
+  character(len=*), optional, intent(out) :: long_name !< The long name of the field
+  character(len=*), optional, intent(out) :: units !< The units of the field
+
+  if (present(values)) values => var%bc(bc_index)%field(field_index)%values
+  if (present(name)) name = var%bc(bc_index)%field(field_index)%name
+  if (present(long_name)) long_name = var%bc(bc_index)%field(field_index)%long_name
+  if (present(units)) units = var%bc(bc_index)%field(field_index)%units
+end subroutine CT_get_field
 
 end module MOM_couplertype_infra
