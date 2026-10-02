@@ -2277,13 +2277,18 @@ end function get_num_restart_files
 
 
 !> Initialize this module and set up a restart control structure.
-subroutine restart_init(param_file, CS, restart_root)
+subroutine restart_init(param_file, CS, restart_root, turns)
   type(param_file_type), intent(in) :: param_file !< A structure to parse for run-time parameters
   type(MOM_restart_CS),  pointer    :: CS !< A pointer to a MOM_restart_CS object that is allocated here
   character(len=*), optional, &
                          intent(in) :: restart_root !< A filename root that overrides the value
                                           !! set by RESTARTFILE to enable the use of this module by
                                           !! other components than MOM.
+  integer,          optional, &
+                         intent(in) :: turns !< The number of counterclockwise quarter-turn index
+                                          !! rotations from the grid in the restart file to the
+                                          !! grid of the fields that will be registered,
+                                          !! overriding the value set by INDEX_TURNS.
 
   logical :: rotate_index
 
@@ -2365,6 +2370,7 @@ subroutine restart_init(param_file, CS, restart_root)
     call get_param(param_file, mdl, "INDEX_TURNS", CS%turns, &
         default=1, do_not_log=.true.)
   endif
+  if (present(turns)) CS%turns = turns
 
   allocate(CS%restart_field(CS%max_fields))
   allocate(CS%restart_obsolete(CS%max_fields))
