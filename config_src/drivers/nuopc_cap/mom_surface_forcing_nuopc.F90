@@ -237,6 +237,9 @@ type, public :: ice_ocean_boundary_type
   integer :: xtype                                            !< The type of the exchange - REGRID, REDIST or DIRECT
   type(coupler_2d_bc_type)      :: fluxes                     !< A structure that may contain an array of
                                                               !! named fields used for passive tracer fluxes.
+  type(coupler_2d_bc_type)      :: atm_fields                 !< A structure that may contain an array of
+                                                              !! named atmospheric surface fields that are
+                                                              !! used in the passive tracer flux calculation.
   integer :: wind_stagger = -999                              !< A flag indicating the spatial discretization of
                                                               !! wind stresses.  This flag may be set by the
                                                               !! flux-exchange code, based on what the sea-ice
