@@ -165,6 +165,14 @@ type, public :: energetic_PBL_CS ; private
                              !! the Ekman depth over the Obukhov depth with destabilizing forcing [nondim].
   real :: Max_Enhance_M = 5. !< The maximum allowed LT enhancement to the mixing [nondim].
 
+  !/ Sea-ice weighting of the Langmuir enhancement
+  logical :: LT_ice_weight = .false. !< If true, attenuate the Langmuir enhancement under sea ice,
+                             !! on the grounds that ice damps the surface waves that drive it.
+  real :: LT_ice_exponent    !< Exponent p in the open-water weight (1-ice_frac)**p applied to the
+                             !! Stokes drift before forming the Langmuir number [nondim].
+  real :: LT_ice_min_open    !< Floor on the open-water weight, preventing an unbounded Langmuir
+                             !! number (and a divide-by-zero) at complete ice cover [nondim].
+
   !/ Machine learned equation discovery model paramters
   logical :: eqdisc       !< Uses machine learned shape function
   logical :: eqdisc_v0    !< Uses machine learned velocity scale
@@ -436,6 +444,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   real :: U_Star_Mean ! The surface friction without gustiness [Z T-1 ~> m s-1].
   real :: mech_TKE  ! The mechanically generated turbulent kinetic energy available for mixing over a
                     ! timestep before the application of the efficiency in mstar [R Z3 T-2 ~> J m-2]
+  real :: ice_frac  ! The sea-ice area fraction of the cell, from 0 to 1 [nondim].
   real :: u_star_BBL ! The bottom boundary layer friction velocity [H T-1 ~> m s-1 or kg m-2 s-1].
   real :: u_star_BBL_z_t ! The bottom boundary layer friction velocity converted to Z T-1 [Z T-1 ~> m s-1].
   real :: BBL_TKE   ! The mechanically generated turbulent kinetic energy available for bottom
@@ -630,6 +639,9 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
       ! Make local copies of surface forcing and process them.
+      ice_frac = 0.0
+      if (CS%LT_ice_weight .and. associated(fluxes%ice_fraction)) &
+        ice_frac = min(1.0, max(0.0, fluxes%ice_fraction(i,j)))
       if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
         u_star = fluxes%ustar(i,j)
         u_star_Mean = fluxes%ustar_gustless(i,j)
@@ -686,12 +698,12 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       if (stoch_CS%pert_epbl) then ! stochastics are active
         call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
                          u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
-                         US, CS, eCD, Waves, G, i, j, &
+                         US, CS, eCD, Waves, G, i, j, ice_frac=ice_frac, &
                          TKE_gen_stoch=stoch_CS%epbl1_wts(i,j), TKE_diss_stoch=stoch_CS%epbl2_wts(i,j))
       else
         call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
                          u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
-                         US, CS, eCD, Waves, G, i, j)
+                         US, CS, eCD, Waves, G, i, j, ice_frac=ice_frac)
       endif
 
       ! Add the diffusivity due to bottom boundary layer mixing, if there is energy to drive this mixing.
@@ -788,11 +800,11 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
           do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale1 * SpV_dt(K) ; enddo
           call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
                            B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_1, Kd_1, &
-                           mixvel, mixlen, GV, US, CS_tmp1, eCD_tmp, Waves, G, i, j)
+                           mixvel, mixlen, GV, US, CS_tmp1, eCD_tmp, Waves, G, i, j, ice_frac=ice_frac)
           do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale2 * SpV_dt(K) ; enddo
           call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
                            B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_2, Kd_2, &
-                           mixvel, mixlen, GV, US, CS_tmp2, eCD_tmp, Waves, G, i, j)
+                           mixvel, mixlen, GV, US, CS_tmp2, eCD_tmp, Waves, G, i, j, ice_frac=ice_frac)
         else
           BLD_1 = BBLD_in ; BLD_2 = BBLD_in
           BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss(i,j)
@@ -891,7 +903,7 @@ end subroutine energetic_PBL
 !!  mixed layer model for a single column of water.
 subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
                        u_star, u_star_mean, mech_TKE_in, dt, MLD_io, Kd, mixvel, mixlen, GV, US, CS, eCD, &
-                       Waves, G, i, j, TKE_gen_stoch, TKE_diss_stoch)
+                       Waves, G, i, j, TKE_gen_stoch, TKE_diss_stoch, ice_frac)
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(unit_scale_type),   intent(in)    :: US     !< A dimensional unit scaling type
   real, dimension(SZK_(GV)), intent(in)  :: h      !< Layer thicknesses [H ~> m or kg m-2].
@@ -947,6 +959,8 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
   integer,                 intent(in)    :: j      !< The j-index to work on (used for Waves)
   real,          optional, intent(in)    :: TKE_gen_stoch  !< random factor used to perturb TKE generation [nondim]
   real,          optional, intent(in)    :: TKE_diss_stoch !< random factor used to perturb TKE dissipation [nondim]
+  real,            optional, intent(in)  :: ice_frac !< Sea-ice area fraction of the cell, 0 to 1
+                                                   !! [nondim]. Only used when LT_ICE_WEIGHT is true.
 
 !    This subroutine determines the diffusivities in a single column from the integrated energetics
 !  planetary boundary layer (ePBL) model.  It assumes that heating, cooling and freshwater fluxes
@@ -1248,6 +1262,14 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
     if (CS%Use_LT) then
       call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
                                U_H=u, V_H=v)
+      if (CS%LT_ice_weight .and. present(ice_frac)) then
+        ! Sea ice attenuates the surface waves that drive Langmuir circulations, but
+        ! get_Langmuir_Number takes no account of ice cover.  Scaling the surface-layer
+        ! Stokes drift by the open-water weight (1-ice_frac)**p is equivalent to dividing
+        ! the Langmuir number La = sqrt(u_star/Us_SL) by the square root of that weight,
+        ! which suppresses the Langmuir enhancement of mstar under ice.
+        LA = LA / sqrt(max(CS%LT_ice_min_open, (1.0 - ice_frac)**CS%LT_ice_exponent))
+      endif
       call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
                       mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
                       mstar_LT=mstar_LT)
@@ -4223,6 +4245,24 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
                  "Coefficient for modification of Langmuir number due to "//&
                  "ratio of Ekman to unstable Obukhov depth.", &
                  units="nondim", default=0.95,  do_not_log=(CS%LT_enhance_form==No_Langmuir))
+
+    call get_param(param_file, mdl, "LT_ICE_WEIGHT", CS%LT_ice_weight, &
+                 "If true, reduce the Langmuir enhancement of mstar in the presence of sea ice. "//&
+                 "Sea ice attenuates the surface waves that drive Langmuir turbulence, but the "//&
+                 "Langmuir number is otherwise computed without reference to ice cover. The "//&
+                 "surface-layer Stokes drift is multiplied by an open-water weight "//&
+                 "(1-ice_fraction)**LT_ICE_EXPONENT, which raises the Langmuir number by the "//&
+                 "square root of that weight and so suppresses the enhancement under ice.", &
+                 default=.false., do_not_log=(CS%LT_enhance_form==No_Langmuir))
+    call get_param(param_file, mdl, "LT_ICE_EXPONENT", CS%LT_ice_exponent, &
+                 "Exponent of the open-water fraction in the sea-ice weighting of the Stokes "//&
+                 "drift. 1 makes the weight linear in open-water fraction; larger values "//&
+                 "suppress Langmuir turbulence more sharply as ice concentration rises.", &
+                 units="nondim", default=1.0, do_not_log=(.not.CS%LT_ice_weight))
+    call get_param(param_file, mdl, "LT_ICE_MIN_OPEN", CS%LT_ice_min_open, &
+                 "Minimum open-water weight used by LT_ICE_WEIGHT. This bounds the Langmuir "//&
+                 "number at complete ice cover and avoids a division by zero.", &
+                 units="nondim", default=1.0e-2, do_not_log=(.not.CS%LT_ice_weight))
   endif
 
   !/Options related to Machine Learning Equation Discovery

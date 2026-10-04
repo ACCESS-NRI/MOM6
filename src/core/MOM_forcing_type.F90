@@ -1623,11 +1623,14 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, handles,
   endif
 
   ! See:
+  ! Registered unconditionally so that the ice fraction seen by ePBL (via LT_ICE_WEIGHT)
+  ! can be diagnosed without also enabling the CFC cap.  Posting it is guarded by whether
+  ! the field is associated.
+  handles%id_ice_fraction = register_diag_field('ocean_model', 'ice_fraction', diag%axesT1, Time, &
+      'Fraction of cell area covered by sea ice', 'm2 m-2', conversion=1.0)
+
   if (present(use_cfcs)) then
     if (use_cfcs) then
-      handles%id_ice_fraction = register_diag_field('ocean_model', 'ice_fraction', diag%axesT1, Time, &
-          'Fraction of cell area covered by sea ice', 'm2 m-2', conversion=1.0)
-
       handles%id_u10_sqr = register_diag_field('ocean_model', 'u10_sqr', diag%axesT1, Time, &
           'Wind magnitude at 10m, squared', 'm2 s-2', conversion=US%L_to_m**2*US%s_to_T**2)
     endif
