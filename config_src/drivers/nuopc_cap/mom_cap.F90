@@ -27,7 +27,7 @@ use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe
 use MOM_grid,                 only: ocean_grid_type, get_global_grid_size
 use MOM_ocean_model_nuopc,    only: ice_ocean_boundary_type
 use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocean_state_type
-use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc, ocean_model_flux_init
+use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc
 use MOM_ocean_model_nuopc,    only: ocean_model_init, update_ocean_model, ocean_model_end
 use MOM_ocean_model_nuopc,    only: get_ocean_grid, get_eps_omesh, query_ocean_state
 use MOM_ocean_model_nuopc,    only: stoch_restart_needed
@@ -766,9 +766,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   else
     call ocean_model_init(ocean_public, ocean_state, time0, time_start, input_restart_file=trim(adjustl(restartfiles)))
   endif
-
-  ! GMM, this call is not needed in CESM. Check with EMC if it can be deleted.
-  call ocean_model_flux_init(ocean_state)
 
   call ocean_model_init_sfc(ocean_state, ocean_public)
 

@@ -44,7 +44,7 @@ use MOM_time_manager,        only : operator(+), operator(-), operator(*), opera
 use MOM_time_manager,        only : operator(/=), operator(<=), operator(>=)
 use MOM_time_manager,        only : operator(<), real_to_time_type, time_type_to_real
 use MOM_interpolate,         only : time_interp_external_init
-use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_flux_init, call_tracer_set_forcing
+use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_set_forcing
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
@@ -80,7 +80,7 @@ implicit none ; private
 public ocean_model_init, ocean_model_end, update_ocean_model
 public ocean_model_save_restart, Ocean_stock_pe
 public ice_ocean_boundary_type
-public ocean_model_init_sfc, ocean_model_flux_init, coupler_bcs_setup
+public ocean_model_init_sfc, coupler_bcs_setup
 public ocean_model_restart
 public ice_ocn_bnd_type_chksum
 public ocean_public_type_chksum
@@ -1106,29 +1106,6 @@ subroutine coupler_bcs_setup(OS, fluxes, atm_fields, axes, Time, isc, iec, jsc, 
   call coupler_bcs_spawn(OS%coupler_bcs_CSp, fluxes, atm_fields, axes, Time, isc, iec, jsc, jec)
 
 end subroutine coupler_bcs_setup
-
-!> ocean_model_flux_init is used to initialize properties of the air-sea fluxes
-!! as determined by various run-time parameters.  It can be called from
-!! non-ocean PEs, or PEs that have not yet been initialzed, and it can safely
-!! be called multiple times.
-subroutine ocean_model_flux_init(OS, verbosity)
-  type(ocean_state_type), optional, pointer :: OS  !< An optional pointer to the ocean state,
-                                             !! used to figure out if this is an ocean PE that
-                                             !! has already been initialized.
-  integer, optional, intent(in) :: verbosity !< A 0-9 integer indicating a level of verbosity.
-
-  logical :: OS_is_set
-  integer :: verbose
-
-  OS_is_set = .false. ; if (present(OS)) OS_is_set = associated(OS)
-
-  ! Use this to control the verbosity of output; consider rethinking this logic later.
-  verbose = 5 ; if (OS_is_set) verbose = 3
-  if (present(verbosity)) verbose = verbosity
-
-  call call_tracer_flux_init(verbosity=verbose)
-
-end subroutine ocean_model_flux_init
 
 !> This interface allows certain properties that are stored in the ocean_state_type to be
 !! obtained.

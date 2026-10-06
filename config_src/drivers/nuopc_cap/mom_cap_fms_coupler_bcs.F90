@@ -91,8 +91,9 @@ subroutine coupler_bcs_init(CS)
   allocate(CS)
 
   call atmos_ocean_type_fluxes_init()
-  ! FMScoupler's gas_exchange_init calls ocean_model_flux_init, but that is just a wrapper on
-  ! call_tracer_flux_init and calling the latter directly avoids a circular dependency.
+  ! FMScoupler's gas_exchange_init calls the FMS cap's ocean_model_flux_init at this point, but
+  ! that is just a wrapper on call_tracer_flux_init, which is called directly here because this
+  ! module cannot use the MOM_ocean_model_nuopc module without a circular dependency.
   call call_tracer_flux_init()
   call atmos_ocean_fluxes_init(CS%gas_fluxes, CS%gas_fields_atm, CS%gas_fields_ocn)
 
