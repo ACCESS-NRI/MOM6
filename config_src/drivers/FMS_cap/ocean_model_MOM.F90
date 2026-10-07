@@ -63,9 +63,7 @@ use iso_fortran_env, only : int64
 
 #include <MOM_memory.h>
 
-#ifdef _USE_GENERIC_TRACER
 use MOM_generic_tracer, only : MOM_generic_tracer_fluxes_accumulate
-#endif
 
 implicit none ; private
 
@@ -548,11 +546,11 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, time_start_upda
         call iceberg_fluxes(OS%grid, OS%US, OS%fluxes, OS%use_ice_shelf, &
                             OS%sfc_state, dt_coupling, OS%marine_ice_CSp)
 
-#ifdef _USE_GENERIC_TRACER
-      call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
-      call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, 1.0) ! Here weight=1, so just store the current fluxes
-      call disable_averaging(OS%diag)
-#endif
+      if (coupler_type_initialized(OS%fluxes%tr_fluxes)) then
+        call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
+        call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, 1.0) ! Here weight=1, so just store the current fluxes
+        call disable_averaging(OS%diag)
+      endif
     else
       ! The previous fluxes have not been used yet, so translate the input fluxes
       ! into a temporary type and then accumulate them in about 20 lines.
@@ -567,10 +565,9 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, time_start_upda
                             OS%sfc_state, dt_coupling, OS%marine_ice_CSp)
 
       call fluxes_accumulate(OS%flux_tmp, OS%fluxes, OS%grid, weight)
-#ifdef _USE_GENERIC_TRACER
-       ! Incorporate the current tracer fluxes into the running averages
-      call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight)
-#endif
+      ! Incorporate the current tracer fluxes into the running averages
+      if (coupler_type_initialized(OS%flux_tmp%tr_fluxes)) &
+        call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight)
     endif
   endif
 
