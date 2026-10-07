@@ -67,7 +67,7 @@ else()
 endif()
 
 # See https://github.com/ACCESS-NRI/GFDL-generic-tracers/issues/29
-add_compile_definitions(_USE_GENERIC_TRACER) # _USE_MOM6_DIAG)
+# add_compile_definitions(_USE_MOM6_DIAG)
 
 ## Fortran modules path; currently this is simply set to be the include dir
 set(CMAKE_INSTALL_MODULEDIR ${CMAKE_INSTALL_INCLUDEDIR}
