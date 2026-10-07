@@ -222,8 +222,7 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
                  "If true, use the MOM_CFC_cap tracer package.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_generic_tracer", CS%use_MOM_generic_tracer, &
-                 "If true and _USE_GENERIC_TRACER is defined as a "//&
-                 "preprocessor macro, use the MOM_generic_tracer packages.", &
+                 "If true, use the MOM_generic_tracer packages.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_PSEUDO_SALT_TRACER", CS%use_pseudo_salt_tracer, &
                  "If true, use the pseudo salt tracer, typically run as a diagnostic.", &
