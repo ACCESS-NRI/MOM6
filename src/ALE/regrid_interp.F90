@@ -310,7 +310,10 @@ subroutine interpolate_grid( n0, h0, x0, ppoly0_E, ppoly0_coefs, &
   integer,      optional, intent(in)    :: answer_date   !< The vintage of the expressions to use
 
   ! Local variables
+  real, dimension(n0) :: e2min ! Workspace that get_polynomial_coordinate keeps for this column [A]
   integer        :: k ! loop index
+  integer        :: k_start ! The source cell at which the search for the next target value starts,
+                            ! or 0 before the first search in this column
   real           :: t ! current interface target density [A]
 
   ! Make sure boundary coordinates of new grid coincide with boundary
@@ -319,10 +322,12 @@ subroutine interpolate_grid( n0, h0, x0, ppoly0_E, ppoly0_coefs, &
   x1(n1+1) = x0(n0+1)
 
   ! Find coordinates for interior target values
+  k_start = 0
   do k = 2,n1
     t = target_values(k)
-    x1(k) = get_polynomial_coordinate ( n0, h0, x0, ppoly0_E, ppoly0_coefs, t, degree, &
-                                        answer_date=answer_date )
+    if (.not. (t >= target_values(k-1))) k_start = min(k_start, 1)  ! Restart at the top if the targets decrease.
+    call get_polynomial_coordinate( n0, h0, x0, ppoly0_E, ppoly0_coefs, t, degree, &
+                                    answer_date=answer_date, k_start=k_start, e2min=e2min, x_tgt=x1(k) )
     h1(k-1) = x1(k) - x1(k-1)
   enddo
   h1(n1) = x1(n1+1) - x1(n1)
@@ -375,8 +380,8 @@ end subroutine build_and_interpolate_grid
 !!
 !! It is assumed that the number of cells defining 'grid' and 'ppoly' are the
 !! same.
-function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
-                                    target_value, degree, answer_date ) result ( x_tgt )
+subroutine get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
+                                      target_value, degree, answer_date, k_start, e2min, x_tgt )
   ! Arguments
   integer,              intent(in) :: N            !< Number of grid cells
   real, dimension(N),   intent(in) :: h            !< Grid cell thicknesses [H]
@@ -386,7 +391,14 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   real,                 intent(in) :: target_value !< Target value to find position for [A]
   integer,              intent(in) :: degree       !< Degree of the interpolating polynomials
   integer,              intent(in) :: answer_date  !< The vintage of the expressions to use
-  real                             :: x_tgt        !< The position of x_g at which target_value is found [H]
+  integer,           intent(inout) :: k_start      !< A cell before which no cell or interface can hold
+                                                   !! target_value, so the scans below start there.  It is
+                                                   !! moved on past the cells that can not hold any larger
+                                                   !! value either.  Use 1 to scan the whole column again,
+                                                   !! or 0 for a new column, which also sets e2min.
+  real, dimension(N), intent(inout) :: e2min      !< The lowest upper edge value in each cell or any later
+                                                   !! cell, set when k_start is 0 and kept for later calls [A]
+  real,                intent(out) :: x_tgt        !< The position of x_g at which target_value is found [H]
 
   ! Local variables
   real                        :: xi0         ! normalized target coordinate [nondim]
@@ -399,12 +411,32 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   real                        :: grad        ! gradient during N-R iterations [A]
   integer :: i, k, iter  ! loop indices
   integer :: k_found     ! index of target cell
+  integer :: n_scan      ! The last interface that could hold target_value
   character(len=320) :: mesg
   logical :: use_2018_answers  ! If true use older, less accurate expressions.
 
   eps = NR_OFFSET
   k_found = -1
   use_2018_answers = (answer_date < 20190101)
+
+  if (k_start < 1) then
+    ! A NaN can not satisfy any of the comparisons below, so it is passed over in this running
+    ! minimum, unless it is in cell N, when every comparison with e2min fails.
+    e2min(N) = edge_values(N,2)
+    do k=N-1,1,-1
+      e2min(k) = e2min(k+1) ; if (edge_values(k,2) < e2min(k)) e2min(k) = edge_values(k,2)
+    enddo
+    k_start = 1
+  endif
+  ! Move past the cells that target_value is above, which can not hold it or any larger value.
+  do while (k_start <= N)
+    if (.not. ((target_value > edge_values(k_start,1)) .and. (target_value >= edge_values(k_start,2)))) exit
+    k_start = k_start + 1
+  enddo
+  ! A value below e2min(k_start) can not be at any interface after cell k_start, so only interface
+  ! k_start needs checking.
+  n_scan = N
+  if (k_start <= N) then ; if (target_value < e2min(k_start)) n_scan = k_start ; endif
 
   ! If the target value is outside the range of all values, we
   ! force the target coordinate to be equal to the lowest or
@@ -416,7 +448,7 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
 
   ! Since discontinuous edge values are allowed, we check whether the target
   ! value lies between two discontinuous edge values at interior interfaces
-  do k = 2,N
+  do k = max(2,k_start),n_scan
     if ( ( target_value >= edge_values(k-1,2) ) .AND. ( target_value <= edge_values(k,1) ) ) then
       x_tgt = x_g(k)
       return   ! return because there is no need to look further
@@ -436,7 +468,7 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   ! there is a unique solution. We loop on all cells and find which one
   ! contains the target value. The variable k_found holds the index value
   ! of the cell where the taregt value lies.
-  do k = 1,N
+  do k = k_start,N
     if ( ( target_value > edge_values(k,1) ) .AND. ( target_value < edge_values(k,2) ) ) then
       k_found = k
       exit
@@ -507,7 +539,7 @@ function get_polynomial_coordinate( N, h, x_g, edge_values, ppoly_coefs, &
   enddo ! end Newton-Raphson iterations
 
   x_tgt = x_g(k_found) + xi0 * h(k_found)
-end function get_polynomial_coordinate
+end subroutine get_polynomial_coordinate
 
 !> Numeric value of interpolation_scheme corresponding to scheme name
 integer function interpolation_scheme(interp_scheme)
