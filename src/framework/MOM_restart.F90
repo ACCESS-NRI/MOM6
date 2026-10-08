@@ -2182,6 +2182,7 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
       enddo ! while (still_looking) loop
     else
       filepath = trim(directory)//trim(fname)
+      fexists_decomp = .false.
       inquire(file=filepath, exist=fexists)
       if (.not.fexists .and. CS%parallel_restartfiles) &
         fexists_decomp = file_exists(filepath, G%Domain)
