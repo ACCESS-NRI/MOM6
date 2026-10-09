@@ -1,228 +1,310 @@
-!> Contains routines for handling FMS coupler_bc_type tracer flux structures
-!! when using MOM generic tracers
+!> Contains routines for handling the FMS coupler_bc_type structures that carry the air-sea
+!! tracer fluxes and the fields they are calculated from.  These are the fields, e.g., that the
+!! generic tracer packages are designed to exchange through the FMS coupler, as distinct from
+!! everything else in this driver, which is exchanged through NUOPC.
 
-module MOM_cap_gtracer_flux
+module MOM_cap_fms_coupler_bcs
 
-use MOM_domains,               only: domain2d
-use MOM_coupler_types,         only: coupler_1d_bc_type, coupler_2d_bc_type
+use MOM_constants,             only: wtmair, rdgas, vonkarm
+use MOM_coupler_types,         only: coupler_1d_bc_type, coupler_2d_bc_type, coupler_type_spawn
+use MOM_coupler_types,         only: coupler_type_num_bcs
 use MOM_coupler_types,         only: ind_flux, ind_deltap, ind_kw, ind_flux0
 use MOM_coupler_types,         only: ind_pcair, ind_u10, ind_psurf
 use MOM_coupler_types,         only: ind_alpha, ind_csurf, ind_sc_no
 use MOM_coupler_types,         only: ind_runoff, ind_deposition
-use MOM_ocean_model_nuopc,     only: ocean_model_flux_init
-use coupler_types_mod,         only: coupler_type_register_restarts, coupler_type_restore_state
+use MOM_coupler_types,         only: coupler_type_register_restart_fields
+use MOM_coupler_types,         only: coupler_type_get_bc, coupler_type_get_field
+use MOM_coupler_types,         only: coupler_type_set_field
+use MOM_coupler_types,         only: coupler_type_set_diags
+use MOM_coupler_types,         only: coupler_type_send_data
+use MOM_data_override,         only: data_override
+use MOM_domains,               only: domain2d, get_domain_extent
+use MOM_error_handler,         only: MOM_error, FATAL
+use MOM_file_parser,           only: param_file_type
+use MOM_grid,                  only: ocean_grid_type
+use MOM_restart,               only: MOM_restart_CS, restart_init, restart_init_end, restart_end
+use MOM_restart,               only: restore_state, save_restart, determine_is_new_run
+use MOM_time_manager,          only: time_type
+use MOM_tracer_flow_control,   only: call_tracer_flux_init
+
+! This FMS module has no MOM6 infrastructure wrapper.  The solo drivers supply a stub of it that
+! provides only aof_set_coupler_flux, and adding stubs of the routines used here for the sake of
+! the NUOPC cap seems backwards.
 use atmos_ocean_fluxes_mod,    only: atmos_ocean_type_fluxes_init, atmos_ocean_fluxes_init
-use fms2_io_mod,               only: FmsNetcdfDomainFile_t
-use fms2_io_mod,               only: fms2_check_if_open => check_if_open, fms2_close_file => close_file
-use fms2_io_mod,               only: fms2_write_data => write_data
-use fms2_io_mod,               only: fms2_read_restart => read_restart, fms2_write_restart => write_restart
-use fms2_io_mod,               only: fms2_get_global_io_domain_indices => get_global_io_domain_indices
-use field_manager_mod,         only: fm_field_name_len, fm_type_name_len, fm_loop_over_list, fm_change_list
-use fm_util_mod,               only: fm_util_get_real_array
-use mpp_mod,                   only: mpp_error, FATAL
-use FMSconstants,              only: wtmair, rdgas, vonkarm
 
 implicit none; private
 
 ! Public member functions
-public :: gas_exchange_init
-public :: gas_fields_restore
-public :: gas_fields_restart
-public :: add_gas_fluxes_param
-public :: get_coupled_field_name
-public :: atmos_ocean_fluxes_calc
-public :: UNKNOWN_CMEPS_FIELD
+public :: coupler_bcs_init, coupler_bcs_end, coupler_bcs_spawn
+public :: coupler_bcs_data_override, coupler_bcs_update_fluxes
+public :: coupler_bcs_register_restarts, coupler_bcs_save_restart, coupler_bcs_restore
+public :: coupler_bcs_get_cmeps_name
 
-character(len=*), parameter      :: mod_name = 'mom_cap_gtracer_flux'
-character(len=*), parameter      :: UNKNOWN_CMEPS_FIELD = "UNKNOWN_FIELD"
+character(len=*), parameter      :: mod_name = 'mom_cap_fms_coupler_bcs'
 real, parameter                  :: epsln=1.0e-30
 
-!> FMS coupler_bc_types for additional tracer fields when using generic tracers
-logical :: gas_fluxes_initialized = .false.  ! This is set to true when the following types are initialized.
-type(coupler_1d_bc_type), target :: ex_gas_fields_atm ! tracer fields in atm
-    !< Structure containing atmospheric surface variables that are used in the
-    !! calculation of the atmosphere-ocean gas fluxes, as well as parameters
-    !! regulating these fluxes. The fields in this structure are never actually
-    !! set, but the structure is used for initialisation of components and to
-    !! spawn other structure whose fields are set.
-type(coupler_1d_bc_type), target :: ex_gas_fields_ocn ! tracer fields atop the ocean
-    !< Structure containing ocean surface variables that are used in the
-    !! calculation of the atmosphere-ocean gas fluxes, as well as parameters
-    !! regulating these fluxes. The fields in this structure are never actually
-    !! set, but the structure is used for initialisation of components and to
-    !! spawn other structure whose fields are set.
-type(coupler_1d_bc_type), target :: ex_gas_fluxes ! tracer fluxes between the atm and ocean
-    !< A structure for exchanging gas or tracer fluxes between the atmosphere and
-    !! ocean, defined by the field table, as well as a place holder of
-    !! intermediate calculations, such as piston velocities, and parameters that
-    !! impact the fluxes. The fields in this structure are never actually set,
-    !! but the structure is used for initialisation of components and to spawn
-    !! other structure whose fields are set.
+!> The name root of the restart files that hold the FMS coupler_bc_type ocean surface fields.
+!! Note, the ocean_restart_file entries in the field table are not used by this module.
+character(len=*), parameter      :: restart_file_root = 'coupler_bc'
+
+!> The control structure for the air-sea tracer fluxes, holding the FMS coupler_bc_types that
+!! describe them and the restarts of the ocean surface fields that the flux calculation consumes.
+type, public :: coupler_bcs_CS ; private
+  type(coupler_1d_bc_type) :: gas_fields_atm ! tracer fields in atm
+      !< Structure containing atmospheric surface variables that are used in the
+      !! calculation of the atmosphere-ocean gas fluxes, as well as parameters
+      !! regulating these fluxes. The fields in this structure are never actually
+      !! set, but the structure is used for initialisation of components and to
+      !! spawn other structure whose fields are set.
+  type(coupler_1d_bc_type), public :: gas_fields_ocn ! tracer fields atop the ocean
+      !< Structure containing ocean surface variables that are used in the
+      !! calculation of the atmosphere-ocean gas fluxes, as well as parameters
+      !! regulating these fluxes. The fields in this structure are never actually
+      !! set, but the structure is used for initialisation of components and to
+      !! spawn other structure whose fields are set.
+  type(coupler_1d_bc_type) :: gas_fluxes ! tracer fluxes between the atm and ocean
+      !< A structure for exchanging gas or tracer fluxes between the atmosphere and
+      !! ocean, defined by the field table, as well as a place holder of
+      !! intermediate calculations, such as piston velocities, and parameters that
+      !! impact the fluxes. The fields in this structure are never actually set,
+      !! but the structure is used for initialisation of components and to spawn
+      !! other structure whose fields are set.
+
+  type(MOM_restart_CS), pointer :: restart_CSp => NULL()
+      !< A pointer to the control structure that the ocean surface fields used in the flux
+      !! calculation are registered with, or NULL if there are none to restart.
+end type coupler_bcs_CS
 
 contains
 
-!> \brief Gas and tracer field initialization routine for running with MOM generic tracers.
-!! Copied and adapted slightly from
+!> \brief Define the FMS coupler boundary conditions from the field table.  This must be called
+!! before the tracer packages are registered, because a package that registers a coupler flux of
+!! its own needs the flux types that this defines to exist already.
+!!
+!! Copied and adapted slightly from the FMScoupler gas_exchange_init routine at
 !! https://github.com/NOAA-GFDL/FMScoupler/blob/7761886/full/flux_exchange.F90#L626.
-subroutine gas_exchange_init (gas_fields_atm, gas_fields_ocn, gas_fluxes)
-  type(coupler_1d_bc_type), optional, pointer :: gas_fields_atm ! tracer fields in atm
-      !< Pointer to a structure containing atmospheric surface variables that
-      !! are used in the calculation of the atmosphere-ocean gas fluxes, as well
-      !! as parameters regulating these fluxes.
-  type(coupler_1d_bc_type), optional, pointer :: gas_fields_ocn ! tracer fields atop the ocean
-      !< Pointer to a structure containing ocean surface variables that are
-      !! used in the calculation of the atmosphere-ocean gas fluxes, as well as
-      !! parameters regulating these fluxes.
-  type(coupler_1d_bc_type), optional, pointer :: gas_fluxes ! tracer fluxes between the atm and ocean
-      !< Pointer to a structure for exchanging gas or tracer fluxes between the
-      !! atmosphere and ocean, defined by the field table, as well as a place holder
-      !! of intermediate calculations, such as piston velocities, and parameters
-      !! that impact the fluxes.
+subroutine coupler_bcs_init(CS)
+  type(coupler_bcs_CS), pointer :: CS !< A pointer to the control structure for the FMS coupler
+      !! boundary conditions, which is allocated here if any are in use.
 
-  if (.not.gas_fluxes_initialized) then
-    call atmos_ocean_type_fluxes_init( )
-    call ocean_model_flux_init( )
-    call atmos_ocean_fluxes_init(ex_gas_fluxes, ex_gas_fields_atm, ex_gas_fields_ocn)
-    gas_fluxes_initialized = .true.
+  if (associated(CS)) return
+  allocate(CS)
+
+  call atmos_ocean_type_fluxes_init()
+  ! FMScoupler's gas_exchange_init calls the FMS cap's ocean_model_flux_init at this point, but
+  ! that is just a wrapper on call_tracer_flux_init, which is called directly here because this
+  ! module cannot use the MOM_ocean_model_nuopc module without a circular dependency.
+  call call_tracer_flux_init()
+  call atmos_ocean_fluxes_init(CS%gas_fluxes, CS%gas_fields_atm, CS%gas_fields_ocn)
+
+  ! No enabled tracer package registered a coupler flux, so there is nothing for this module to
+  ! do. Return an unassociated control structure.
+  if (coupler_type_num_bcs(CS%gas_fluxes) <= 0) then
+    deallocate(CS) ; CS => NULL()
   endif
 
-  if (present(gas_fields_atm)) gas_fields_atm => ex_gas_fields_atm
-  if (present(gas_fields_ocn)) gas_fields_ocn => ex_gas_fields_ocn
-  if (present(gas_fluxes)) gas_fluxes => ex_gas_fluxes
+end subroutine coupler_bcs_init
 
-end subroutine gas_exchange_init
+!> Release the memory that is associated with the FMS coupler boundary conditions.
+subroutine coupler_bcs_end(CS)
+  type(coupler_bcs_CS), pointer :: CS !< A pointer to the control structure for the FMS coupler
+      !! boundary conditions, which is deallocated here
 
-!> \brief Restore FMS coupler_bc_type state from ocean restart file
-! See https://github.com/NOAA-GFDL/FMScoupler/blob/008399d/full/full_coupler_mod.F90#L1096
-subroutine gas_fields_restore(gas_fields, domain, directory)
-  type(coupler_2d_bc_type), intent(inout) :: gas_fields !< FMS coupler_bc_type to be registered for restarts
-  type(domain2D), intent(in)              :: domain     !< The FMS domain to use for this registration call
-  character(len=*), optional, intent(in)  :: directory  !< Directory containing the restart file
+  if (.not.associated(CS)) return
 
-  ! local variables
-  type(FmsNetcdfDomainFile_t), dimension(:), pointer :: ocn_bc_restart => NULL() !< Structures describing
-                                                                                 !! the restart files
-  integer                                            :: num_ocn_bc_restart       !< The number of restart
-                                                                                 !! files to use
-  integer                                            :: n
+  ! The value arrays for the CS%gas_* coupler types are never allocated so calling the FMS
+  ! destructor on them here gives an error.
+  if (associated(CS%restart_CSp)) call restart_end(CS%restart_CSp)
 
-  call coupler_type_register_restarts(gas_fields, ocn_bc_restart, num_ocn_bc_restart, &
-      domain, to_read=.true., ocean_restart=.true., directory=directory)
+  deallocate(CS) ; CS => NULL()
 
-  ! Restore the fields from the restart files
-  do n = 1, num_ocn_bc_restart
-    if (fms2_check_if_open(ocn_bc_restart(n))) then
-      call fms2_read_restart(ocn_bc_restart(n))
-    endif
-  enddo
+end subroutine coupler_bcs_end
 
-  ! Check whether the restarts were read successfully.
-  call coupler_type_restore_state(gas_fields, use_fms2_io=.true., test_by_field=.true.)
+!> Spawn the FMS coupler_bc_types that hold the air-sea tracer fluxes and the atmospheric fields
+!! that they are calculated from, and register their diagnostics. Both are left unset when the
+!! FMS coupler boundary conditions are not in use.
+subroutine coupler_bcs_spawn(CS, fluxes, atm_fields, axes, Time, isc, iec, jsc, jec)
+  type(coupler_bcs_CS),     pointer       :: CS !< The control structure for the FMS coupler
+                                                !! boundary conditions
+  type(coupler_2d_bc_type), intent(inout) :: fluxes !< The structure that is spawned to hold the
+                                                !! air-sea tracer fluxes
+  type(coupler_2d_bc_type), intent(inout) :: atm_fields !< The structure that is spawned to hold
+                                                !! the atmospheric fields used to calculate them
+  integer, dimension(2),    intent(in)    :: axes !< The handles of the horizontal axes that the
+                                                !! diagnostics of the spawned structures use
+  type(time_type),          intent(in)    :: Time !< The model time at which the diagnostics start
+  integer,                  intent(in)    :: isc !< The start i-index of the computational domain
+  integer,                  intent(in)    :: iec !< The end i-index of the computational domain
+  integer,                  intent(in)    :: jsc !< The start j-index of the computational domain
+  integer,                  intent(in)    :: jec !< The end j-index of the computational domain
 
-  do n = 1, num_ocn_bc_restart
-    if(fms2_check_if_open(ocn_bc_restart(n))) call fms2_close_file(ocn_bc_restart(n))
-  enddo
+  if (.not.associated(CS)) return
 
-end subroutine gas_fields_restore
+  ! The param arrays are read by the flux calculation, but are not transferred by default when
+  ! spawning.
+  call coupler_type_spawn(CS%gas_fluxes, fluxes, (/isc,isc,iec,iec/), (/jsc,jsc,jec,jec/), &
+                          suffix='_ice_ocn', copy_param=.true.)
+  call coupler_type_spawn(CS%gas_fields_atm, atm_fields, (/isc,isc,iec,iec/), &
+                          (/jsc,jsc,jec,jec/), suffix='_atm')
 
-!> \brief Write ocean restart file for FMS coupler_bc_type state
-! See https://github.com/NOAA-GFDL/FMScoupler/blob/008399d/full/full_coupler_mod.F90#L1408
-subroutine gas_fields_restart(gas_fields, domain, directory)
-  type(coupler_2d_bc_type), intent(inout) :: gas_fields !< FMS coupler_bc_type to be registered for restarts
-  type(domain2D), intent(in)              :: domain     !< The FMS domain to use for this registration call
-  character(len=*), optional, intent(in)  :: directory  !< Directory containing the restart file
+  call coupler_type_set_diags(fluxes, "ocean_flux", axes, Time)
+  call coupler_type_set_diags(atm_fields, "atmos_sfc", axes, Time)
 
-  ! local variables
-  type(FmsNetcdfDomainFile_t), dimension(:), pointer :: ocn_bc_restart => NULL() !< Structures describing
-                                                                                 !! the restart files
-  integer                                            :: num_ocn_bc_restart       !< The number of restart
-                                                                                 !! files to use
-  integer                                            :: n
+end subroutine coupler_bcs_spawn
 
-  call coupler_type_register_restarts(gas_fields, ocn_bc_restart, num_ocn_bc_restart, &
-      domain, to_read=.false., ocean_restart=.true., directory=directory)
+!> Potentially override the FMS coupler_bc_type air-sea tracer fluxes and the atmospheric
+!! fields that they are calculated from, using the component name 'OCN'.
+subroutine coupler_bcs_data_override(fluxes, atm_fields, Time)
+  type(coupler_2d_bc_type), intent(inout) :: fluxes !< The air-sea tracer fluxes
+  type(coupler_2d_bc_type), intent(inout) :: atm_fields !< The atmospheric fields that the fluxes
+                                                !! are calculated from
+  type(time_type),          intent(in)    :: Time !< The model time at which the fields apply
 
-  do n = 1, num_ocn_bc_restart
-    if (fms2_check_if_open(ocn_bc_restart(n))) then
-      call fms2_write_restart(ocn_bc_restart(n))
-      call add_domain_dimension_data(ocn_bc_restart(n))
-      call fms2_close_file(ocn_bc_restart(n))
-    endif
-  enddo
+  ! Local variables
+  real, dimension(:,:), pointer :: values ! The data of the field being overridden [various]
+  character(len=128) :: name  ! The name of the field being overridden
+  logical :: overridden       ! True if the field was overridden
+  integer :: nfields          ! The number of fields in a boundary condition
+  integer :: m, n             ! The indices of a boundary condition and of a field within it
 
-end subroutine gas_fields_restart
+  ! coupler_type_data_override is not used here because it does not set the override flag on the
+  ! fields that it overrides, and mom_import and the flux calculation both use that flag to tell
+  ! which of these fields the data_table has already provided.
+  do n=1,coupler_type_num_bcs(atm_fields)
+    call coupler_type_get_bc(atm_fields, n, num_fields=nfields)
+    do m=1,nfields
+      call coupler_type_get_field(atm_fields, n, m, values=values, name=name)
+      call data_override('OCN', trim(name), values, Time, override=overridden)
+      call coupler_type_set_field(atm_fields, n, m, override=overridden)
+    enddo
+  enddo ! n- and m-loops over the atmospheric fields and their components
+  do n=1,coupler_type_num_bcs(fluxes)
+    call coupler_type_get_bc(fluxes, n, num_fields=nfields)
+    do m=1,nfields
+      call coupler_type_get_field(fluxes, n, m, values=values, name=name)
+      call data_override('OCN', trim(name), values, Time, override=overridden)
+      call coupler_type_set_field(fluxes, n, m, override=overridden)
+    enddo
+  enddo ! n- and m-loops over the tracer fluxes and their components
 
-!> Register the axis data as a variable in the netcdf file and add some dummy data.
-!! This is needed so the combiner can work correctly when the io_layout is not 1,1. Copied from
-!! https://github.com/NOAA-GFDL/FMScoupler/blob/008399d/full/full_coupler_mod.F90#L1328
-subroutine add_domain_dimension_data(fileobj)
-  type(FmsNetcdfDomainFile_t)        :: fileobj !< Fms2io domain decomposed fileobj
+end subroutine coupler_bcs_data_override
 
-  ! local variables
-  integer, dimension(:), allocatable :: buffer !< Buffer with axis data
-  integer                            :: is, ie !< Starting and Ending indices for data
+!> Calculate the FMS coupler_bc_type air-sea tracer fluxes for the current coupling step and send
+!! the diagnostics of the fluxes and of the atmospheric fields that they are calculated from.
+subroutine coupler_bcs_update_fluxes(fluxes, atm_fields, sfc_fields, ice_fraction, domain, Time)
+  type(coupler_2d_bc_type), intent(inout) :: fluxes !< The air-sea tracer fluxes that are calculated
+  type(coupler_2d_bc_type), intent(inout) :: atm_fields !< The atmospheric fields that the fluxes
+                                                !! are calculated from
+  type(coupler_2d_bc_type), intent(in)    :: sfc_fields !< The ocean surface fields that the fluxes
+                                                !! are calculated from
+  real, dimension(:,:),     intent(in)    :: ice_fraction !< The fraction of each cell that is
+                                                !! covered by sea ice [nondim]
+  type(domain2d),           intent(in)    :: domain !< The domain of the ocean surface fields
+  type(time_type),          intent(in)    :: Time !< The model time at which the fluxes apply
 
-  call fms2_get_global_io_domain_indices(fileobj, "xaxis_1", is, ie, indices=buffer)
-  call fms2_write_data(fileobj, "xaxis_1", buffer)
-  deallocate(buffer)
+  ! Local variables
+  integer :: isc, iec, jsc, jec  ! The computational domain index bounds
 
-  call fms2_get_global_io_domain_indices(fileobj, "yaxis_1", is, ie, indices=buffer)
-  call fms2_write_data(fileobj, "yaxis_1", buffer)
-  deallocate(buffer)
+  call get_domain_extent(domain, isc, iec, jsc, jec)
+  call atmos_ocean_fluxes_calc(atm_fields, sfc_fields, fluxes, ice_fraction, isc, iec, jsc, jec)
 
-end subroutine add_domain_dimension_data
+  call coupler_type_send_data(atm_fields, Time)
+  call coupler_type_send_data(fluxes, Time)
 
-!> Retrieve param array from field_manager and add to FMS coupler_bc_type. This is
-!! needed because the coupler_type_spawn routine does not copy the param array into
-!! the spawned type. Hopefully we can get rid of this. This routine is based on
-!! https://github.com/NOAA-GFDL/FMS/blob/7f58528/coupler/atmos_ocean_fluxes.F90#L448
-subroutine add_gas_fluxes_param(gas_fluxes)
-  type(coupler_2d_bc_type), intent(inout) :: gas_fluxes !< FMS coupler_bc_type to add param to
+end subroutine coupler_bcs_update_fluxes
 
-  ! local variables
-  integer                                 :: n
-  character(len=fm_field_name_len)        :: name
-  character(len=fm_type_name_len)         :: typ
-  integer                                 :: ind
+!> Register for restart the ocean surface fields of the FMS coupler boundary conditions that the
+!! air-sea tracer flux calculation consumes.
+subroutine coupler_bcs_register_restarts(CS, sfc_fields, param_file)
+  type(coupler_bcs_CS),     pointer       :: CS !< The control structure for the FMS coupler
+                                                !! boundary conditions
+  type(coupler_2d_bc_type), intent(inout) :: sfc_fields !< The ocean surface fields to register
+  type(param_file_type),    intent(in)    :: param_file !< A structure to parse for run-time
+                                                !! parameters
 
-  character(len=*), parameter             :: sub_name = 'add_gas_fluxes_param'
-  character(len=*), parameter             :: error_header =&
-      '==>Error from ' // trim(mod_name) // '(' // trim(sub_name) // '):'
+  if (.not.associated(CS)) return
 
-  n = 0
-  do while (fm_loop_over_list('/coupler_mod/fluxes', name, typ, ind))
-    if (typ .ne. 'list') then
-      call mpp_error(FATAL, trim(error_header) // ' ' // trim(name) // ' is not a list')
-    endif
+  ! The fields in a coupler type are on the input grid, so this control structure applies no
+  ! index rotation.
+  call restart_init(param_file, CS%restart_CSp, restart_root=restart_file_root, turns=0)
+  call coupler_type_register_restart_fields(sfc_fields, CS%restart_CSp)
+  call restart_init_end(CS%restart_CSp)
 
-    n = n + 1
+end subroutine coupler_bcs_register_restarts
 
-    if (.not. fm_change_list('/coupler_mod/fluxes/' // trim(name))) then
-      call mpp_error(FATAL, trim(error_header) // ' Problem changing to ' // trim(name))
-    endif
+!> Read the ocean surface fields of the FMS coupler boundary conditions from their restart file.
+!! Nothing is read on a new run.
+subroutine coupler_bcs_restore(CS, G, input_filename, restart_input_dir)
+  type(coupler_bcs_CS),  pointer    :: CS !< The control structure for the FMS coupler boundary
+                                          !! conditions
+  type(ocean_grid_type), intent(in) :: G  !< The ocean's grid structure
+  character(len=*),      intent(in) :: input_filename !< The list of ocean restart file names, or
+                                          !! a single character indicating how they are named
+  character(len=*),      intent(in) :: restart_input_dir !< The directory holding the restart files
 
-    if (gas_fluxes%bc(n)%name .eq. name) then
-      gas_fluxes%bc(n)%param => fm_util_get_real_array('param')
-    else
-      call mpp_error(FATAL, trim(error_header) // ' Problem setting param array pointer')
-    endif
-  enddo
-end subroutine add_gas_fluxes_param
+  ! Local variables
+  type(time_type) :: restart_time  ! The time recorded in the restart file
 
-!> Return the CMEPS standard_name of the coupled field required for a given coupled
-!! generic_tracer flux name.
-function get_coupled_field_name(name)
-  character(len=64)                  :: get_coupled_field_name !< CMEPS standard_name
-  character(len=*), intent(in)       :: name                   !< gtracer flux name
+  if (.not.associated(CS)) return
+  if (.not.associated(CS%restart_CSp)) return
 
-  ! Add other coupled field names here
-  select case(trim(name))
-    case( 'co2_flux' )
-      get_coupled_field_name = "Sa_co2prog"
-    case default
-      get_coupled_field_name = UNKNOWN_CMEPS_FIELD
+  ! Do not restore on a new run, following the test that MOM_initialize_state uses.
+  if (determine_is_new_run(input_filename, restart_input_dir, G, CS%restart_CSp)) return
+
+  call restore_state(input_filename, restart_input_dir, restart_time, G, CS%restart_CSp)
+
+end subroutine coupler_bcs_restore
+
+!> Write the ocean surface fields of the FMS coupler boundary conditions to their restart file.
+subroutine coupler_bcs_save_restart(CS, G, Time, directory, name_prefix, restartname, num_rest_files)
+  type(coupler_bcs_CS),  pointer          :: CS !< The control structure for the FMS coupler
+                                             !! boundary conditions
+  type(ocean_grid_type), intent(inout)    :: G !< The ocean's grid structure
+  type(time_type),       intent(in)       :: Time !< The current model time
+  character(len=*),      intent(in)       :: directory !< The directory into which to write the
+                                             !! restart files
+  character(len=*), optional, intent(in)  :: name_prefix !< If present, a prefix that is prepended
+                                             !! to the name of the restart files
+  character(len=*), optional, intent(out) :: restartname !< The name root shared by the restart
+                                             !! files that are written
+  integer,          optional, intent(out) :: num_rest_files !< The number of restart files written
+
+  ! Local variables
+  character(len=240) :: filename  ! The name root of the restart files that are written
+
+  if (present(num_rest_files)) num_rest_files = 0
+  if (present(restartname)) restartname = ""
+  if (.not.associated(CS)) return
+  if (.not.associated(CS%restart_CSp)) return
+
+  filename = restart_file_root
+  if (present(name_prefix)) filename = trim(name_prefix)//"."//trim(filename)
+  if (present(restartname)) restartname = trim(filename)
+
+  call save_restart(directory, Time, G, CS%restart_CSp, filename=filename, &
+                    num_rest_files=num_rest_files)
+
+end subroutine coupler_bcs_save_restart
+
+!> \brief Return the CMEPS standard_name of the field that provides the input of an FMS coupler
+!! boundary condition, or an empty string if the coupler does not provide it.  Depending on the
+!! flux type, that input is an atmospheric concentration, an atmospheric deposition flux or a
+!! runoff flux.
+!!
+!! The CMEPS standard names are a fixed external vocabulary, so a boundary condition can only be
+!! driven from the coupler if the mediator has been set up to provide its field.  Any other
+!! boundary condition has to have its input field, or its flux, supplied from the data_table, and
+!! mom_import issues a fatal error if neither is the case.
+function coupler_bcs_get_cmeps_name(name)
+  character(len=64)            :: coupler_bcs_get_cmeps_name !< CMEPS standard_name
+  character(len=*), intent(in) :: name !< FMS coupler boundary condition name
+
+  ! Add other FMS coupler boundary conditions that the coupler can drive here.
+  select case (trim(name))
+    case ('co2_flux') ; coupler_bcs_get_cmeps_name = "Sa_co2prog"
+    case default      ; coupler_bcs_get_cmeps_name = ""
   end select
-end function get_coupled_field_name
+end function coupler_bcs_get_cmeps_name
 
 !> \brief Calculate the FMS coupler_bc_type ocean tracer fluxes. Units should be mol/m^2/s.
 !! Upward flux is positive.
@@ -283,7 +365,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
 
   if (.not. associated(gas_fluxes%bc)) then
     if (gas_fluxes%num_bcs .ne. 0) then
-      call mpp_error(FATAL, trim(error_header) // ' Number of gas fluxes not zero')
+      call MOM_error(FATAL, trim(error_header) // ' Number of gas fluxes not zero')
     else
       return
     endif
@@ -297,7 +379,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
           allocate( kw(isc:iec,jsc:jec) )
           allocate ( cair(isc:iec,jsc:jec) )
         elseif ((size(kw(:,:), dim=1) .ne. iec-isc+1) .or. (size(kw(:,:), dim=2) .ne. jec-jsc+1)) then
-          call mpp_error(FATAL, trim(error_header) // ' Sizes of flux fields do not match')
+          call MOM_error(FATAL, trim(error_header) // ' Sizes of flux fields do not match')
         endif
 
         if (gas_fluxes%bc(n)%implementation .eq. 'ocmip2') then
@@ -325,7 +407,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
           enddo
         elseif (gas_fluxes%bc(n)%implementation .eq. 'duce') then
           if (.not. present(tsurf)) then
-            call mpp_error(FATAL, trim(error_header) // ' Implementation ' //&
+            call MOM_error(FATAL, trim(error_header) // ' Implementation ' //&
                 trim(gas_fluxes%bc(n)%implementation) // ' for ' // trim(gas_fluxes%bc(n)%name) //&
                 ' requires input tsurf')
           endif
@@ -355,7 +437,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
           enddo
         elseif (gas_fluxes%bc(n)%implementation .eq. 'johnson') then
           if (.not. present(tsurf)) then
-            call mpp_error(FATAL, trim(error_header) // ' Implementation ' //&
+            call MOM_error(FATAL, trim(error_header) // ' Implementation ' //&
                 trim(gas_fluxes%bc(n)%implementation) // ' for ' // trim(gas_fluxes%bc(n)%name) //&
                 ' requires input tsurf')
           endif
@@ -389,7 +471,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
             enddo
           enddo
         else
-          call mpp_error(FATAL, ' Unknown implementation (' //&
+          call MOM_error(FATAL, ' Unknown implementation (' //&
               & trim(gas_fluxes%bc(n)%implementation) // ') for ' // trim(gas_fluxes%bc(n)%name))
         endif
       elseif (gas_fluxes%bc(n)%flux_type .eq. 'air_sea_gas_flux') then
@@ -397,7 +479,7 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
           allocate( kw(isc:iec,jsc:jec) )
           allocate ( cair(isc:iec,jsc:jec) )
         elseif ((size(kw(:,:), dim=1) .ne. iec-isc+1) .or. (size(kw(:,:), dim=2) .ne. jec-jsc+1)) then
-          call mpp_error(FATAL, trim(error_header) // ' Sizes of flux fields do not match')
+          call MOM_error(FATAL, trim(error_header) // ' Sizes of flux fields do not match')
         endif
 
         if (gas_fluxes%bc(n)%implementation .eq. 'ocmip2_data') then
@@ -440,13 +522,13 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
             enddo
           enddo
         else
-          call mpp_error(FATAL, ' Unknown implementation (' //&
+          call MOM_error(FATAL, ' Unknown implementation (' //&
               & trim(gas_fluxes%bc(n)%implementation) // ') for ' // trim(gas_fluxes%bc(n)%name))
         endif
       elseif (gas_fluxes%bc(n)%flux_type .eq. 'air_sea_deposition') then
         if (gas_fluxes%bc(n)%param(1) .le. 0.0) then
           write (error_string, '(1pe10.3)') gas_fluxes%bc(n)%param(1)
-          call mpp_error(FATAL, 'Bad parameter (' // trim(error_string) //&
+          call MOM_error(FATAL, 'Bad parameter (' // trim(error_string) //&
               & ') for air_sea_deposition for ' // trim(gas_fluxes%bc(n)%name))
         endif
 
@@ -465,13 +547,13 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
             enddo
           enddo
         else
-          call mpp_error(FATAL, 'Unknown implementation (' //&
+          call MOM_error(FATAL, 'Unknown implementation (' //&
               & trim(gas_fluxes%bc(n)%implementation) // ') for ' // trim(gas_fluxes%bc(n)%name))
         endif
       elseif (gas_fluxes%bc(n)%flux_type .eq. 'land_sea_runoff') then
         if (gas_fluxes%bc(n)%param(1) .le. 0.0) then
           write (error_string, '(1pe10.3)') gas_fluxes%bc(n)%param(1)
-          call mpp_error(FATAL, ' Bad parameter (' // trim(error_string) //&
+          call MOM_error(FATAL, ' Bad parameter (' // trim(error_string) //&
               & ') for land_sea_runoff for ' // trim(gas_fluxes%bc(n)%name))
         endif
 
@@ -484,11 +566,11 @@ subroutine atmos_ocean_fluxes_calc(gas_fields_atm, gas_fields_ocn, gas_fluxes,&
             enddo
           enddo
         else
-          call mpp_error(FATAL, ' Unknown implementation (' //&
+          call MOM_error(FATAL, ' Unknown implementation (' //&
               & trim(gas_fluxes%bc(n)%implementation) // ') for ' // trim(gas_fluxes%bc(n)%name))
         endif
       else
-        call mpp_error(FATAL, ' Unknown flux_type (' // trim(gas_fluxes%bc(n)%flux_type) //&
+        call MOM_error(FATAL, ' Unknown flux_type (' // trim(gas_fluxes%bc(n)%flux_type) //&
             & ') for ' // trim(gas_fluxes%bc(n)%name))
       endif
     endif
@@ -677,4 +759,4 @@ real function n_air(t)
   n_air = sv_0+(sv_1*t)+(sv_2*t**2)+(sv_3*t**3)+(sv_4*t**4)
 end function n_air
 
-end module MOM_cap_gtracer_flux
+end module MOM_cap_fms_coupler_bcs

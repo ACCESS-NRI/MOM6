@@ -71,9 +71,7 @@ use iso_fortran_env,         only : int64
 
 #include <MOM_memory.h>
 
-#ifdef _USE_GENERIC_TRACER
 use MOM_generic_tracer, only : MOM_generic_tracer_fluxes_accumulate
-#endif
 
 implicit none ; public
 
@@ -527,10 +525,10 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     ! Fields that exist in both the forcing and mech_forcing types must be copied.
     call copy_common_forcing_fields(OS%forces, OS%fluxes, OS%grid)
 
-#ifdef _USE_GENERIC_TRACER
-    call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
-    call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, weight) !here weight=1, just saving the current fluxes
-#endif
+    if (coupler_type_initialized(OS%fluxes%tr_fluxes)) then
+      call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
+      call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, weight) !here weight=1, just saving the current fluxes
+    endif
 
   else
 
@@ -561,9 +559,9 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     ! (e.g., ustar) are time-averages must be copied back to the forces type.
     call copy_back_forcing_fields(OS%fluxes, OS%forces, OS%grid)
 
-#ifdef _USE_GENERIC_TRACER
-    call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight) !weight of the current flux in the running average
-#endif
+    !weight of the current flux in the running average
+    if (coupler_type_initialized(OS%flux_tmp%tr_fluxes)) &
+      call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight)
   endif
 
   call set_derived_forcing_fields(OS%forces, OS%fluxes, OS%grid, OS%US, OS%GV%Rho0)
