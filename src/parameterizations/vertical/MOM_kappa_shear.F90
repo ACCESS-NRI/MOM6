@@ -1613,6 +1613,7 @@ subroutine find_kappa_tke(N2, S2, kappa_in, Idz, h_Int, dz_Int, dz_h_Int, I_L2_b
   logical :: was_Newton   ! The value of do_Newton before checking convergence.
   logical :: within_tolerance ! If .true., all points are within tolerance to
                           ! enable this subroutine to return.
+  logical :: e1_set       ! If .true., e1 has been calculated for this column.
   integer :: ks_src, ke_src ! The range indices that have nonzero k_src.
   integer :: ks_kappa, ke_kappa, ke_tke   ! The ranges of k-indices that are or
   integer :: ks_kappa_prev, ke_kappa_prev ! were being worked on.
@@ -1677,28 +1678,34 @@ subroutine find_kappa_tke(N2, S2, kappa_in, Idz, h_Int, dz_Int, dz_h_Int, I_L2_b
   ! Apply boundary conditions to kappa.
   kappa(1) = 0.0 ; kappa(nz+1) = 0.0
 
-  ! Calculate the term (e1) that allows changes in TKE to be calculated quickly
-  ! below the deepest nonzero value of kappa.  If kappa = 0, below interface
-  ! k-1, the final changes in TKE are related by dQ(K+1) = e1(K+1)*dQ(K).
-  eden2 = kappa0 * Idz(nz)
-  if (tke_noflux_bottom_BC) then
-    eden1 = h_Int(nz+1)*TKE_decay(nz+1)
-    I_eden = 1.0 / (eden2 + eden1)
-    e1(nz+1) = eden2 * I_eden ; ome = eden1 * I_eden
-  else
-    e1(nz+1) = 0.0 ; ome = 1.0
-  endif
-  do k=nz,2,-1
-    eden1 = h_Int(K)*TKE_decay(K) + ome * eden2
-    eden2 = kappa0 * Idz(k-1)
-    I_eden = 1.0 / (eden2 + eden1)
-    e1(K) = eden2 * I_eden ; ome = eden1 * I_eden ! = 1-e1
-  enddo
-  e1(1) = 0.0
-
-
   ! Iterate here to convergence to within some tolerance of order tol_err.
+  e1_set = .false.
   do itt=1,CS%max_RiNo_it
+
+    ! Calculate the term (e1) that allows changes in TKE to be calculated quickly
+    ! below the deepest nonzero value of kappa.  If kappa = 0, below interface
+    ! k-1, the final changes in TKE are related by dQ(K+1) = e1(K+1)*dQ(K).
+    ! e1 is only used once the deepest nonzero kappa of this and the previous iteration
+    ! is above the bottom, or by Newton's method, so it is calculated the first time
+    ! that it might be needed, which in most calls is never.
+    if (.not.e1_set) then ; if (do_Newton .or. (max(ke_kappa,ke_kappa_prev) < nz)) then
+      eden2 = kappa0 * Idz(nz)
+      if (tke_noflux_bottom_BC) then
+        eden1 = h_Int(nz+1)*TKE_decay(nz+1)
+        I_eden = 1.0 / (eden2 + eden1)
+        e1(nz+1) = eden2 * I_eden ; ome = eden1 * I_eden
+      else
+        e1(nz+1) = 0.0 ; ome = 1.0
+      endif
+      do k=nz,2,-1
+        eden1 = h_Int(K)*TKE_decay(K) + ome * eden2
+        eden2 = kappa0 * Idz(k-1)
+        I_eden = 1.0 / (eden2 + eden1)
+        e1(K) = eden2 * I_eden ; ome = eden1 * I_eden ! = 1-e1
+      enddo
+      e1(1) = 0.0
+      e1_set = .true.
+    endif ; endif
 
   ! ----------------------------------------------------
   ! Calculate TKE
