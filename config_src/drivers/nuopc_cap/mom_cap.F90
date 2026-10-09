@@ -6,6 +6,7 @@
 
 module MOM_cap_mod
 
+use field_manager_mod,        only: field_manager_init, field_manager_end
 use MOM_domains,              only: get_domain_extent
 use MOM_io,                   only: stdout, io_infra_end
 use MOM_io,                   only: insert_ensemble_appendix
@@ -26,7 +27,7 @@ use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe
 use MOM_grid,                 only: ocean_grid_type, get_global_grid_size
 use MOM_ocean_model_nuopc,    only: ice_ocean_boundary_type
 use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocean_state_type
-use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc, ocean_model_flux_init
+use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc
 use MOM_ocean_model_nuopc,    only: ocean_model_init, update_ocean_model, ocean_model_end
 use MOM_ocean_model_nuopc,    only: get_ocean_grid, get_eps_omesh, query_ocean_state
 use MOM_ocean_model_nuopc,    only: stoch_restart_needed
@@ -44,6 +45,12 @@ use shr_log_mod,             only: shr_log_setLogUnit
 use nuopc_shr_methods,       only: get_component_instance
 #endif
 use time_utils_mod,          only: esmf2fms_time
+
+use MOM_coupler_types,        only: coupler_type_initialized, coupler_type_num_bcs
+use MOM_coupler_types,        only: coupler_type_get_bc
+use MOM_ocean_model_nuopc,    only: coupler_bcs_setup
+use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_get_cmeps_name
+use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_data_override, coupler_bcs_update_fluxes
 
 use, intrinsic :: iso_fortran_env, only: output_unit
 
@@ -110,7 +117,7 @@ implicit none ; private
 public SetServices
 public SetVM
 
-!> Internal state type with pointers to three types defined by MOM.
+!> Internal state type with pointers to types defined by MOM.
 type ocean_internalstate_type
   type(ocean_public_type),       pointer :: ocean_public_type_ptr
   type(ocean_state_type),        pointer :: ocean_state_type_ptr
@@ -464,7 +471,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   type (ocean_state_type),       pointer :: ocean_state => NULL()
   type(ice_ocean_boundary_type), pointer :: Ice_ocean_boundary => NULL()
   type(ocean_internalstate_wrapper)      :: ocean_internalstate
-  type(ocean_grid_type),         pointer :: ocean_grid => NULL()
   type(directories)                      :: dirs
   type(time_type)                        :: Run_len      !< length of experiment
   type(time_type)                        :: time0        !< Start time of coupled model's calendar.
@@ -477,6 +483,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   integer                                :: mpi_comm_mom
   integer                                :: i,n
   character(len=256)                     :: stdname, shortname
+  character(len=128)                     :: bc_name ! The name of an FMS coupler boundary condition
   character(len=32)                      :: starttype            ! model start type
   character(len=512)                     :: diro
   character(len=512)                     :: logfile
@@ -592,6 +599,8 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call NUOPC_CompAttributeSet(gcomp, "logunit", stdout, rc=rc)
   if (chkerr(rc,__LINE__,u_FILE_u)) return
   call MOM_infra_init(mpi_comm_mom)
+
+  call field_manager_init
 
   ! determine the calendar
   if (cesm_coupled) then
@@ -750,15 +759,13 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   endif
 
   ocean_public%is_ocean_pe = .true.
+
   if (cesm_coupled .and. len_trim(inst_suffix)>0) then
     call ocean_model_init(ocean_public, ocean_state, time0, time_start, &
       input_restart_file=trim(adjustl(restartfiles)), inst_index=inst_index)
   else
     call ocean_model_init(ocean_public, ocean_state, time0, time_start, input_restart_file=trim(adjustl(restartfiles)))
   endif
-
-  ! GMM, this call is not needed in CESM. Check with EMC if it can be deleted.
-  call ocean_model_flux_init(ocean_state)
 
   call ocean_model_init_sfc(ocean_state, ocean_public)
 
@@ -822,6 +829,12 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
               source=0.0)
     endif
   endif
+
+  ! Allocate any required FMS coupler_bc_type tracer flux structures and register their
+  ! diagnostics. These are only set when there are modules enabled that use them.
+  call coupler_bcs_setup(ocean_state, Ice_ocean_boundary%fluxes, &
+                         Ice_ocean_boundary%atm_fields, ocean_public%axes(1:2), &
+                         time_start, isc, iec, jsc, jec)
 
   if (use_waves) then
     if (wave_method == "EFACTOR") then
@@ -924,6 +937,16 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     endif
   endif
 
+  ! Add import fields required for any FMS coupler_bc_type tracer fluxes.
+  if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
+    do n = 1, coupler_type_num_bcs(Ice_ocean_boundary%fluxes)
+      call coupler_type_get_bc(Ice_ocean_boundary%fluxes, n, name=bc_name)
+      stdname = coupler_bcs_get_cmeps_name(bc_name)
+      if (len_trim(stdname) > 0) &
+        call fld_list_add(fldsToOcn_num, fldsToOcn, stdname, "will provide")
+    enddo
+  endif
+
   !--------- export fields -------------
   call fld_list_add(fldsFrOcn_num, fldsFrOcn, "So_omask"   , "will provide")
   call fld_list_add(fldsFrOcn_num, fldsFrOcn, "So_t"       , "will provide")
@@ -937,6 +960,8 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   if (cesm_coupled .and. use_MARBL) then
     call fld_list_add(fldsFrOcn_num, fldsFrOcn, "Faoo_fco2_ocn", "will provide")
   endif
+
+  ! TODO: dts: How to handle export fields from FMS coupler_bc_type structures?
 
   do n = 1,fldsToOcn_num
     call NUOPC_Advertise(importState, standardName=fldsToOcn(n)%stdname, name=fldsToOcn(n)%shortname, rc=rc)
@@ -1767,6 +1792,7 @@ subroutine ModelAdvance(gcomp, rc)
   type(ocean_internalstate_wrapper)      :: ocean_internalstate
   type(ocean_grid_type)        , pointer :: ocean_grid
   type(time_type)                        :: Time
+  type(time_type)                        :: Time_import
   type(time_type)                        :: Time_step_coupled
   type(time_type)                        :: Time_restart_current
   integer                                :: dth, dtm, dts
@@ -1779,14 +1805,15 @@ subroutine ModelAdvance(gcomp, rc)
   integer                                :: iostat
   integer                                :: rpointer_unit
   type(ESMF_VM)                          :: vm
-  integer                                :: n, i
+  integer                                :: n
   character(240)                         :: import_timestr, export_timestr
   character(len=128)                     :: fldname
   character(len=*),parameter             :: subname='(MOM_cap:ModelAdvance)'
-  character(len=8)                       :: suffix
   character(len=:), allocatable          :: rpointer_filename
   character(len=17)                      :: timestamp
   integer                                :: num_rest_files
+  character(240)                         :: coupler_bc_restartname
+  integer                                :: num_coupler_bc_rest_files
   real(8)                                :: MPI_Wtime, timers
   logical                                :: write_restart, write_restartfh
   logical                                :: write_restart_eor
@@ -1831,6 +1858,7 @@ subroutine ModelAdvance(gcomp, rc)
 
   Time_step_coupled = esmf2fms_time(timeStep)
   Time = esmf2fms_time(currTime)
+  Time_import = Time
 
   !---------------
   ! Apply ocean lag for startup runs:
@@ -1906,9 +1934,23 @@ subroutine ModelAdvance(gcomp, rc)
     ! Import data
     !---------------
 
+    if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
+      ! Override any FMS coupler_bc_type tracer fluxes and their inputs from the data_table before
+      ! importing, so that mom_import knows which of them the data_table has already provided.
+      call coupler_bcs_data_override(Ice_ocean_boundary%fluxes, Ice_ocean_boundary%atm_fields, &
+                                     Time_import)
+    endif
+
     call mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,  &
                     set_missing_stks_to_zero, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+    if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
+      ! Calculate the FMS coupler_bc_type tracer fluxes for this coupling step
+      call coupler_bcs_update_fluxes(Ice_ocean_boundary%fluxes, Ice_ocean_boundary%atm_fields, &
+                                     ocean_public%fields, Ice_ocean_boundary%ice_fraction, &
+                                     ocean_public%domain, Time_import)
+    endif
 
     if (use_cdeps_inline) then
       call mom_inline_run(clock, ocean_public, ocean_grid, ice_ocean_boundary, dbug, rc=rc)
@@ -2004,7 +2046,9 @@ subroutine ModelAdvance(gcomp, rc)
         call ESMF_LogWrite("MOM_cap: Writing restart :  "//trim(restartname), ESMF_LOGMSG_INFO)
         ! write restart file(s)
         call ocean_model_restart(ocean_state, restartname=restartname, &
-                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files)
+                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files, &
+                coupler_bc_restartname=coupler_bc_restartname, &
+                num_coupler_bc_rest_files=num_coupler_bc_rest_files)
         if (localPet == 0) then
            ! Write name of restart file in the rpointer file - this is currently hard-coded for the ocean
           open(newunit=rpointer_unit, file=rpointer_filename, form='formatted', status='unknown', iostat=iostat)
@@ -2013,20 +2057,12 @@ subroutine ModelAdvance(gcomp, rc)
                  msg=subname//' ERROR opening '//rpointer_filename, line=__LINE__, file=u_FILE_u, rcToReturn=rc)
             return
           endif
-
           call insert_ensemble_appendix(restartname, ".mom6")
+          call write_rpointer_filenames(rpointer_unit, restartname, num_rest_files)
 
-          write(rpointer_unit,'(a)') trim(restartname)//'.nc'
-          if (num_rest_files > 1) then
-            ! append i.th restart file name to rpointer
-            do i=1, num_rest_files-1
-              if (i < 10) then
-                write(suffix,'("_",I1)') i
-              else
-                write(suffix,'("_",I2)') i
-              endif
-              write(rpointer_unit,'(a)') trim(restartname) // trim(suffix) // '.nc'
-            enddo
+          if (num_coupler_bc_rest_files > 0) then
+            call insert_ensemble_appendix(coupler_bc_restartname, ".mom6")
+            call write_rpointer_filenames(rpointer_unit, coupler_bc_restartname, num_coupler_bc_rest_files)
           endif
 
           if (stoch_restart_needed(ocean_state)) then
@@ -2345,6 +2381,8 @@ subroutine ocean_model_finalize(gcomp, rc)
 
   call ocean_model_end(ocean_public, ocean_State, Time, write_restart=write_restart)
 
+  call field_manager_end()
+
   call io_infra_end()
   call MOM_infra_end()
 
@@ -2360,6 +2398,25 @@ subroutine ocean_model_finalize(gcomp, rc)
 
 end subroutine ocean_model_finalize
 
+!> Write the names of a set of restart files to an open restart pointer file, following the
+!! convention that save_restart uses when it names them.
+subroutine write_rpointer_filenames(writeunit, restartname, num_files)
+  integer,          intent(in) :: writeunit   !< The unit of the open restart pointer file
+  character(len=*), intent(in) :: restartname !< The name root shared by the restart files
+  integer,          intent(in) :: num_files   !< The number of files in the set
+
+  ! Local variables
+  character(len=8) :: suffix  ! The index appended to the names of the files after the first
+  integer :: i
+
+  write(writeunit,'(a)') trim(restartname)//'.nc'
+
+  do i=1,num_files-1
+    write(suffix,'("_",I0)') i
+    write(writeunit,'(a)') trim(restartname)//trim(suffix)//'.nc'
+  enddo
+
+end subroutine write_rpointer_filenames
 
 !> Set scalar data from state for a particula name
 subroutine State_SetScalar(value, scalar_id, State, mytask, scalar_name, scalar_count,  rc)

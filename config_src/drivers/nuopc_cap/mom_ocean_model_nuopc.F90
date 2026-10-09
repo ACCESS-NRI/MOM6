@@ -22,6 +22,7 @@ use MOM_coms,                only : field_chksum
 use MOM_constants,           only : CELSIUS_KELVIN_OFFSET, hlf
 use MOM_diag_mediator,       only : diag_ctrl, enable_averages, disable_averaging
 use MOM_diag_mediator,       only : diag_mediator_close_registration, diag_mediator_end
+use MOM_domains,             only : MOM_domain_type, domain2d, clone_MOM_domain, get_domain_extent
 use MOM_domains,             only : pass_var, pass_vector, AGRID, BGRID_NE, CGRID_NE
 use MOM_domains,             only : TO_ALL, Omit_Corners
 use MOM_error_handler,       only : MOM_error, FATAL, WARNING, is_root_pe, MOM_mesg
@@ -43,19 +44,21 @@ use MOM_time_manager,        only : operator(+), operator(-), operator(*), opera
 use MOM_time_manager,        only : operator(/=), operator(<=), operator(>=)
 use MOM_time_manager,        only : operator(<), real_to_time_type, time_type_to_real
 use MOM_interpolate,         only : time_interp_external_init
-use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_flux_init, call_tracer_set_forcing
+use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_set_forcing
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
 use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
 use MOM_ice_shelf,           only : adjust_ice_sheet_frazil
-use MOM_coupler_types,       only : coupler_1d_bc_type, coupler_2d_bc_type
+use MOM_coupler_types,       only : coupler_2d_bc_type
 use MOM_coupler_types,       only : coupler_type_spawn, coupler_type_write_chksums
 use MOM_coupler_types,       only : coupler_type_initialized, coupler_type_copy_data
 use MOM_coupler_types,       only : coupler_type_set_diags, coupler_type_send_data
-use mpp_domains_mod,         only : domain2d, mpp_get_layout, mpp_get_global_domain
-use mpp_domains_mod,         only : mpp_define_domains, mpp_get_compute_domain, mpp_get_data_domain
+use MOM_cap_fms_coupler_bcs, only : coupler_bcs_CS, coupler_bcs_init, coupler_bcs_register_restarts
+use MOM_cap_fms_coupler_bcs, only : coupler_bcs_spawn, coupler_bcs_end
+use MOM_cap_fms_coupler_bcs, only : coupler_bcs_restore, coupler_bcs_save_restart
+use MOM_data_override,       only : data_override_init
 use MOM_io,                  only : stdout
 use MOM_EOS,                 only : gsw_sp_from_sr, gsw_pt_from_ct
 use MOM_wave_interface,      only : wave_parameters_CS, MOM_wave_interface_init
@@ -70,16 +73,14 @@ use iso_fortran_env,           only : int64
 
 #include <MOM_memory.h>
 
-#ifdef _USE_GENERIC_TRACER
-use MOM_generic_tracer, only : MOM_generic_tracer_fluxes_accumulate
-#endif
+use MOM_generic_tracer,      only : MOM_generic_tracer_fluxes_accumulate
 
 implicit none ; private
 
 public ocean_model_init, ocean_model_end, update_ocean_model
 public ocean_model_save_restart, Ocean_stock_pe
 public ice_ocean_boundary_type
-public ocean_model_init_sfc, ocean_model_flux_init
+public ocean_model_init_sfc, coupler_bcs_setup
 public ocean_model_restart
 public ice_ocn_bnd_type_chksum
 public ocean_public_type_chksum
@@ -107,7 +108,7 @@ type, public ::  ocean_public_type
                     !! points of the two velocity components. Valid entries
                     !! include AGRID, BGRID_NE, CGRID_NE, BGRID_SW, and CGRID_SW,
                     !! corresponding to the community-standard Arakawa notation.
-                    !! (These are named integers taken from mpp_parameter_mod.)
+                    !! (These are named integers taken from the MOM_domains module.)
                     !! Following MOM5, stagger is BGRID_NE by default when the
                     !! ocean is initialized, but here it is set to -999 so that
                     !! a global max across ocean and non-ocean processors can be
@@ -193,6 +194,10 @@ type, public :: ocean_state_type ; private
                               !! domain coordinates
 
   type(directories) :: dirs   !< A structure containing several relevant directory paths.
+  type(coupler_bcs_CS), pointer :: &
+    coupler_bcs_CSp => NULL() !< A pointer to the control structure for the FMS coupler
+                              !! boundary conditions, which is only associated when they
+                              !! are in use.
   type(mech_forcing) :: forces !< A structure with the driving mechanical surface forces
   type(forcing)   :: fluxes   !< A structure containing pointers to
                               !! the thermodynamic ocean forcing fields.
@@ -236,7 +241,7 @@ contains
 !!   This subroutine initializes both the ocean state and the ocean surface type.
 !! Because of the way that indicies and domains are handled, Ocean_sfc must have
 !! been used in a previous call to initialize_ocean_type.
-subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, input_restart_file, inst_index)
+subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_file, inst_index)
   type(ocean_public_type), target, &
                        intent(inout) :: Ocean_sfc !< A structure containing various publicly
                                 !! visible ocean surface properties after initialization,
@@ -246,12 +251,6 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
                                 !! contain all information about the ocean's interior state.
   type(time_type),     intent(in)    :: Time_init !< The start time for the coupled model's calendar
   type(time_type),     intent(in)    :: Time_in   !< The time at which to initialize the ocean model.
-  type(coupler_1d_bc_type), &
-             optional, intent(in)    :: gas_fields_ocn !< If present, this type describes the
-                                              !! ocean and surface-ice fields that will participate
-                                              !! in the calculation of additional gas or other
-                                              !! tracer fluxes, and can be used to spawn related
-                                              !! internal variables in the ice model.
   character(len=*), optional, intent(in) :: input_restart_file !< If present, name of restart file to read
   integer, optional :: inst_index !< Ensemble index provided by the cap (instead of FMS ensemble manager)
 
@@ -298,6 +297,12 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
       call MOM_mesg("stoch_restfile = "//trim(stoch_restfile), 3)
     endif
   endif
+
+  ! Set up the FMS coupler_bc_type tracer fluxes before initialize_MOM, because that registers the
+  ! tracer packages, and a package that registers a coupler flux of its own needs the flux types
+  ! that this defines to exist already.
+  call coupler_bcs_init(OS%coupler_bcs_CSp)
+
   call initialize_MOM(OS%Time, Time_init, param_file, OS%dirs, OS%MOM_CSp, &
                       Time_in, offline_tracer_mode=OS%offline_tracer_mode, &
                       input_restart_file=input_restart_file, &
@@ -402,10 +407,17 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
 
   !   Consider using a run-time flag to determine whether to do the diagnostic
   ! vertical integrals, since the related 3-d sums are not negligible in cost.
-  call allocate_surface_state(OS%sfc_state, OS%grid, use_temperature, &
-                              do_integrals=.true., gas_fields_ocn=gas_fields_ocn, &
-                              use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
-                              use_MARBL_tracers=OS%use_MARBL)
+  if (associated(OS%coupler_bcs_CSp)) then
+    call allocate_surface_state(OS%sfc_state, OS%grid, use_temperature, &
+                                do_integrals=.true., gas_fields_ocn=OS%coupler_bcs_CSp%gas_fields_ocn, &
+                                use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
+                                use_MARBL_tracers=OS%use_MARBL)
+  else
+    call allocate_surface_state(OS%sfc_state, OS%grid, use_temperature, &
+                                do_integrals=.true., &
+                                use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
+                                use_MARBL_tracers=OS%use_MARBL)
+  endif
 
   call surface_forcing_init(Time_in, OS%grid, OS%US, param_file, OS%diag, &
                             OS%forcing_CSp, OS%restore_salinity, OS%restore_temp, OS%use_waves)
@@ -429,18 +441,15 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
   ! it also initializes statistical waves.
   call MOM_wave_interface_init(OS%Time, OS%grid, OS%GV, OS%US, param_file, OS%Waves, OS%diag)
 
-  if (associated(OS%grid%Domain%maskmap)) then
-    call initialize_ocean_public_type(OS%grid%Domain%mpp_domain, Ocean_sfc, &
-                                      OS%diag, maskmap=OS%grid%Domain%maskmap, &
-                                      gas_fields_ocn=gas_fields_ocn)
-  else
-    call initialize_ocean_public_type(OS%grid%Domain%mpp_domain, Ocean_sfc, &
-                                      OS%diag, gas_fields_ocn=gas_fields_ocn)
-  endif
+  call initialize_ocean_public_type(OS%grid%Domain, Ocean_sfc, OS%diag, OS%coupler_bcs_CSp)
 
-  ! This call can only occur here if the coupler_bc_type variables have been
-  ! initialized already using the information from gas_fields_ocn.
-  if (present(gas_fields_ocn)) then
+  ! This call can only occur here if the FMS coupler_bc_type variables have been initialized
+  ! already.
+  if (associated(OS%coupler_bcs_CSp)) then
+    ! Enable data override of the FMS coupler boundary conditions via the data_table, using the
+    ! component name 'OCN'.
+    call data_override_init(OS%grid%Domain)
+
     call coupler_type_set_diags(Ocean_sfc%fields, "ocean_sfc", &
                                 Ocean_sfc%axes(1:2), Time_in)
 
@@ -451,6 +460,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
 
     call convert_state_to_ocean_type(OS%sfc_state, Ocean_sfc, OS%grid, OS%US)
 
+    call coupler_bcs_register_restarts(OS%coupler_bcs_CSp, Ocean_sfc%fields, param_file)
   endif
 
   call extract_surface_state(OS%MOM_CSp, OS%sfc_state)
@@ -562,8 +572,7 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
                           (/is,is,ie,ie/), (/js,js,je,je/), as_needed=.true.)
 
   ! Translate Ice_ocean_boundary into fluxes.
-  call mpp_get_compute_domain(Ocean_sfc%Domain, index_bnds(1), index_bnds(2), &
-                              index_bnds(3), index_bnds(4))
+  call get_domain_extent(Ocean_sfc%Domain, index_bnds(1), index_bnds(2), index_bnds(3), index_bnds(4))
 
   weight = 1.0
 
@@ -596,10 +605,10 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     ! Fields that exist in both the forcing and mech_forcing types must be copied.
     call copy_common_forcing_fields(OS%forces, OS%fluxes, OS%grid, skip_pres=.true.)
 
-#ifdef _USE_GENERIC_TRACER
-    call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
-    call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, weight) !here weight=1, just saving the current fluxes
-#endif
+    if (coupler_type_initialized(OS%fluxes%tr_fluxes)) then
+      call enable_averages(dt_coupling, OS%Time + Ocean_coupling_time_step, OS%diag) !Is this needed?
+      call MOM_generic_tracer_fluxes_accumulate(OS%fluxes, weight) !here weight=1, just saving the current fluxes
+    endif
   else
     OS%flux_tmp%C_p = OS%fluxes%C_p
     if (do_thermo) &
@@ -626,9 +635,9 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     ! (e.g., ustar) are time-averages must be copied back to the forces type.
     call copy_back_forcing_fields(OS%fluxes, OS%forces, OS%grid)
 
-#ifdef _USE_GENERIC_TRACER
-    call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight) !weight of the current flux in the running average
-#endif
+    !weight of the current flux in the running average
+    if (coupler_type_initialized(OS%flux_tmp%tr_fluxes)) &
+      call MOM_generic_tracer_fluxes_accumulate(OS%flux_tmp, weight)
   endif
   call set_derived_forcing_fields(OS%forces, OS%fluxes, OS%grid, OS%US, OS%GV%Rho0)
   call set_net_mass_forcing(OS%fluxes, OS%forces, OS%grid, OS%US)
@@ -749,7 +758,8 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
 end subroutine update_ocean_model
 
 !> This subroutine writes out the ocean model restart file.
-subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, num_rest_files)
+subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, num_rest_files, &
+                               coupler_bc_restartname, num_coupler_bc_rest_files)
   type(ocean_state_type),     pointer    :: OS !< A pointer to the structure containing the
                                                !! internal ocean state being saved to a restart file
   character(len=*), optional, intent(in) :: timestamp !< An optional timestamp string that should be
@@ -761,6 +771,11 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
                                                !! This option distinguishes the cesm interface from the
                                                !! non-cesm interface
   integer, optional, intent(out)         :: num_rest_files !< number of restart files written
+  character(len=*), optional, intent(out) :: coupler_bc_restartname !< The name root shared by the
+                                               !! restart files holding the ocean surface fields of
+                                               !! the FMS coupler boundary conditions
+  integer, optional, intent(out)         :: num_coupler_bc_rest_files !< The number of restart files
+                                               !! written for the FMS coupler boundary conditions
 
   if (.not.MOM_state_is_synchronized(OS%MOM_CSp)) &
       call MOM_error(WARNING, "End of MOM_main reached with inconsistent "//&
@@ -779,6 +794,10 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
       call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, &
            OS%dirs%restart_output_dir)
     endif
+    ! Give the FMS coupler_bc_type tracer flux restart the same name root as the ocean restart.
+    call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, OS%Time, OS%dirs%restart_output_dir, &
+                                 name_prefix=restartname, restartname=coupler_bc_restartname, &
+                                 num_rest_files=num_coupler_bc_rest_files)
   else
     if (BTEST(OS%Restart_control,1)) then
       call save_MOM_restart(OS%MOM_CSp, OS%dirs%restart_output_dir, OS%Time, &
@@ -798,7 +817,12 @@ subroutine ocean_model_restart(OS, timestamp, restartname, stoch_restartname, nu
         call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
       endif
     endif
+    ! With no ocean restart name to share, the FMS coupler_bc_type tracer flux restart falls back
+    ! on its own name root.
+    call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, OS%Time, OS%dirs%restart_output_dir, &
+                                   restartname=coupler_bc_restartname, num_rest_files=num_coupler_bc_rest_files)
   endif
+
   if (present(stoch_restartname)) then
     if (stoch_restart_needed(OS)) then
       call write_stoch_restart_ocn(trim(stoch_restartname))
@@ -823,6 +847,7 @@ subroutine ocean_model_end(Ocean_sfc, Ocean_state, Time, write_restart)
   call diag_mediator_end(Time, Ocean_state%diag, end_diag_manager=.true.)
   call MOM_end(Ocean_state%MOM_CSp)
   if (Ocean_state%use_ice_shelf) call ice_shelf_end(Ocean_state%Ice_shelf_CSp)
+  call coupler_bcs_end(Ocean_state%coupler_bcs_CSp)
 end subroutine ocean_model_end
 
 !> ocean_model_save_restart causes restart files associated with the ocean to be
@@ -830,7 +855,7 @@ end subroutine ocean_model_end
 subroutine ocean_model_save_restart(OS, Time, directory, filename_suffix)
   type(ocean_state_type),     pointer    :: OS  !< A pointer to the structure containing the
                                                 !! internal ocean state (in).
-  type(time_type),            intent(in) :: Time !< The model time at this call, needed for mpp_write calls.
+  type(time_type),            intent(in) :: Time !< The model time at this call, needed for writing files.
   character(len=*), optional, intent(in) :: directory  !<  An optional directory into which to
                                                 !! write these restart files.
   character(len=*), optional, intent(in) :: filename_suffix !< An optional suffix (e.g., a time-stamp)
@@ -855,41 +880,31 @@ subroutine ocean_model_save_restart(OS, Time, directory, filename_suffix)
 
   call forcing_save_restart(OS%forcing_CSp, OS%grid, Time, restart_dir)
 
+  call coupler_bcs_save_restart(OS%coupler_bcs_CSp, OS%grid, Time, restart_dir)
+
   if (OS%use_ice_shelf) then
     call ice_shelf_save_restart(OS%Ice_shelf_CSp, OS%Time, OS%dirs%restart_output_dir)
   endif
 end subroutine ocean_model_save_restart
 
 !> Initialize the public ocean type
-subroutine initialize_ocean_public_type(input_domain, Ocean_sfc, diag, maskmap, &
-                                        gas_fields_ocn)
-  type(domain2D),          intent(in)    :: input_domain !< The ocean model domain description
+subroutine initialize_ocean_public_type(input_domain, Ocean_sfc, diag, coupler_bcs_CSp)
+  type(MOM_domain_type),   intent(in)    :: input_domain !< The ocean model domain description
   type(ocean_public_type), intent(inout) :: Ocean_sfc !< A structure containing various publicly
-                                !! visible ocean surface properties after initialization, whose
-                                !! elements are allocated here.
-  type(diag_ctrl),         intent(in)    :: diag  !< A structure that regulates diagnsotic output
-  logical, dimension(:,:), &
-                 optional, intent(in)    :: maskmap !< A mask indicating which virtual processors
-                                              !! are actually in use.  If missing, all are used.
-  type(coupler_1d_bc_type), &
-                 optional, intent(in)    :: gas_fields_ocn !< If present, this type describes the
-                                              !! ocean and surface-ice fields that will participate
-                                              !! in the calculation of additional gas or other
-                                              !! tracer fluxes.
+                                              !! visible ocean surface properties after
+                                              !! initialization, whose elements are allocated here.
+  type(diag_ctrl),         intent(in)    :: diag  !< A structure that regulates diagnostic output
+  type(coupler_bcs_CS),       pointer    :: coupler_bcs_CSp !< A pointer to the control structure for
+                                              !! the FMS coupler_bc_type tracer fluxes, or NULL if
+                                              !! there are none.
 
-  integer :: xsz, ysz, layout(2)
   ! ice-ocean-boundary fields are always allocated using absolute indicies
   ! and have no halos.
   integer :: isc, iec, jsc, jec
 
-  call mpp_get_layout(input_domain,layout)
-  call mpp_get_global_domain(input_domain, xsize=xsz, ysize=ysz)
-  if (PRESENT(maskmap)) then
-    call mpp_define_domains((/1,xsz,1,ysz/),layout,Ocean_sfc%Domain, maskmap=maskmap)
-  else
-    call mpp_define_domains((/1,xsz,1,ysz/),layout,Ocean_sfc%Domain)
-  endif
-  call mpp_get_compute_domain(Ocean_sfc%Domain, isc, iec, jsc, jec)
+  call clone_MOM_domain(input_domain, Ocean_sfc%Domain, halo_size=0, symmetric=.false.)
+
+  call get_domain_extent(Ocean_sfc%Domain, isc, iec, jsc, jec)
 
   allocate(Ocean_sfc%t_surf (isc:iec,jsc:jec),  &  ! time averaged sst (Kelvin) passed to atmosphere/ice model
            Ocean_sfc%s_surf (isc:iec,jsc:jec),  &  ! time averaged sss (psu) passed to atmosphere/ice models
@@ -906,8 +921,8 @@ subroutine initialize_ocean_public_type(input_domain, Ocean_sfc, diag, maskmap, 
 
   Ocean_sfc%axes    = diag%axesT1%handles !diag axes to be used by coupler tracer flux diagnostics
 
-  if (present(gas_fields_ocn)) then
-    call coupler_type_spawn(gas_fields_ocn, Ocean_sfc%fields, (/isc,isc,iec,iec/), &
+  if (associated(coupler_bcs_CSp)) then
+    call coupler_type_spawn(coupler_bcs_CSp%gas_fields_ocn, Ocean_sfc%fields, (/isc,isc,iec,iec/), &
                               (/jsc,jsc,jec,jec/), suffix = '_ocn', as_needed=.true.)
   endif
 
@@ -939,8 +954,7 @@ subroutine convert_state_to_ocean_type(sfc_state, Ocean_sfc, G, US, patm, press_
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   call pass_vector(sfc_state%u, sfc_state%v, G%Domain)
 
-  call mpp_get_compute_domain(Ocean_sfc%Domain, isc_bnd, iec_bnd, &
-                              jsc_bnd, jec_bnd)
+  call get_domain_extent(Ocean_sfc%Domain, isc_bnd, iec_bnd, jsc_bnd, jec_bnd)
   if (present(patm)) then
     ! Check that the inidicies in patm are (isc_bnd:iec_bnd,jsc_bnd:jec_bnd).
     if (.not.present(press_to_z)) call MOM_error(FATAL, &
@@ -1063,30 +1077,35 @@ subroutine ocean_model_init_sfc(OS, Ocean_sfc)
 
   call convert_state_to_ocean_type(OS%sfc_state, Ocean_sfc, OS%grid, OS%US)
 
+  ! The ocean surface fields used in the FMS coupler_bc_type tracer flux calculation are restored
+  ! here because the call above sets them from the ocean state, overwriting anything read earlier.
+  call coupler_bcs_restore(OS%coupler_bcs_CSp, OS%grid, OS%dirs%input_filename, &
+                          OS%dirs%restart_input_dir)
+
 end subroutine ocean_model_init_sfc
 
-!> ocean_model_flux_init is used to initialize properties of the air-sea fluxes
-!! as determined by various run-time parameters.  It can be called from
-!! non-ocean PEs, or PEs that have not yet been initialzed, and it can safely
-!! be called multiple times.
-subroutine ocean_model_flux_init(OS, verbosity)
-  type(ocean_state_type), optional, pointer :: OS  !< An optional pointer to the ocean state,
-                                             !! used to figure out if this is an ocean PE that
-                                             !! has already been initialized.
-  integer, optional, intent(in) :: verbosity !< A 0-9 integer indicating a level of verbosity.
+!> Spawn the FMS coupler types that hold the air-sea tracer fluxes and the atmospheric fields that
+!! they are calculated from and register their diagnostics.  This exists so that the mom_cap can
+!! reach the control structure that ocean_state_type holds privately.  The coupler types are left
+!! unset when the structures are not in use.
+subroutine coupler_bcs_setup(OS, fluxes, atm_fields, axes, Time, isc, iec, jsc, jec)
+  type(ocean_state_type),   pointer       :: OS !< A pointer to the structure containing the
+                                                !! internal ocean state
+  type(coupler_2d_bc_type), intent(inout) :: fluxes !< The structure that is spawned to hold the
+                                                !! air-sea tracer fluxes
+  type(coupler_2d_bc_type), intent(inout) :: atm_fields !< The structure that is spawned to hold
+                                                !! the atmospheric fields used to calculate them
+  integer, dimension(2),    intent(in)    :: axes !< The handles of the horizontal axes that the
+                                                !! diagnostics of the spawned structures use
+  type(time_type),          intent(in)    :: Time !< The model time at which the diagnostics start
+  integer,                  intent(in)    :: isc !< The start i-index of the computational domain
+  integer,                  intent(in)    :: iec !< The end i-index of the computational domain
+  integer,                  intent(in)    :: jsc !< The start j-index of the computational domain
+  integer,                  intent(in)    :: jec !< The end j-index of the computational domain
 
-  logical :: OS_is_set
-  integer :: verbose
+  call coupler_bcs_spawn(OS%coupler_bcs_CSp, fluxes, atm_fields, axes, Time, isc, iec, jsc, jec)
 
-  OS_is_set = .false. ; if (present(OS)) OS_is_set = associated(OS)
-
-  ! Use this to control the verbosity of output; consider rethinking this logic later.
-  verbose = 5 ; if (OS_is_set) verbose = 3
-  if (present(verbosity)) verbose = verbosity
-
-  call call_tracer_flux_init(verbosity=verbose)
-
-end subroutine ocean_model_flux_init
+end subroutine coupler_bcs_setup
 
 !> This interface allows certain properties that are stored in the ocean_state_type to be
 !! obtained.

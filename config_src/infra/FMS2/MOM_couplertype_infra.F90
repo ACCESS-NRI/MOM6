@@ -11,7 +11,10 @@ use coupler_types_mod, only : coupler_type_write_chksums, coupler_type_redistrib
 use coupler_types_mod, only : coupler_type_increment_data, coupler_type_rescale_data
 use coupler_types_mod, only : coupler_type_extract_data, coupler_type_set_data
 use coupler_types_mod, only : coupler_type_data_override
-use coupler_types_mod, only : ind_flux, ind_alpha, ind_csurf
+use coupler_types_mod, only : ind_flux, ind_deltap, ind_kw, ind_flux0
+use coupler_types_mod, only : ind_pcair, ind_u10, ind_psurf
+use coupler_types_mod, only : ind_alpha, ind_csurf, ind_sc_no
+use coupler_types_mod, only : ind_runoff, ind_deposition
 use coupler_types_mod, only : coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 use atmos_ocean_fluxes_mod, only : aof_set_coupler_flux
 use MOM_domain_infra,  only : domain2D
@@ -23,8 +26,12 @@ public :: CT_spawn, CT_initialized, CT_destructor
 public :: CT_set_diags, CT_send_data, CT_data_override, CT_write_chksums
 public :: CT_set_data,  CT_increment_data, CT_rescale_data
 public :: CT_copy_data, CT_extract_data, CT_redistribute_data
+public :: CT_num_bcs, CT_is_double_precision, CT_get_bc, CT_get_field, CT_set_field
 public :: atmos_ocn_coupler_flux
-public :: ind_flux, ind_alpha, ind_csurf
+public :: ind_flux, ind_deltap, ind_kw, ind_flux0
+public :: ind_pcair, ind_u10, ind_psurf
+public :: ind_alpha, ind_csurf, ind_sc_no
+public :: ind_runoff, ind_deposition
 public :: coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 
 !> This is the interface to spawn one coupler_bc_type into another.
@@ -42,6 +49,11 @@ end interface CT_initialized
 interface CT_destructor
   module procedure CT_destructor_1d, CT_destructor_2d
 end interface CT_destructor
+
+!> This function interface returns the number of boundary conditions in a coupler_bc_type.
+interface CT_num_bcs
+  module procedure CT_num_bcs_1d, CT_num_bcs_2d
+end interface CT_num_bcs
 
 !> Copy all elements of the data in either a coupler_2d_bc_type or a coupler_3d_bc_type into
 !! another structure of the same or the other type.  Both must have the same array sizes in common
@@ -103,7 +115,7 @@ function atmos_ocn_coupler_flux(name, flux_type, implementation, param, mol_wt, 
 end function atmos_ocn_coupler_flux
 
 !> Generate a 2-D coupler type using a 1-D coupler type as a template.
-subroutine CT_spawn_1d_2d(var_in, var, idim, jdim, suffix, as_needed)
+subroutine CT_spawn_1d_2d(var_in, var, idim, jdim, suffix, as_needed, copy_param)
   type(coupler_1d_bc_type), intent(in)    :: var_in  !< structure from which to copy information
   type(coupler_2d_bc_type), intent(inout) :: var     !< structure into which to copy information
   integer, dimension(4),    intent(in)    :: idim    !< The data and computational domain extents of
@@ -113,8 +125,31 @@ subroutine CT_spawn_1d_2d(var_in, var, idim, jdim, suffix, as_needed)
   character(len=*), optional, intent(in)  :: suffix  !< optional suffix to make the name identifier unique
   logical,          optional, intent(in)  :: as_needed !< Only do the spawn if the target type (var)
                                                      !! is not set and the parent type (var_in) is set.
+  logical,          optional, intent(in)  :: copy_param !< If true, give the spawned type its own
+                                                     !! copy of the param array of each of the
+                                                     !! boundary conditions of the input structure.
+
+  logical :: do_copy_param ! True if the param arrays are to be copied
+  integer :: n  ! The index of a boundary condition
 
   call coupler_type_spawn(var_in, var, idim, jdim, suffix=suffix, as_needed=as_needed)
+
+  do_copy_param = .false. ; if (present(copy_param)) do_copy_param = copy_param
+
+  ! Spawning does not set the param arrays, so they have to be copied separately if they are
+  ! needed.
+  if (do_copy_param) then
+    if (associated(var_in%bc) .and. associated(var%bc)) then
+      if (var%num_bcs == var_in%num_bcs) then
+        do n=1,var%num_bcs
+          if (associated(var_in%bc(n)%param) .and. .not.associated(var%bc(n)%param)) then
+            allocate(var%bc(n)%param(size(var_in%bc(n)%param)))
+            var%bc(n)%param(:) = var_in%bc(n)%param(:)
+          endif
+        enddo
+      endif
+    endif
+  endif
 
 end subroutine CT_spawn_1d_2d
 
@@ -501,5 +536,83 @@ subroutine CT_destructor_2d(var)
   call coupler_type_destructor(var)
 
 end subroutine CT_destructor_2d
+
+!> Return the number of boundary conditions in a coupler_1d_bc_type.
+integer function CT_num_bcs_1d(var)
+  type(coupler_1d_bc_type), intent(in) :: var  !< BC_type structure being queried
+
+  CT_num_bcs_1d = var%num_bcs
+end function CT_num_bcs_1d
+
+!> Return the number of boundary conditions in a coupler_2d_bc_type.
+integer function CT_num_bcs_2d(var)
+  type(coupler_2d_bc_type), intent(in) :: var  !< BC_type structure being queried
+
+  CT_num_bcs_2d = var%num_bcs
+end function CT_num_bcs_2d
+
+!> Indicate whether a coupler_2d_bc_type holds its data in double precision.  A coupler type
+!! holds its data in one of two arrays, depending on its precision, and only the double precision
+!! one can be reached by the accessors here.
+logical function CT_is_double_precision(var)
+  type(coupler_2d_bc_type), intent(in) :: var  !< BC_type structure being queried
+
+  CT_is_double_precision = associated(var%bc)
+end function CT_is_double_precision
+
+!> Return the metadata of one of the boundary conditions of a coupler_2d_bc_type.
+subroutine CT_get_bc(var, bc_index, name, flux_type, num_fields)
+  type(coupler_2d_bc_type), intent(in)    :: var  !< BC_type structure being queried
+  integer,                  intent(in)    :: bc_index !< The index of the boundary condition being
+                                                     !! queried
+  character(len=*), optional, intent(out) :: name !< The name of the boundary condition
+  character(len=*), optional, intent(out) :: flux_type !< The type of flux that the boundary
+                                                     !! condition describes
+  integer,          optional, intent(out) :: num_fields !< The number of fields that the boundary
+                                                     !! condition holds
+
+  if (present(name)) name = var%bc(bc_index)%name
+  if (present(flux_type)) flux_type = var%bc(bc_index)%flux_type
+  if (present(num_fields)) num_fields = var%bc(bc_index)%num_fields
+end subroutine CT_get_bc
+
+!> Return the metadata of one field of one boundary condition of a coupler_2d_bc_type, and a
+!! pointer to its data.  The pointer aliases the data in the type, so that the field can be read
+!! or written in place, and it is returned unassociated if the field has no data.
+subroutine CT_get_field(var, bc_index, field_index, values, name, long_name, units, override)
+  type(coupler_2d_bc_type), intent(in)    :: var  !< BC_type structure being queried
+  integer,                  intent(in)    :: bc_index !< The index of the boundary condition that
+                                                     !! the field belongs to
+  integer,                  intent(in)    :: field_index !< The index of the field within that
+                                                     !! boundary condition
+  real, dimension(:,:), optional, pointer :: values !< A pointer to the data of the field, in
+                                                     !! arbitrary units [various]
+  character(len=*), optional, intent(out) :: name !< The short name of the field
+  character(len=*), optional, intent(out) :: long_name !< The long name of the field
+  character(len=*), optional, intent(out) :: units !< The units of the field
+  logical,          optional, intent(out) :: override !< True if the values of the field have been
+                                                     !! overridden from a file, as recorded by a
+                                                     !! previous call to CT_set_field
+
+  if (present(values)) values => var%bc(bc_index)%field(field_index)%values
+  if (present(name)) name = var%bc(bc_index)%field(field_index)%name
+  if (present(long_name)) long_name = var%bc(bc_index)%field(field_index)%long_name
+  if (present(units)) units = var%bc(bc_index)%field(field_index)%units
+  if (present(override)) override = var%bc(bc_index)%field(field_index)%override
+end subroutine CT_get_field
+
+!> Set the metadata of one field of one boundary condition of a coupler_2d_bc_type.  The data of
+!! a field is not set here, but is written in place through the pointer that CT_get_field returns.
+subroutine CT_set_field(var, bc_index, field_index, override)
+  type(coupler_2d_bc_type), intent(inout) :: var  !< BC_type structure being modified
+  integer,                  intent(in)    :: bc_index !< The index of the boundary condition that
+                                                     !! the field belongs to
+  integer,                  intent(in)    :: field_index !< The index of the field within that
+                                                     !! boundary condition
+  logical,          optional, intent(in)  :: override !< True if the values of the field have been
+                                                     !! overridden from a file
+
+  if (present(override)) var%bc(bc_index)%field(field_index)%override = override
+end subroutine CT_set_field
 
 end module MOM_couplertype_infra
