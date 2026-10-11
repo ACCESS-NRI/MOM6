@@ -129,6 +129,8 @@ type, public :: vertvisc_CS ; private
   logical :: direct_stress  !< If true, the wind stress is distributed over the topmost Hmix_stress
                             !! of fluid, and an added mixed layer viscosity or a physically based
                             !! boundary layer turbulence parameterization is not needed for stability.
+  logical :: OBC_stress_bug !< If true, recover a bug that applies the surface wind stress at
+                            !! open boundary points in vertvisc.
   logical :: dynamic_viscous_ML  !< If true, use the results from a dynamic
                             !! calculation, perhaps based on a bulk Richardson
                             !! number criterion, to determine the mixed layer
@@ -599,6 +601,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
                            ! than this are diagnosed as 0 [L T-2 ~> m s-2].
   real :: zDS, h_a         ! Temporary thickness variables used with direct_stress [H ~> m or kg m-2]
   real :: hfr              ! Temporary ratio of thicknesses used with direct_stress [nondim]
+  real :: stress_mask      ! The mask that is applied to the surface wind stress [nondim]
   real :: surface_stress(SZIB_(G), SZJB_(G))
     ! The same as stress, unless the wind stress is applied as a body force
     ! [H L T-1 ~> m2 s-1 or kg m-1 s-1].
@@ -692,7 +695,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (CS%direct_stress) then
     do j=G%jsc,G%jec ; do I=Isq,Ieq
       surface_stress(I,j) = 0.0
-      if (G%OBCmaskCu(I,j) > 0.) then
+      stress_mask = G%OBCmaskCu(I,j) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCu(I,j)
+      if (stress_mask > 0.) then
         zDS = 0.0
         stress = dt_Rho0 * forces%taux(I,j)
         do k=1,nz
@@ -706,7 +710,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo
   else
     do j=G%jsc,G%jec ; do I=Isq,Ieq
-      surface_stress(I,j) = dt_Rho0 * (G%OBCmaskCu(I,j)*forces%taux(I,j))
+      stress_mask = G%OBCmaskCu(I,j) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCu(I,j)
+      surface_stress(I,j) = dt_Rho0 * (stress_mask*forces%taux(I,j))
     enddo ; enddo
   endif
 
@@ -914,7 +919,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (CS%direct_stress) then
     do J=Jsq,Jeq ; do i=is,ie
       surface_stress(i,J) = 0.0
-      if (G%OBCmaskCv(i,J) > 0.) then
+      stress_mask = G%OBCmaskCv(i,J) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCv(i,J)
+      if (stress_mask > 0.) then
         zDS = 0.0
         stress = dt_Rho0 * forces%tauy(i,J)
         do k=1,nz
@@ -928,7 +934,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo
   else
     do J=Jsq,Jeq ; do i=is,ie
-      surface_stress(i,J) = dt_Rho0 * (G%OBCmaskCv(i,J) * forces%tauy(i,J))
+      stress_mask = G%OBCmaskCv(i,J) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCv(i,J)
+      surface_stress(i,J) = dt_Rho0 * (stress_mask * forces%tauy(i,J))
     enddo ; enddo
   endif
 
@@ -2744,6 +2751,9 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   real :: Kv_back_z  ! A background kinematic viscosity [Z2 T-1 ~> m2 s-1]
   integer :: default_answer_date  ! The default setting for the various ANSWER_DATE flags.
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB, nz
+  integer :: number_of_OBC_segments  ! The number of open boundary segments
+  logical :: enable_bugs  ! If true, the defaults for recently added bug-fix flags are set to
+                          ! recreate the bugs, or if false bugs are only used if actively selected.
   logical :: lfpmix
   character(len=200) :: kappa_gl90_file, inputdir, kdgl90_varname
   ! This include declares and sets the variable "version".
@@ -2798,6 +2808,14 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
                  "(like in HYCOM), and an added mixed layer viscosity or a physically based "//&
                  "boundary layer turbulence parameterization is not needed for stability.", &
                  default=.false.)
+  call get_param(param_file, mdl, "OBC_NUMBER_OF_SEGMENTS", number_of_OBC_segments, &
+                 default=0, do_not_log=.true.)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "VERTVISC_OBC_STRESS_BUG", CS%OBC_stress_bug, &
+                 "If true, recover a bug that applies the surface wind stress as a boundary "//&
+                 "condition at open boundary points in vertvisc.", &
+                 default=enable_bugs, do_not_log=(number_of_OBC_segments<=0))
   call get_param(param_file, mdl, "DYNAMIC_VISCOUS_ML", CS%dynamic_viscous_ML, &
                  "If true, use a bulk Richardson number criterion to "//&
                  "determine the mixed layer thickness for viscosity.", &
