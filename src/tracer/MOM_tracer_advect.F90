@@ -280,6 +280,13 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     if (isv > is-stencil) then
       call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass)
 
+      if (itt == 1) then
+        ! Store the tracer concentrations before any advection for use in diagnostics.
+        do m=1,ntr ; if (associated(Reg%Tr(m)%t_pre_adv)) then
+          Reg%Tr(m)%t_pre_adv(:,:,:) = Reg%Tr(m)%t(:,:,:)
+        endif ; enddo
+      endif
+
       isv = is - nsten_halo * stencil ; jsv = js - nsten_halo * stencil
       iev = ie + nsten_halo * stencil ; jev = je + nsten_halo * stencil
       ! Reevaluate domore_u & domore_v unless the valid range is the same size as
