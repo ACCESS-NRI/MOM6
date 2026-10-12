@@ -56,7 +56,7 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
   real :: h_neglect              ! A thickness that is so small it is usually lost
                                  ! in roundoff and can be neglected [H ~> m or kg m-2]
   real :: Ih                     ! Inverse updated thickness [H-1 ~> m-1]
-  real :: ht_prev                ! Thickness weighted tracer prior to dynamics [CU H ~> conc m]
+  real :: ht_prev                ! Thickness weighted tracer prior to lateral advection [CU H ~> conc m]
   real :: ht_adv                 ! Thickness weighted tracer after lateral advection [CU H ~> conc m]
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -64,9 +64,9 @@ subroutine thickness_weighted_variance_advection(G, GV, Tr, h_diag, h, dt, Idt, 
 
   do k=1,nz ; do j=js,je ; do i=is,ie
     Ih = 1.0 / (h(i,j,k) + h_neglect)
-    ht_prev = h_diag(i,j,k) * Tr%t_prev(i,j,k)
+    ht_prev = h_diag(i,j,k) * Tr%t_pre_adv(i,j,k)
     ht_adv = ht_prev + dt * Tr%advection_xy(i,j,k)
-    asvp(i,j,k) = ( (Ih * (ht_adv*ht_adv)) - (ht_prev * Tr%t_prev(i,j,k)) ) * Idt
+    asvp(i,j,k) = ( (Ih * (ht_adv*ht_adv)) - (ht_prev * Tr%t_pre_adv(i,j,k)) ) * Idt
   enddo ; enddo ; enddo
 
 end subroutine thickness_weighted_variance_advection
@@ -129,9 +129,9 @@ subroutine zonal_upwind_values(G, GV, Tr, uhtr, x_upwind)
 
   do k=1,nz ; do j=js,je ; do I=is-1,ie
     if (uhtr(I,j,k) >= 0.) then
-      x_upwind(I,j,k) = Tr%t_prev(i,j,k)
+      x_upwind(I,j,k) = Tr%t_pre_adv(i,j,k)
     else
-      x_upwind(I,j,k) = Tr%t_prev(i+1,j,k)
+      x_upwind(I,j,k) = Tr%t_pre_adv(i+1,j,k)
     endif
   enddo ; enddo ; enddo
 
@@ -155,9 +155,9 @@ subroutine meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
 
   do k=1,nz ; do J=js-1,je ; do i=is,ie
     if (vhtr(i,J,k) >= 0.) then
-      y_upwind(i,J,k) = Tr%t_prev(i,j,k)
+      y_upwind(i,J,k) = Tr%t_pre_adv(i,j,k)
     else
-      y_upwind(i,J,k) = Tr%t_prev(i,j+1,k)
+      y_upwind(i,J,k) = Tr%t_pre_adv(i,j+1,k)
     endif
   enddo ; enddo ; enddo
 

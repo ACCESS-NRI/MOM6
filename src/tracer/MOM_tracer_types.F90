@@ -66,6 +66,9 @@ type, public :: tracer_type
 !                                                              !! [CU T-1 ~> conc s-1]
   real, dimension(:,:,:), pointer :: t_prev         => NULL() !< tracer concentration array at a previous
                                                               !! timestep used for diagnostics [CU ~> conc]
+  real, dimension(:,:,:), pointer :: t_pre_adv      => NULL() !< tracer concentration array, including halos,
+                                                              !! just before the most recent call to advect_tracer,
+                                                              !! used for diagnostics [CU ~> conc]
   real, dimension(:,:,:), pointer :: Trxh_prev      => NULL() !< layer integrated tracer concentration array
                                                               !! at a previous timestep used for diagnostics
                                                               !! [CU H ~> conc m or conc kg m-2]
