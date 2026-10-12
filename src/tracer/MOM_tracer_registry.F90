@@ -193,9 +193,6 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
   Tr%conc_underflow = 0.0
   if (present(underflow_conc)) Tr%conc_underflow = underflow_conc
 
-  ! transform asvar_underflow from [Conc2] ~> [CU2] to get correct internal units for each tracer
-  Tr%var_underflow = Reg%asvar_underflow / (Tr%conc_scale**2)
-
   Tr%flux_nameroot = Tr%name
   if (present(flux_nameroot)) then
     if (len_trim(flux_nameroot) > 0) Tr%flux_nameroot = flux_nameroot
@@ -315,6 +312,8 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
   character(len=48)  :: conv_units ! The units for flux convergences, either
                                  ! [units] m s-1 or [units] kg m-2 s-1.
   character(len=48)  :: unit2    ! The dimensions of the tracer squared
+  character(len=64)  :: var_prod_units ! The units for thickness-weighted tracer variance production,
+                                 ! either [units]2 m s-1 or [units]2 kg m-2 s-1.
   character(len=72)  :: cmorname ! The CMOR name of this tracer.
   character(len=120) :: cmor_longname ! The CMOR long name of that variable.
   character(len=120) :: var_lname      ! A temporary longname for a diagnostic.
@@ -446,10 +445,12 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
     endif
     unit2 = trim(units)//"2"
     if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
+    if (GV%Boussinesq) then ; var_prod_units = trim(unit2)//" m s-1"
+    else ; var_prod_units = trim(unit2)//" kg m-2 s-1" ; endif
     Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
         trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
-        "Spurious variance production of "//trim(shortnm)//" variance due to advection", &
-        trim(unit2)//" m s-1", conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T)
+        "Spurious production of "//trim(shortnm)//" variance due to advection", &
+        var_prod_units, conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T, v_extensive=.true.)
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
         "Thickness-weighted integral of " // trim(longname), &
@@ -820,7 +821,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: work2d(SZI_(G),SZJ_(G))      ! The vertically integrated convergence of lateral advective
                                           ! tracer fluxes [CU H T-1 ~> conc m s-1 or conc kg m-2 s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme variance production of a
-                                                      ! tracer [CU2 H T-1 ~> conc2 m s-1]
+                                                      ! tracer [CU2 H T-1 ~> conc2 m s-1 or
+                                                      ! conc2 kg m-2 s-1]
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -1080,13 +1082,6 @@ subroutine tracer_registry_init(param_file, Reg)
 
   if (.not.associated(Reg)) then ; allocate(Reg)
   else ; return ; endif
-
-  ! Read in the nondim value that is used to set the underflow value below which advection scheme variance
-  ! production is set to zero
-  call get_param(param_file, mdl, "ADVECTION_SCHEME_VARIANCE_UNDERFLOW", Reg%asvar_underflow, &
-               "A tiny magnitude for variance used to determine when advection scheme variance &
-                production is set to 0.", &
-               units='Conc2 (tracer dependent)', default=1e-23)
 
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, mdl, version, "", all_default=.true.)
