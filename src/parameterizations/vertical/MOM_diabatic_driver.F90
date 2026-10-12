@@ -3401,15 +3401,13 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "relative to this scale, in which case the forcing tendencies "//&
                  "scaled down by distributing the forcing over this depth scale.", &
                  units="m", default=0.001, scale=GV%m_to_H)
-  if (present(frac_shelf_h)) then
-    call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
-                   "The smallest depth over which forcing can be applied under an "//&
-                   "ice shelf. This only takes effect under ice shelves, and when "//&
-                   "near-surface layers become thin relative to this scale, in "//&
-                   "which case the forcing tendencies are scaled down by "//&
-                   "distributing the forcing over this depth scale.", &
-                   units="m", default=0.001, scale=GV%m_to_H)
-  endif
+  call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
+                 "The smallest depth over which forcing can be applied under an "//&
+                 "ice shelf. This only takes effect under ice shelves, and when "//&
+                 "near-surface layers become thin relative to this scale, in "//&
+                 "which case the forcing tendencies are scaled down by "//&
+                 "distributing the forcing over this depth scale.", &
+                 units="m", default=0.001, scale=GV%m_to_H)
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
                  "The largest fraction of a layer than can be lost to forcing "//&
                  "(e.g. evaporation, sea-ice formation) in one time-step. The unused "//&
