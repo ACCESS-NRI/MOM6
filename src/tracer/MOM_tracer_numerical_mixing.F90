@@ -186,7 +186,7 @@ subroutine meridional_upwind_values(G, GV, Tr, vhtr, y_upwind)
 
 end subroutine meridional_upwind_values
 
-!< Subroutine to calculate the numerical mixing due to the remapping scheme in MOM6.
+!> Subroutine to calculate the numerical mixing due to the remapping scheme in MOM6.
 subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
                                          isrc_start, isrc_end, h_sub, u_sub, col_var_production)
 
