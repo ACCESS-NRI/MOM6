@@ -819,10 +819,10 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
     do m=1,ntr ! For each tracer
       Tr => Reg%Tr(m)
       if ((Tr%id_remap_variance_production > 0) .and. (present(dt))) then
-          compute_remapping_variance = .true.
-          rvp(:,:,:) = 0.0
-        else
-          compute_remapping_variance = .false.
+        compute_remapping_variance = .true.
+        rvp(:,:,:) = 0.0
+      else
+        compute_remapping_variance = .false.
       endif
       do j = G%jsc,G%jec ; do i = G%isc,G%iec ; if (G%mask2dT(i,j)>0.) then
         ! Build the start and final grids
