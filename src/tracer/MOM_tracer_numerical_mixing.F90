@@ -182,7 +182,7 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
   real, dimension(n1),   intent(out) :: col_var_production !< Remap variance production for a column [A2 H]
 
   ! Local variables
-  integer :: i1, j2 !< Loop counters
+  integer :: i1, j2 ! Loop counters
 
   if (n0 >= n1) then
     do i1 = 1, n1
