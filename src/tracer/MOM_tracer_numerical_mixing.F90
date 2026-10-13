@@ -202,7 +202,7 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
   integer, dimension(n0), intent(in) :: isrc_end           !< Index of last sub-cell within each source cell
   real,                   intent(in) :: h_sub(n0+n1+1)     !< Overlapping sub-cell thicknesses, h_sub [H]
   real,                   intent(in) :: u_sub(n0+n1+1)     !< Sub-cell cell averages (size n1) [A]
-  real, dimension(n1), intent(inout) :: col_var_production !< Remap variance production for a column
+  real, dimension(n1),   intent(out) :: col_var_production !< Remap variance production for a column [A2 H]
 
   ! Local variables
   integer :: i1, j2 !< Loop counters
