@@ -886,7 +886,6 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
           call post_data(Tr%id_remap_variance_production, rvp, CS%diag)
         endif
       endif
-
     enddo ! m=1,ntr
 
   endif  ! endif for ntr > 0
