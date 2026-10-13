@@ -107,6 +107,9 @@ type, public :: MOM_restart_CS ; private
   logical :: symmetric_checksums    !< If true, do the restart checksums on all the edge points for
                                     !! a non-reentrant grid.  Setting this to true requires that
                                     !! SYMMETRIC_MEMORY_ is defined at compile time.
+  logical :: staggered_checksums_bug !< If true, recover a bug in which the restart checksums of
+                                    !! fields at velocity or corner points are calculated over a
+                                    !! range shifted one point to the west or south with symmetric memory.
   logical :: unsigned_zeros         !< If true, convert any negative zeros that would be written to
                                     !! the restart file into ordinary unsigned zeros.  This does not
                                     !! change answers, but it can be helpful in comparing restart
@@ -2262,6 +2265,8 @@ subroutine restart_init(param_file, CS, restart_root)
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_restart"   ! This module's name.
   logical :: all_default   ! If true, all parameters are using their default values.
+  logical :: enable_bugs   ! If true, the defaults for recently added bug-fix flags are set to
+                           ! recreate the bugs, or if false bugs are only used if actively selected.
 
   if (associated(CS)) then
     call MOM_error(WARNING, "restart_init called with an associated control structure.")
@@ -2281,8 +2286,13 @@ subroutine restart_init(param_file, CS, restart_root)
                  default=.false., do_not_log=.true.)
   call get_param(param_file, mdl, "RESTART_UNSIGNED_ZEROS", CS%unsigned_zeros, &
                  default=.false., do_not_log=.true.)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "RESTART_STAGGERED_CHECKSUMS_BUG", CS%staggered_checksums_bug, &
+                 default=enable_bugs, do_not_log=.true.)
   all_default = ((.not.CS%parallel_restartfiles) .and. (CS%max_fields == 100) .and. &
-                 (CS%checksum_required) .and. (.not.CS%symmetric_checksums) .and. (.not.CS%unsigned_zeros))
+                 (CS%checksum_required) .and. (.not.CS%symmetric_checksums) .and. &
+                 (.not.CS%unsigned_zeros) .and. (CS%staggered_checksums_bug .eqv. enable_bugs))
   if (.not.present(restart_root)) then
     call get_param(param_file, mdl, "RESTARTFILE", CS%restartfile, &
                    default="MOM.res", do_not_log=.true.)
@@ -2317,6 +2327,13 @@ subroutine restart_init(param_file, CS, restart_root)
                  "If true, do the restart checksums on all the edge points for a non-reentrant "//&
                  "grid.  This requires that SYMMETRIC_MEMORY_ is defined at compile time.", &
                  default=.false.)
+  call get_param(param_file, mdl, "RESTART_STAGGERED_CHECKSUMS_BUG", CS%staggered_checksums_bug, &
+                 "If true, recover a bug in which the restart checksums of fields at velocity "//&
+                 "or corner points are calculated over a range that is shifted one point to the "//&
+                 "west or south with symmetric memory.  Setting this to false changes the "//&
+                 "checksums written into the restart files, so restarts written with it true "//&
+                 "will fail their checksum test unless RESTART_CHECKSUMS_REQUIRED is also false.", &
+                 default=enable_bugs)
   call get_param(param_file, mdl, "RESTART_UNSIGNED_ZEROS", CS%unsigned_zeros, &
                  "If true, convert any negative zeros that would be written to the restart file "//&
                  "into ordinary unsigned zeros.  This does not change answers, but it can be "//&
@@ -2431,13 +2448,22 @@ subroutine get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL)
   integer,               intent(out) :: jsL !< j-start for checksum
   integer,               intent(out) :: jeL !< j-end for checksum
 
-  ! Regular non-symmetric compute domain
-  isL = G%isc-G%isd+1
-  ieL = G%iec-G%isd+1
-  jsL = G%jsc-G%jsd+1
-  jeL = G%jec-G%jsd+1
+  ! Local variables
+  integer :: i_lower, j_lower ! The grid i- and j-indices of the field's first element
 
-  ! Expand range east or south for symmetric arrays
+  ! Fields at velocity or corner points start an extra column/row west/south if symmetric.
+  if (CS%staggered_checksums_bug) then
+    i_lower = G%isd ; j_lower = G%jsd
+  else
+    i_lower = G%isd ; if ((pos == EAST_FACE) .or. (pos == CORNER)) i_lower = G%IsdB
+    j_lower = G%jsd ; if ((pos == NORTH_FACE) .or. (pos == CORNER)) j_lower = G%JsdB
+  endif
+
+  ! Computational domain bounds, omitting the faces shared with the neighboring PEs.
+  isL = G%isc - i_lower + 1 ; ieL = G%iec - i_lower + 1
+  jsL = G%jsc - j_lower + 1 ; jeL = G%jec - j_lower + 1
+
+  ! Expand range west or south for symmetric arrays
   if (CS%symmetric_checksums) then
     if (.not.G%symmetric) call MOM_error(FATAL, &
         "Setting SYMMETRIC_RESTART_CHECKSUMS to true only works with symmetric memory allocation, "//&
