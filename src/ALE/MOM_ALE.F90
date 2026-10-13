@@ -787,8 +787,7 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
   real, dimension(SZI_(G),SZJ_(G))          :: work_2d ! The rate of change of column-integrated tracer
                                                        ! content [Conc H T-1 ~> Conc m s-1 or Conc kg m-2 s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: rvp ! Variance production due to the ALE remapping
-                                                   ! [Conc2 H T-1 ~> Conc2 m s-1 or Conc2 kg m-2 s-1] or
-                                                   ! cell thickness [H T-1 ~> m s-1 or kg m-2 s-1]
+                                                   ! [Conc2 H T-1 ~> Conc2 m s-1 or Conc2 kg m-2 s-1]
   logical :: PCM(GV%ke) ! If true, do PCM remapping from a cell.
   logical :: compute_remapping_variance ! If true, compute the variance production of tracers due to the ALE remapping
   real :: Idt           ! The inverse of the timestep [T-1 ~> s-1]
