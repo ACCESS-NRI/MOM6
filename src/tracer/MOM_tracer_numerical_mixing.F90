@@ -222,16 +222,16 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
 
   do i1 = 1, n1
     col_var_production(i1) = col_var_production(i1) + (h1(i1) * (u1(i1) * u1(i1)))
-      do j2 = isrc_start(i1), isrc_end(i1)
-        if (j2 < itgt_start(i1) .or. j2 > itgt_end(i1)) then
-          col_var_production(i1) = col_var_production(i1) + (h_sub(j2) * (u_sub(j2) * u_sub(j2)))
-        endif
-      enddo
-      do j2 = itgt_start(i1), itgt_end(i1)
-        if (j2 < isrc_start(i1) .or. j2 > isrc_end(i1)) then
-          col_var_production(i1) = col_var_production(i1) - (h_sub(j2) * (u_sub(j2) * u_sub(j2)))
-        endif
-      enddo
+    do j2 = isrc_start(i1), isrc_end(i1)
+      if (j2 < itgt_start(i1) .or. j2 > itgt_end(i1)) then
+        col_var_production(i1) = col_var_production(i1) + (h_sub(j2) * (u_sub(j2) * u_sub(j2)))
+      endif
+    enddo
+    do j2 = itgt_start(i1), itgt_end(i1)
+      if (j2 < isrc_start(i1) .or. j2 > isrc_end(i1)) then
+        col_var_production(i1) = col_var_production(i1) - (h_sub(j2) * (u_sub(j2) * u_sub(j2)))
+      endif
+    enddo
   enddo
 
 end subroutine remapping_variance_production
