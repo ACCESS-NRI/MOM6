@@ -213,7 +213,7 @@ type, public :: ice_shelf_CS ; private
              id_tfreeze = -1, id_tfl_shelf = -1, &
              id_thermal_driving = -1, id_haline_driving = -1, &
              id_u_ml = -1, id_v_ml = -1, id_sbdry = -1, &
-             id_h_shelf = -1, id_dhdt_shelf = -1, id_h_mask = -1, id_frazil = -1, &
+             id_h_shelf = -1, id_dhdt_shelf = -1, id_h_mask = -1, id_frazil = -1, id_frazil_refreeze = -1, &
              id_surf_elev = -1, id_bathym = -1, &
              id_area_shelf_h = -1, &
              id_ustar_shelf = -1, id_shelf_mass = -1, id_mass_flux = -1, &
@@ -299,6 +299,9 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
     haline_driving !< (SSS - S_boundary) ice-ocean
                !! interface, positive for melting and negative for freezing [S ~> ppt].
                !! This is computed as part of the ISOMIP diagnostics.
+  real, dimension(SZDI_(CS%grid),SZDJ_(CS%grid)) :: &
+    frazil_refreeze !< frazil_refreeze
+
   real :: time_step !< Length of time over which these fluxes will be applied [T ~> s].
   real :: Itime_step !< Inverse of the length of time over which these fluxes will be applied [T-1 ~> s-1]
   real :: VK       !< Von Karman's constant [nondim]
@@ -382,7 +385,7 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
   time_step = time_step_in
   Itime_step = 1./time_step
 
-  dh_adott(:,:) = 0.0 ; dh_bdott(:,:) = 0.0
+  dh_adott(:,:) = 0.0 ; dh_bdott(:,:) = 0.0; frazil_refreeze(:,:) = 0.0;
 
   if (CS%active_shelf_dynamics) then
     !calculate previous volumes above floatation
@@ -888,6 +891,7 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
     !Add frazil formation
     if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) &
       ISS%water_flux(i,j) = ISS%water_flux(i,j) - ISS%frazil(i,j) * I_dt_LHF
+      frazil_refreeze(i,j) = - ISS%frazil(i,j) * I_dt_LHF
     fluxes%iceshelf_melt(i,j) = ISS%water_flux(i,j)
   enddo ; enddo ! i- and j-loops
 
@@ -981,6 +985,7 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
   if (CS%id_dhdt_shelf > 0) call post_data(CS%id_dhdt_shelf, ISS%dhdt_shelf, CS%diag)
   if (CS%id_h_mask > 0) call post_data(CS%id_h_mask,ISS%hmask,CS%diag)
   if (CS%id_frazil > 0) call post_data(CS%id_frazil,ISS%frazil,CS%diag)
+  if (CS%id_frazil_refreeze > 0) call post_data(CS%id_frazil_refreeze,frazil_refreeze,CS%diag)
   if (CS%active_shelf_dynamics) &
       call process_and_post_scalar_data(CS, vaf0, vaf0_A, vaf0_G, Itime_step, dh_adott, dh_bdott)
   call disable_averaging(CS%diag)
@@ -2222,6 +2227,8 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
       'Fric vel under shelf', 'm/s', conversion=US%Z_to_m*US%s_to_T)
   CS%id_frazil = register_diag_field('ice_shelf_model', 'frazil', CS%diag%axesT1, CS%Time, &
      'Frazil heat rejected by the ocean', 'J m-2', conversion=US%Q_to_J_kg*US%RZ_to_kg_m2)
+  CS%id_frazil_refreeze = register_diag_field('ice_shelf_model', 'frazil_refreeze', CS%diag%axesT1, CS%Time, &
+     'Frazil heat turned into freezing', 'kg s-1 m-2', conversion=US%RZ_T_to_kg_m2s)
   if (CS%active_shelf_dynamics) then
     CS%id_h_mask = register_diag_field('ice_shelf_model', 'h_mask', CS%diag%axesT1, CS%Time, &
        'ice shelf thickness mask', 'none', conversion=1.0)
