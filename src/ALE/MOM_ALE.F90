@@ -37,7 +37,8 @@ use MOM_regridding,       only : regriddingDefaultMinThickness
 use MOM_regridding,       only : regridding_CS, set_regrid_params, write_regrid_file
 use MOM_regridding,       only : getCoordinateInterfaces
 use MOM_regridding,       only : getCoordinateUnits, getCoordinateShortName
-use MOM_regridding,       only : getStaticThickness
+use MOM_regridding,       only : getCoordinateMode, getStaticThickness
+use MOM_regridding,       only : get_adapt_CS
 use MOM_remapping,        only : initialize_remapping, end_remapping
 use MOM_remapping,        only : remapping_core_h, remapping_core_w
 use MOM_remapping,        only : remappingSchemesDoc, remappingDefaultScheme
@@ -51,10 +52,13 @@ use MOM_verticalGrid,     only : get_thickness_units, verticalGrid_type
 
 !use regrid_consts,       only : coordinateMode, DEFAULT_COORDINATE_MODE
 use regrid_consts,        only : coordinateUnits, coordinateMode, state_dependent
+use regrid_consts,        only : REGRIDDING_ADAPTIVE
 use regrid_edge_values,   only : edge_values_implicit_h4
 use PLM_functions,        only : PLM_reconstruction, PLM_boundary_extrapolation
 use PLM_functions,        only : PLM_extrapolate_slope, PLM_monotonized_slope, PLM_slope_wa
 use PPM_functions,        only : PPM_reconstruction, PPM_boundary_extrapolation
+
+use coord_adapt, only : adapt_CS, adapt_diag_CS, associate_adapt_diag, get_adapt_diag_CS
 
 implicit none ; private
 #include <MOM_memory.h>
@@ -155,6 +159,7 @@ public pre_ALE_adjustments
 public ALE_remap_init_conds
 public ALE_register_diags
 public ALE_set_extrap_boundaries
+public ALE_register_coord_diags
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -427,6 +432,140 @@ subroutine ALE_register_diags(Time, G, GV, US, diag, CS)
 
 end subroutine ALE_register_diags
 
+
+!> Register any diagnostics from within a specific regridding routine
+subroutine ALE_register_coord_diags(Time, G, GV, US, diag, CS)
+  type(time_type), target, intent(in) :: Time !< Time structure
+  type(ocean_grid_type),   intent(in) :: G    !< Grid structure
+  type(unit_scale_type),   intent(in) :: US   !< Dimensional unit scaling type
+  type(verticalGrid_type), intent(in) :: GV   !< Vertical grid structure
+  type(diag_ctrl), target, intent(in) :: diag !< Diagnostics control structure
+  type(ALE_CS), pointer               :: CS   !< Module control structure
+
+  type(adapt_CS), pointer :: adapt_CS
+  type(adapt_diag_CS), pointer :: diag_CS
+
+  integer :: isd, ied, jsd, jed, isdB, iedB, jsdB, jedB, nk
+
+  isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed
+  isdB = G%isdB ; iedB = G%iedB ; jsdB = G%jsdB ; jedB = G%jedB
+  nk = GV%ke
+
+  select case (getCoordinateMode(CS%regridCS))
+  case ( REGRIDDING_ADAPTIVE )
+    allocate(diag_CS)
+
+    diag_CS%id_slope_u = register_diag_field("ocean_model", "adapt_slope_u", diag%axesCui, Time, &
+         "Adaptive coordinate slope on u-points in density space (used for flux calc.)")
+    diag_CS%id_slope_v = register_diag_field("ocean_model", "adapt_slope_v", diag%axesCvi, Time, &
+         "Adaptive coordinate slope on v-points in density space (used for flux calc.)")
+
+    diag_CS%id_denom_u = register_diag_field("ocean_model", "adapt_denom_u", diag%axesCui, Time, &
+         "Adaptive coordinate density denominator on u-points (used for density displacement)")
+    diag_CS%id_denom_v = register_diag_field("ocean_model", "adapt_denom_v", diag%axesCvi, Time, &
+         "Adaptive coordinate density denominator on v-points (used for density displacement)")
+
+    diag_CS%id_phys_u = register_diag_field("ocean_model", "adapt_phys_u", diag%axesCui, Time, &
+         "Adaptive coordinate physical slope on u-points (used as weighting)")
+    diag_CS%id_phys_v = register_diag_field("ocean_model", "adapt_phys_v", diag%axesCvi, Time, &
+         "Adaptive coordinate physical slope on v-points (used as weighting)")
+
+
+    diag_CS%id_coord_u = register_diag_field("ocean_model", "adapt_coord_u", diag%axesCui, Time, &
+         "Adaptive coordinate along-coordinate slope on u-points (used as weighting)")
+    diag_CS%id_coord_v = register_diag_field("ocean_model", "adapt_coord_v", diag%axesCvi, Time, &
+         "Adaptive coordinate along-coordinate slope on v-points (used as weighting)")
+
+    diag_CS%id_limiting_density = register_diag_field("ocean_model", "adapt_limiting_density", &
+         diag%axesTi, Time, &
+         "Adaptive coordinate layer-limiting on density term (difference between "// &
+         "unlimited and limited flux, before weighting", &
+         conversion=(GV%H_to_Z * US%Z_to_m) ** 2)
+    diag_CS%id_limiting_smoothing = register_diag_field("ocean_model", "adapt_limiting_smoothing", &
+         diag%axesTi, Time, &
+         "Adaptive coordinate layer-limiting on smoothing term (difference between "// &
+         "unlimited and limited flux, before weighting", &
+         conversion=(GV%H_to_Z * US%Z_to_m) ** 2)
+
+    diag_CS%id_w_adjust = register_diag_field("ocean_model", "adapt_w_adjust", diag%axesTi, Time, &
+         "Adaptive coordinate interface velocity due to hydrostatic adjustment")
+
+    diag_CS%id_disp_density = register_diag_field("ocean_model", "adapt_disp_density", &
+         diag%axesTi, Time, &
+         "Adaptive coordinate interface displacement due to density adaptivity", &
+         conversion=GV%H_to_Z * US%Z_to_m)
+    diag_CS%id_disp_smoothing = register_diag_field("ocean_model", "adapt_disp_smoothing", &
+         diag%axesTi, Time, &
+         "Adaptive coordinate interface displacement due to (limited) smoothing", &
+         conversion=GV%H_to_Z * US%Z_to_m)
+    diag_CS%id_disp_unlimited = register_diag_field("ocean_model", "adapt_disp_unlimited", &
+         diag%axesTi, Time, &
+         "Adaptive coordinate interface displacement due to (barotropic) smoothing", &
+         conversion=US%z_to_m)
+
+    if (diag_CS%id_slope_u > 0) allocate(diag_CS%slope_u(isdB:iedB,jsd:jed,nk+1))
+    if (diag_CS%id_slope_v > 0) allocate(diag_CS%slope_v(isd:ied,jsdB:jedB,nk+1))
+    if (diag_CS%id_denom_u > 0) allocate(diag_CS%denom_u(isdB:iedB,jsd:jed,nk+1))
+    if (diag_CS%id_denom_v > 0) allocate(diag_CS%denom_v(isd:ied,jsdB:jedB,nk+1))
+
+    if (diag_CS%id_phys_u > 0) allocate(diag_CS%phys_u(isdB:iedB,jsd:jed,nk+1))
+    if (diag_CS%id_phys_v > 0) allocate(diag_CS%phys_v(isd:ied,jsdB:jedB,nk+1))
+    if (diag_CS%id_coord_u > 0) allocate(diag_CS%coord_u(isdB:iedB,jsd:jed,nk+1))
+    if (diag_CS%id_coord_v > 0) allocate(diag_CS%coord_v(isd:ied,jsdB:jedB,nk+1))
+
+    if (diag_CS%id_limiting_density > 0) &
+         allocate(diag_CS%limiting_density(isd:ied,jsd:jed,nk+1))
+    if (diag_CS%id_limiting_smoothing > 0) &
+         allocate(diag_CS%limiting_smoothing(isd:ied,jsd:jed,nk+1))
+
+    if (diag_CS%id_w_adjust > 0) &
+         allocate(diag_CS%w_adjust(isd:ied,jsd:jed,nk+1))
+
+    if (diag_CS%id_disp_density > 0) &
+         allocate(diag_CS%disp_density(isd:ied,jsd:jed,nk+1))
+    if (diag_CS%id_disp_smoothing > 0) &
+         allocate(diag_CS%disp_smoothing(isd:ied,jsd:jed,nk+1))
+    if (diag_CS%id_disp_unlimited > 0) &
+         allocate(diag_CS%disp_unlimited(isd:ied,jsd:jed,nk+1))
+
+    adapt_CS => get_adapt_CS(CS%regridCS)
+    call associate_adapt_diag(adapt_CS, diag_CS)
+  end select
+
+end subroutine ALE_register_coord_diags
+
+subroutine ALE_post_coord_diags(CS)
+  type(ALE_CS), pointer :: CS !< Module control structure
+
+  type(adapt_CS), pointer :: adapt_CS
+  type(adapt_diag_CS), pointer :: diag_CS
+
+  select case (getCoordinateMode(CS%regridCS))
+  case ( REGRIDDING_ADAPTIVE )
+    diag_CS => get_adapt_diag_CS(get_adapt_CS(CS%regridCS))
+    if (.not. associated(diag_CS)) return
+
+    if (diag_CS%id_slope_u > 0) call post_data(diag_CS%id_slope_u, diag_CS%slope_u, CS%diag)
+    if (diag_CS%id_slope_v > 0) call post_data(diag_CS%id_slope_v, diag_CS%slope_v, CS%diag)
+    if (diag_CS%id_denom_u > 0) call post_data(diag_CS%id_denom_u, diag_CS%denom_u, CS%diag)
+    if (diag_CS%id_denom_v > 0) call post_data(diag_CS%id_denom_v, diag_CS%denom_v, CS%diag)
+    if (diag_CS%id_phys_u > 0) call post_data(diag_CS%id_phys_u, diag_CS%phys_u, CS%diag)
+    if (diag_CS%id_phys_v > 0) call post_data(diag_CS%id_phys_v, diag_CS%phys_v, CS%diag)
+    if (diag_CS%id_coord_u > 0) call post_data(diag_CS%id_coord_u, diag_CS%coord_u, CS%diag)
+    if (diag_CS%id_coord_v > 0) call post_data(diag_CS%id_coord_v, diag_CS%coord_v, CS%diag)
+    if (diag_CS%id_limiting_density > 0) &
+         call post_data(diag_CS%id_limiting_density, diag_CS%limiting_density, CS%diag)
+    if (diag_CS%id_limiting_smoothing > 0) &
+         call post_data(diag_CS%id_limiting_smoothing, diag_CS%limiting_smoothing, CS%diag)
+    if (diag_CS%id_w_adjust > 0) call post_data(diag_CS%id_w_adjust, diag_CS%w_adjust, CS%diag)
+    if (diag_CS%id_disp_density > 0) call post_data(diag_CS%id_disp_density, diag_CS%disp_density, CS%diag)
+    if (diag_CS%id_disp_smoothing > 0) &
+         call post_data(diag_CS%id_disp_smoothing, diag_CS%disp_smoothing, CS%diag)
+    if (diag_CS%id_disp_unlimited > 0) &
+         call post_data(diag_CS%id_disp_unlimited, diag_CS%disp_unlimited, CS%diag)
+  end select
+end subroutine ALE_post_coord_diags
+
 !> Crudely adjust (initial) grid for integrity.
 !! This routine is typically called (from initialize_MOM in file MOM.F90)
 !! before the main time integration loop to initialize the regridding stuff.
@@ -519,7 +658,7 @@ end subroutine pre_ALE_adjustments
 
 !> Takes care of building a new grid. The creation of the new grid can be based on z coordinates,
 !! target interface densities, sigma coordinates or any arbitrary coordinate system.
-subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_cell)
+subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_cell, dt)
   type(ocean_grid_type),                      intent(in)    :: G   !< Ocean grid informations
   type(verticalGrid_type),                    intent(in)    :: GV  !< Ocean vertical grid structure
   type(unit_scale_type),                      intent(in)    :: US  !< A dimensional unit scaling type
@@ -534,7 +673,8 @@ subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_
   type(ALE_CS),                               pointer       :: CS  !< Regridding parameters and options
   real, dimension(SZI_(G),SZJ_(G)), optional, intent(in)    :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
   logical, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                    optional, intent(out)   :: PCM_cell !< If true, use PCM remapping in a cell.
+       optional, intent(out)   :: PCM_cell !< If true, use PCM remapping in a cell.
+  real, optional, intent(in) :: dt !< Time step between calls to ALE_regrid [T ~> s]
 
   ! Local variables
   logical :: showCallTree
@@ -547,7 +687,7 @@ subroutine ALE_regrid( G, GV, US, h, h_new, dzRegrid, tv, CS, frac_shelf_h, PCM_
   ! Both are needed for the subsequent remapping of variables.
   dzRegrid(:,:,:) = 0.0
   call regridding_main( CS%remapCS, CS%regridCS, G, GV, US, h, tv, h_new, dzRegrid, &
-                        frac_shelf_h=frac_shelf_h, PCM_cell=PCM_cell)
+                        frac_shelf_h=frac_shelf_h, PCM_cell=PCM_cell, dt=dt)
 
   if (CS%id_dzRegrid>0) then ; if (query_averaging_enabled(CS%diag)) then
     call post_data(CS%id_dzRegrid, dzRegrid, CS%diag, alt_h=h_new)
@@ -725,7 +865,7 @@ subroutine ALE_regrid_accelerated(CS, G, GV, US, h, tv, n_itt, u, v, OBC, Reg, d
     ! Update the layer specific volumes if necessary
     if (allocated(tv_local%SpV_avg)) call calc_derived_thermo(tv_local, h, G, GV, US, halo=1)
 
-    call regridding_main(CS%remapCS, CS%regridCS, G, GV, US, h_loc, tv_local, h, dzInterface)
+    call regridding_main(CS%remapCS, CS%regridCS, G, GV, US, h_loc, tv_local, h, dzInterface, dt=dt)
     if (CS%remap_uv_using_old_alg) &
         dzIntTotal(:,:,:) = dzIntTotal(:,:,:) + dzInterface(:,:,:)
 
