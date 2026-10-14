@@ -48,7 +48,7 @@ use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_flux_ini
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
-use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
+use MOM_ice_shelf,           only : shelf_calc_flux, ice_shelf_CS
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
 use MOM_ice_shelf,           only : initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
 use MOM_ice_shelf,           only : adjust_ice_sheet_frazil
@@ -291,6 +291,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
                       Time_in, offline_tracer_mode=OS%offline_tracer_mode, &
                       input_restart_file=input_restart_file, &
                       diag_ptr=OS%diag, count_calls=.true., tracer_flow_CSp=OS%tracer_flow_CSp, &
+                      ice_shelf_CSp=OS%ice_shelf_CSp, &
                       waves_CSp=OS%Waves, ensemble_num=inst_index)
   call get_MOM_state_elements(OS%MOM_CSp, G=OS%grid, GV=OS%GV, US=OS%US, C_p=OS%C_p, &
                               C_p_scaled=OS%fluxes%C_p, use_temp=use_temperature)
@@ -400,8 +401,6 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, gas_fields_ocn, i
                             OS%forcing_CSp, OS%restore_salinity, OS%restore_temp, OS%use_waves)
 
   if (OS%use_ice_shelf)  then
-    call initialize_ice_shelf(param_file, OS%grid, OS%Time, OS%ice_shelf_CSp, &
-                              OS%diag, Time_init, OS%dirs%output_directory)
     call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%fluxes)
     call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%flux_tmp)
     call initialize_ice_shelf_forces(OS%ice_shelf_CSp, OS%grid, OS%US, OS%forces)
