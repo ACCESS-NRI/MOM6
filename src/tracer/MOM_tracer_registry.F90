@@ -415,8 +415,8 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
     if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
     if (GV%Boussinesq) then ; var_prod_units = trim(unit2)//" m s-1"
     else ; var_prod_units = trim(unit2)//" kg m-2 s-1" ; endif
-    Tr%id_advection_scheme_variance_production = register_diag_field("ocean_model", &
-        trim(shortnm)//"_advection_scheme_variance_production", diag%axesTL, Time, &
+    Tr%id_varprod_adv = register_diag_field("ocean_model", &
+        trim(shortnm)//"_varprod_adv", diag%axesTL, Time, &
         "Spurious production of "//trim(shortnm)//" variance due to advection", &
         var_prod_units, conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T, v_extensive=.true.)
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
@@ -429,9 +429,9 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         trim(units) // " m")
     Tr%id_surf = register_diag_field("ocean_model", trim(shortnm)//"_SURF", &
         diag%axesT1, Time, "Surface values of "// trim(longname), trim(units))
-    if ((Tr%id_adx > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+    if ((Tr%id_adx > 0) .or. (Tr%id_varprod_adv > 0)) &
       call safe_alloc_ptr(Tr%ad_x,IsdB,IedB,jsd,jed,nz)
-    if ((Tr%id_ady > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+    if ((Tr%id_ady > 0) .or. (Tr%id_varprod_adv > 0)) &
       call safe_alloc_ptr(Tr%ad_y,isd,ied,JsdB,JedB,nz)
     if (Tr%id_dfx > 0) call safe_alloc_ptr(Tr%df_x,IsdB,IedB,jsd,jed,nz)
     if (Tr%id_dfy > 0) call safe_alloc_ptr(Tr%df_y,isd,ied,JsdB,JedB,nz)
@@ -481,7 +481,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         diag%axesT1, Time, &
         'Vertical sum of horizontal convergence of residual mean advective fluxes of '//&
         trim(lowercase(flux_longname)), conv_units, conversion=Tr%conv_scale*US%s_to_T)
-    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0) .or. (Tr%id_advection_scheme_variance_production > 0)) &
+    if ((Tr%id_adv_xy > 0) .or. (Tr%id_adv_xy_2d > 0) .or. (Tr%id_varprod_adv > 0)) &
       call safe_alloc_ptr(Tr%advection_xy,isd,ied,jsd,jed,nz)
 
     Tr%id_tendency = register_diag_field('ocean_model', trim(shortnm)//'_tendency', &
@@ -495,7 +495,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
         Tr%t_prev(i,j,k) = Tr%t(i,j,k)
       enddo ; enddo ; enddo
     endif
-    if (Tr%id_advection_scheme_variance_production > 0) &
+    if (Tr%id_varprod_adv > 0) &
       call safe_alloc_ptr(Tr%t_pre_adv,isd,ied,jsd,jed,nz)
 
     ! Neutral/Horizontal diffusion convergence tendencies
@@ -791,9 +791,8 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
   real    :: frac_under_100m(SZI_(G),SZJ_(G),SZK_(GV)) ! weights used to compute 100m vertical integrals [nondim]
   real    :: ztop(SZI_(G),SZJ_(G)) ! position of the top interface [H ~> m or kg m-2]
   real    :: zbot(SZI_(G),SZJ_(G)) ! position of the bottom interface [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV))   :: asvp ! Advection scheme variance production of a
-                                                      ! tracer [CU2 H T-1 ~> conc2 m s-1 or
-                                                      ! conc2 kg m-2 s-1]
+  real    :: varprod_adv(SZI_(G),SZJ_(G),SZK_(GV)) ! Advection scheme variance production of a tracer
+                                                   ! [CU2 H T-1 ~> conc2 m s-1 or conc2 kg m-2 s-1]
   type(tracer_type), pointer :: Tr=>NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -847,10 +846,10 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag, uhtr, vht
       call post_data(Tr%id_adv_xy_2d, work2d, diag)
     endif
 
-    if (Tr%id_advection_scheme_variance_production > 0) then
-      asvp(:,:,:) = 0.
-      call advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, asvp)
-      call post_data(Tr%id_advection_scheme_variance_production, asvp, diag, alt_h=h_diag)
+    if (Tr%id_varprod_adv > 0) then
+      varprod_adv(:,:,:) = 0.
+      call advection_scheme_variance_production(G, GV, Tr, h_diag, h, dt_trans, Idt, uhtr, vhtr, varprod_adv)
+      call post_data(Tr%id_varprod_adv, varprod_adv, diag, alt_h=h_diag)
     endif
 
     ! A few diagnostics introduce with MARBL driver
