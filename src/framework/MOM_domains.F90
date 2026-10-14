@@ -489,19 +489,29 @@ subroutine MOM_define_layout(n_global, ndivs, layout)
 
   ! Local variables
   integer :: isz, jsz, idiv, jdiv
+  real :: squareness      ! A measure of the squareness of a candidate layout [gridpoints]
+  real :: best_squareness ! The largest squareness found so far [gridpoints]
 
-  ! At present, this algorithm is a copy of mpp_define_layout, but it could perhaps be improved?
+  ! This algorithm differs from mpp_define_layout, which searches only downwards from the
+  ! idiv that would make the subdomains exactly square.  That search can miss a better
+  ! divisor just above the target, so all divisors of ndivs are examined here instead.
 
   isz = n_global(1) ; jsz = n_global(2)
-  ! First try to divide ndivs to match the domain aspect ratio.  If this is not an even
-  ! divisor of ndivs, reduce idiv until a factor is found.
-  idiv = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
-  do while( mod(ndivs,idiv) /= 0 )
-    idiv = idiv - 1
-  enddo ! This will terminate at idiv=1 if not before
-  jdiv = ndivs / idiv
-
-  layout = (/ idiv, jdiv /)
+  layout(1) = 1
+  best_squareness = 0.0
+  ! Loop over all divisors and find the one that gives the highest squareness
+  do idiv=1,ndivs
+    if (mod(ndivs, idiv) /= 0) cycle
+    jdiv = ndivs / idiv
+    ! The shorter of the two side lengths gives a measure of the squareness since the
+    ! product of the two side lengths is isz*jsz/ndivs for every candidate layout
+    squareness = min(real(isz) / real(idiv), real(jsz) / real(jdiv))
+    if (squareness > best_squareness) then
+      best_squareness = squareness
+      layout(1) = idiv
+    endif
+  enddo
+  layout(2) = ndivs / layout(1)
 end subroutine MOM_define_layout
 
 !> Given a desired number of active npes, generate a layout and mask_table
@@ -534,6 +544,7 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
   real :: ar             ! layout aspect ratio to check if it is too extreme        [nondim]
   real :: m_to_Z         ! A conversion factor from m to height units           [Z m-1 ~> 1]
   integer :: nx, ny      ! global domain sizes
+  integer :: n_ocean     ! The number of ocean points in the global domain          [nondim]
   integer, parameter :: ibuf=2, jbuf=2
   real, parameter :: r_extreme = 4.0 ! aspect ratio limit (>1) for a layout to be considered [nondim]
   integer :: num_masked_blocks
@@ -619,8 +630,10 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
     mask(:, jbuf+ny) = 1
   endif
 
-  glob_ocn_frac = real(sum(mask(1+ibuf:nx+ibuf, 1+jbuf:ny+jbuf))) / (nx * ny)
+  n_ocean = sum(mask(1+ibuf:nx+ibuf, 1+jbuf:ny+jbuf))
+  glob_ocn_frac = real(n_ocean) / (nx * ny)
   max_feasible_p = 0
+  num_masked_blocks = 0
 
   ! Iteratively check for all possible division counts starting from the upper bound of npes/glob_ocn_frac.
   ! The first encountered feasible division count is stored in max_feasible_p. If the target_io_pes is not
@@ -672,8 +685,14 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
   enddo outer
 
   if (num_masked_blocks == 0) then
-    call MOM_error(FATAL, "Couldn't auto-eliminate any land blocks. Try to increase the number "//&
-        "of MOM6 PEs or set AUTO_MASKTABLE to False.")
+    if (n_ocean == nx*ny) then
+      call MOM_error(NOTE, "This domain has no land, so there are no land blocks to "//&
+          "auto-eliminate. Proceeding with an unmasked layout.")
+    else
+      call MOM_error(WARNING, "Couldn't auto-eliminate any land blocks, but the domain "//&
+          "contains land. Increasing the number of MOM6 PEs may allow land block "//&
+          "elimination for better efficiency. Proceeding with an unmasked layout.")
+    endif
   endif
 
   ! Call determine_land_blocks once again, this time to retrieve and write out the mask_table.
