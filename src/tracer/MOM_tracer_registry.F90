@@ -308,7 +308,7 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
   character(len=48)  :: conv_units ! The units for flux convergences, either
                                  ! [units] m2 s-1 or [units] kg s-1.
   character(len=48)  :: unit2    ! The dimensions of the tracer squared
-  character(len=64)  :: var_prod_units ! The units for thickness-weighted tracer variance production,
+  character(len=64)  :: varprod_units ! The units for thickness-weighted tracer variance production,
                                  ! either [units]2 m s-1 or [units]2 kg m-2 s-1.
   character(len=72)  :: cmorname ! The CMOR name of this tracer.
   character(len=120) :: cmor_longname ! The CMOR long name of that variable.
@@ -413,12 +413,12 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
     endif
     unit2 = trim(units)//"2"
     if (index(units(1:len_trim(units))," ") > 0) unit2 = "("//trim(units)//")2"
-    if (GV%Boussinesq) then ; var_prod_units = trim(unit2)//" m s-1"
-    else ; var_prod_units = trim(unit2)//" kg m-2 s-1" ; endif
+    if (GV%Boussinesq) then ; varprod_units = trim(unit2)//" m s-1"
+    else ; varprod_units = trim(unit2)//" kg m-2 s-1" ; endif
     Tr%id_varprod_adv = register_diag_field("ocean_model", &
         trim(shortnm)//"_varprod_adv", diag%axesTL, Time, &
         "Spurious production of "//trim(shortnm)//" variance due to advection", &
-        var_prod_units, conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T, v_extensive=.true.)
+        varprod_units, conversion=(Tr%conc_scale**2)*GV%H_to_MKS*US%s_to_T, v_extensive=.true.)
     Tr%id_zint = register_diag_field("ocean_model", trim(shortnm)//"_zint", &
         diag%axesT1, Time, &
         "Thickness-weighted integral of " // trim(longname), &
