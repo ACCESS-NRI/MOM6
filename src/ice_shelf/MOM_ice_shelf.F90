@@ -886,9 +886,10 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
     endif ! area_shelf_h
 
     !Add frazil formation
-    if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) &
+    if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) then
       ISS%water_flux(i,j) = ISS%water_flux(i,j) - ISS%frazil(i,j) * I_dt_LHF
       frazil_refreeze(i,j) = - ISS%frazil(i,j) * I_dt_LHF
+    endif
     fluxes%iceshelf_melt(i,j) = ISS%water_flux(i,j)
 
     ! mass flux [R Z L2 T-1 ~> kg s-1], part of ISOMIP diags.
