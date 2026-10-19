@@ -3407,7 +3407,7 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "near-surface layers become thin relative to this scale, in "//&
                  "which case the forcing tendencies are scaled down by "//&
                  "distributing the forcing over this depth scale.", &
-                 units="m", default=0.001, scale=GV%m_to_H)
+                 units="m", default=CS%minimum_forcing_depth, scale=GV%m_to_H)
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
                  "The largest fraction of a layer than can be lost to forcing "//&
                  "(e.g. evaporation, sea-ice formation) in one time-step. The unused "//&
