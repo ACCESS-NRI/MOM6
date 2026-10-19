@@ -885,14 +885,14 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
       ISS%water_flux(i,j) = 0.0
     endif ! area_shelf_h
 
-    ! mass flux [R Z L2 T-1 ~> kg s-1], part of ISOMIP diags.
-    mass_flux(i,j) = ISS%water_flux(i,j) * ISS%area_shelf_h(i,j)
-
     !Add frazil formation
     if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) &
       ISS%water_flux(i,j) = ISS%water_flux(i,j) - ISS%frazil(i,j) * I_dt_LHF
       frazil_refreeze(i,j) = - ISS%frazil(i,j) * I_dt_LHF
     fluxes%iceshelf_melt(i,j) = ISS%water_flux(i,j)
+
+    ! mass flux [R Z L2 T-1 ~> kg s-1], part of ISOMIP diags.
+    mass_flux(i,j) = ISS%water_flux(i,j) * ISS%area_shelf_h(i,j)
   enddo ; enddo ! i- and j-loops
 
   if (CS%active_shelf_dynamics .or. CS%override_shelf_movement) then
