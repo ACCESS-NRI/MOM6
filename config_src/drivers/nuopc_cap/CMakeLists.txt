@@ -23,6 +23,7 @@ target_sources(mom6lib PRIVATE
   mom_cap_fms_coupler_bcs.F90
   mom_ocean_model_nuopc.F90
   mom_cap_outputlog.F90
+  mom_outputlog_methods.F90
   mom_cap_profiling.F90
   mom_inline_mod.F90
 )
