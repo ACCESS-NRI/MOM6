@@ -6,7 +6,7 @@
 
 module MOM_cap_mod
 
-use field_manager_mod,        only: field_manager_init, field_manager_end
+use field_manager_mod,        only: field_manager_init
 use MOM_domains,              only: get_domain_extent
 use MOM_io,                   only: stdout, io_infra_end
 use MOM_io,                   only: insert_ensemble_appendix
@@ -2381,8 +2381,6 @@ subroutine ocean_model_finalize(gcomp, rc)
                           ESMF_LOGMSG_INFO)
 
   call ocean_model_end(ocean_public, ocean_State, Time, write_restart=write_restart)
-
-  call field_manager_end()
 
   call io_infra_end()
   call MOM_infra_end()
