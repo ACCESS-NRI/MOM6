@@ -2619,12 +2619,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "HMIX_SHELF_PROP is the depth over which to average "//&
                  "to find surface properties like "//&
                  "SST and SSS or density (but not surface velocities).", &
-                 units="m", default=CS%Hmix_z, scale=US%m_to_Z)
+                 units="m", default=Hmix_z, scale=US%m_to_Z)
     call get_param(param_file, "MOM", "HMIX_UV_SHELF_PROP", Hmix_UV_shelf_z, &
                  "HMIX_UV_SHELF_PROP is the depth over which to average "//&
                  "to find surface flow properties, "//&
                  "SSU, SSV. A non-positive value indicates no averaging.", &
-                 units="m", default=CS%Hmix_UV_z, scale=US%m_to_Z)
+                 units="m", default=Hmix_UV_z, scale=US%m_to_Z)
   endif
   call get_param(param_file, "MOM", "HFREEZE", HFrz_z, &
                  "If HFREEZE > 0, melt potential will be computed. The actual depth "//&
