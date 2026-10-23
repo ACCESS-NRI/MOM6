@@ -2131,8 +2131,7 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   if ((.not. new_sim) .and. restore_shelf_state) then
     ! This line calls a subroutine that reads the initial conditions from a restart file.
     call MOM_mesg("MOM_ice_shelf.F90, initialize_ice_shelf: Restoring ice shelf from file.")
-   ! call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, G, CS%restart_CSp)
-    call restore_state('Shelf.res.nc', dirs%restart_input_dir, Time, G, CS%restart_CSp)
+    call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, G, CS%restart_CSp)
 
   endif
 
