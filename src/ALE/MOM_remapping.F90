@@ -20,7 +20,6 @@ use PPM_functions, only : PPM_reconstruction, PPM_boundary_extrapolation
 use PPM_functions, only : PPM_monotonicity
 use PQM_functions, only : PQM_reconstruction, PQM_boundary_extrapolation_v1
 use MOM_hybgen_remap, only : hybgen_plm_coefs, hybgen_ppm_coefs, hybgen_weno_coefs
-use MOM_tracer_numerical_mixing, only : remapping_variance_production
 
 use Recon1d_type, only : Recon1d
 use Recon1d_PCM, only : PCM
@@ -88,6 +87,8 @@ public remapping_core_h, remapping_core_w
 public initialize_remapping, end_remapping, remapping_set_param, extract_member_remapping_CS
 public remapping_unit_tests, build_reconstructions_1d, average_value_ppoly
 public interpolate_column, reintegrate_column, dzFromH1H2
+
+private remapping_variance_production
 
 ! The following are private parameter constants
 integer, parameter  :: REMAPPING_PCM        = 0 !< O(h^1) remapping scheme
@@ -235,7 +236,7 @@ end subroutine extract_member_remapping_CS
 !!
 !! \todo Remove h_neglect argument by moving into remapping_CS
 !! \todo Remove PCM_cell argument by adding new method in Recon1D class
-subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, remap_variance, col_var_production)
+subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, col_var_production)
   type(remapping_CS),  intent(in)  :: CS !< Remapping control structure
   integer,             intent(in)  :: n0 !< Number of cells on source grid
   real, dimension(n0), intent(in)  :: h0 !< Cell widths on source grid [H]
@@ -246,7 +247,6 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, remap
   real, optional,      intent(out) :: net_err !< Error in total column [A H]
   logical, dimension(n0), optional, intent(in) :: PCM_cell !< If present, use PCM remapping for
                                          !! cells in the source grid where this is true.
-  logical,             optional, intent(in)    :: remap_variance !< If true compute the remap variance
   real, dimension(n1), optional, intent(inout) :: col_var_production !< Remap variance production for a column
   ! Local variables
   real, dimension(n0+n1+1) :: h_sub ! Width of each each sub-cell [H]
@@ -338,8 +338,8 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, remap
 
  if (present(net_err)) net_err = uh_err
 
-  if (present(remap_variance)) then
-    if (remap_variance) call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
+  if (present(col_var_production)) then
+    call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
                                                          isrc_start, isrc_end, h_sub, u_sub, col_var_production)
   endif
 
@@ -1569,6 +1569,43 @@ subroutine check_remapped_values(n0, h0, u0, ppoly_r_E, deg, ppoly_r_coefs, &
   endif
 
 end subroutine check_remapped_values
+
+!> Subroutine to calculate the numerical mixing due to the remapping scheme in MOM6.
+subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
+                                         isrc_start, isrc_end, h_sub, u_sub, col_var_production)
+
+  integer,                intent(in) :: n0                 !< Number of cells on source grid
+  real, dimension(n0),    intent(in) :: h0                 !< Cell widths on source grid [H]
+  real, dimension(n0),    intent(in) :: u0                 !< Cell averages on source grid [A]
+  integer,                intent(in) :: n1                 !< Number of cells on target grid
+  real, dimension(n1),    intent(in) :: h1                 !< Cell widths on target grid [H]
+  real, dimension(n1),    intent(in) :: u1                 !< Cell averages on target grid [A]
+  integer,                intent(in) :: itgt_start(n1)     !< Index of first sub-cell within each target cell
+  integer,                intent(in) :: itgt_end(n1)       !< Index of last sub-cell within each target cell
+  integer, dimension(n0), intent(in) :: isrc_start         !< Index of first sub-cell within each source cell
+  integer, dimension(n0), intent(in) :: isrc_end           !< Index of last sub-cell within each source cell
+  real,                   intent(in) :: h_sub(n0+n1+1)     !< Overlapping sub-cell thicknesses, h_sub [H]
+  real,                   intent(in) :: u_sub(n0+n1+1)     !< Sub-cell cell averages [A]
+  real, dimension(n1),   intent(out) :: col_var_production !< Remap variance production for a column [A2 H]
+
+  ! Local variables
+  integer :: i1, j2 ! Loop counters
+
+  if (n0 == n1) then
+    do i1 = 1, n1
+      col_var_production(i1) = 0
+      do j2 = isrc_start(i1), isrc_end(i1)
+        col_var_production(i1) = col_var_production(i1) + (h_sub(j2) * (u_sub(j2) - u0(i1))**2)
+      enddo
+      do j2 = itgt_start(i1), itgt_end(i1)
+        col_var_production(i1) = col_var_production(i1) - (h_sub(j2) * (u_sub(j2) - u1(i1))**2)
+      enddo
+    enddo
+  else ! if n1 > n0
+    call MOM_error(FATAL, "Source and target grids need to have same number of "// &
+                    "levels for this diagnostic to be meaningful.")
+  endif
+end subroutine remapping_variance_production
 
 !> Measure totals and bounds on source grid
 subroutine measure_input_bounds( n0, h0, u0, edge_values, h0tot, h0err, u0tot, u0err, u0min, u0max )
