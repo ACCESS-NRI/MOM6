@@ -213,7 +213,7 @@ type, public :: ice_shelf_CS ; private
              id_tfreeze = -1, id_tfl_shelf = -1, &
              id_thermal_driving = -1, id_haline_driving = -1, &
              id_u_ml = -1, id_v_ml = -1, id_sbdry = -1, &
-             id_h_shelf = -1, id_dhdt_shelf = -1, id_h_mask = -1, id_frazil = -1, &
+             id_h_shelf = -1, id_dhdt_shelf = -1, id_h_mask = -1, id_frazil = -1, id_frazil_refreeze = -1, &
              id_surf_elev = -1, id_bathym = -1, &
              id_area_shelf_h = -1, &
              id_ustar_shelf = -1, id_shelf_mass = -1, id_mass_flux = -1, &
@@ -299,6 +299,9 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
     haline_driving !< (SSS - S_boundary) ice-ocean
                !! interface, positive for melting and negative for freezing [S ~> ppt].
                !! This is computed as part of the ISOMIP diagnostics.
+  real, dimension(SZDI_(CS%grid),SZDJ_(CS%grid)) :: &
+    frazil_refreeze !< frazil_refreeze
+
   real :: time_step !< Length of time over which these fluxes will be applied [T ~> s].
   real :: Itime_step !< Inverse of the length of time over which these fluxes will be applied [T-1 ~> s-1]
   real :: VK       !< Von Karman's constant [nondim]
@@ -382,7 +385,7 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
   time_step = time_step_in
   Itime_step = 1./time_step
 
-  dh_adott(:,:) = 0.0 ; dh_bdott(:,:) = 0.0
+  dh_adott(:,:) = 0.0 ; dh_bdott(:,:) = 0.0; frazil_refreeze(:,:) = 0.0;
 
   if (CS%active_shelf_dynamics) then
     !calculate previous volumes above floatation
@@ -882,13 +885,15 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
       ISS%water_flux(i,j) = 0.0
     endif ! area_shelf_h
 
+    !Add frazil formation
+    if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) then
+      ISS%water_flux(i,j) = ISS%water_flux(i,j) - ISS%frazil(i,j) * I_dt_LHF
+      frazil_refreeze(i,j) = - ISS%frazil(i,j) * I_dt_LHF
+    endif
+    fluxes%iceshelf_melt(i,j) = ISS%water_flux(i,j)
+
     ! mass flux [R Z L2 T-1 ~> kg s-1], part of ISOMIP diags.
     mass_flux(i,j) = ISS%water_flux(i,j) * ISS%area_shelf_h(i,j)
-
-    !Add frazil formation
-    if (add_frazil .and. (ISS%hmask(i,j) == 1 .or. ISS%hmask(i,j) == 2)) &
-      ISS%water_flux(i,j) = ISS%water_flux(i,j) - ISS%frazil(i,j) * I_dt_LHF
-    fluxes%iceshelf_melt(i,j) = ISS%water_flux(i,j)
   enddo ; enddo ! i- and j-loops
 
   if (CS%active_shelf_dynamics .or. CS%override_shelf_movement) then
@@ -981,6 +986,7 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
   if (CS%id_dhdt_shelf > 0) call post_data(CS%id_dhdt_shelf, ISS%dhdt_shelf, CS%diag)
   if (CS%id_h_mask > 0) call post_data(CS%id_h_mask,ISS%hmask,CS%diag)
   if (CS%id_frazil > 0) call post_data(CS%id_frazil,ISS%frazil,CS%diag)
+  if (CS%id_frazil_refreeze > 0) call post_data(CS%id_frazil_refreeze,frazil_refreeze,CS%diag)
   if (CS%active_shelf_dynamics) &
       call process_and_post_scalar_data(CS, vaf0, vaf0_A, vaf0_G, Itime_step, dh_adott, dh_bdott)
   call disable_averaging(CS%diag)
@@ -1572,7 +1578,7 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
                         ! to be floating when CONST_SEA_LEVEL = True [Z ~> m].
   real :: cdrag         ! The drag coefficient at the ice-ocean interface [nondim]
   real :: drag_bg_vel   ! A background velocity used in the quadratic drag [Z T-1 ~> m s-1]
-  logical :: new_sim, save_IC
+  logical :: new_sim, save_IC, restore_shelf_state
   !This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=200) :: IC_file, inputdir  ! Input file names or paths
@@ -2050,15 +2056,21 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   ! Set up the restarts.
 
   call restart_init(param_file, CS%restart_CSp, "Shelf.res")
-  call register_restart_field(ISS%mass_shelf, "shelf_mass", .true., CS%restart_CSp, &
-                              "Ice shelf mass", "kg m-2", conversion=US%RZ_to_kg_m2)
-  call register_restart_field(ISS%area_shelf_h, "shelf_area", .true., CS%restart_CSp, &
-                              "Ice shelf area in cell", "m2", conversion=US%L_to_m**2)
-  call register_restart_field(ISS%h_shelf, "h_shelf", .true., CS%restart_CSp, &
-                              "ice sheet/shelf thickness", "m", conversion=US%Z_to_m)
-  call register_restart_field(ISS%melt_mask, "melt_mask", .false., CS%restart_CSp, &
-                              "Mask that is >0 where ice-shelf melting is allowed", "none")
+  restore_shelf_state = CS%shelf_mass_is_dynamic
+  if (CS%shelf_mass_is_dynamic) then
+    call register_restart_field(ISS%mass_shelf, "shelf_mass", .true., CS%restart_CSp, &
+                                "Ice shelf mass", "kg m-2", conversion=US%RZ_to_kg_m2)
+    call register_restart_field(ISS%area_shelf_h, "shelf_area", .true., CS%restart_CSp, &
+                                "Ice shelf area in cell", "m2", conversion=US%L_to_m**2)
+    call register_restart_field(ISS%h_shelf, "h_shelf", .true., CS%restart_CSp, &
+                                "ice sheet/shelf thickness", "m", conversion=US%Z_to_m)
+    call register_restart_field(ISS%melt_mask, "melt_mask", .false., CS%restart_CSp, &
+                                "Mask that is >0 where ice-shelf melting is allowed", "none")
+    call register_restart_field(ISS%hmask, "h_mask", .true., CS%restart_CSp, &
+                                "ice sheet/shelf thickness mask" ,"none")
+  endif
   if (CS%calve_ice_shelf_bergs) then
+    restore_shelf_state = .true.
     call register_restart_field(ISS%calving, "shelf_calving", .true., CS%restart_CSp, &
                                 "Calving flux from ice shelf into icebergs", "kg m-2", conversion=US%RZ_to_kg_m2)
     call register_restart_field(ISS%calving_hflx, "shelf_calving_hflx", .true., CS%restart_CSp, &
@@ -2067,6 +2079,7 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
 
   if (PRESENT(sfc_state_in)) then
     if (allocated(sfc_state%taux_shelf) .and. allocated(sfc_state%tauy_shelf)) then
+      restore_shelf_state = .true.
       u_desc = var_desc("taux_shelf", "Pa", "the zonal stress on the ocean under ice shelves", &
             hor_grid='Cu',z_grid='1')
       v_desc = var_desc("tauy_shelf", "Pa", "the meridional stress on the ocean under ice shelves", &
@@ -2074,11 +2087,6 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
       call register_restart_pair(sfc_state%taux_shelf, sfc_state%tauy_shelf, u_desc, v_desc, &
             .false., CS%restart_CSp, conversion=US%RLZ_T2_to_Pa)
     endif
-  endif
-
-  if (CS%active_shelf_dynamics) then
-    call register_restart_field(ISS%hmask, "h_mask", .true., CS%restart_CSp, &
-                                "ice sheet/shelf thickness mask" ,"none")
   endif
 
   if (CS%active_shelf_dynamics) then
@@ -2095,13 +2103,15 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   CS%restart_output_dir = dirs%restart_output_dir
 
   if (present(fluxes_in)) then
-     call initialize_ice_shelf_fluxes(CS, ocn_grid, US, fluxes_in)
-     call register_restart_field(fluxes_in%shelf_sfc_mass_flux, "sfc_mass_flux", .true., CS%restart_CSp, &
-        "ice shelf surface mass flux deposition from atmosphere", &
-        'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s)
+    restore_shelf_state = .true.
+    call initialize_ice_shelf_fluxes(CS, ocn_grid, US, fluxes_in)
+    call register_restart_field(fluxes_in%shelf_sfc_mass_flux, "sfc_mass_flux", .true., CS%restart_CSp, &
+      "ice shelf surface mass flux deposition from atmosphere", &
+      'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s)
   endif
 
-  if (new_sim .and. (.not. (CS%override_shelf_movement .and. CS%mass_from_file))) then
+  if ((new_sim .or. (.not. CS%shelf_mass_is_dynamic)) .and. &
+      (.not. (CS%override_shelf_movement .and. CS%mass_from_file))) then
     ! This model is initialized internally or from a file.
     call initialize_ice_thickness(ISS%h_shelf, ISS%area_shelf_h, ISS%hmask, ISS%melt_mask, CS%Grid, CS%Grid_in, &
                                   US, param_file, CS%rotate_index, CS%turns)
@@ -2116,15 +2126,15 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
       call hchksum(ISS%area_shelf_h, "IS init: area_shelf", G%HI, haloshift=0, unscale=US%L_to_m*US%L_to_m)
       call hchksum(ISS%hmask, "IS init: hmask", G%HI, haloshift=0)
     endif
+  endif
 
-  ! else ! Previous block for new_sim=.T., this block restores the state.
-  elseif (.not.new_sim) then
+  if ((.not. new_sim) .and. restore_shelf_state) then
     ! This line calls a subroutine that reads the initial conditions from a restart file.
     call MOM_mesg("MOM_ice_shelf.F90, initialize_ice_shelf: Restoring ice shelf from file.")
    ! call restore_state(dirs%input_filename, dirs%restart_input_dir, Time, G, CS%restart_CSp)
     call restore_state('Shelf.res.nc', dirs%restart_input_dir, Time, G, CS%restart_CSp)
 
-  endif ! .not. new_sim
+  endif
 
 !  do j=G%jsc,G%jec ; do i=G%isc,G%iec
 !    ISS%area_shelf_h(i,j) = ISS%area_shelf_h(i,j)*G%mask2dT(i,j)
@@ -2222,6 +2232,8 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
       'Fric vel under shelf', 'm/s', conversion=US%Z_to_m*US%s_to_T)
   CS%id_frazil = register_diag_field('ice_shelf_model', 'frazil', CS%diag%axesT1, CS%Time, &
      'Frazil heat rejected by the ocean', 'J m-2', conversion=US%Q_to_J_kg*US%RZ_to_kg_m2)
+  CS%id_frazil_refreeze = register_diag_field('ice_shelf_model', 'frazil_refreeze', CS%diag%axesT1, CS%Time, &
+     'Frazil heat turned into freezing', 'kg s-1 m-2', conversion=US%RZ_T_to_kg_m2s)
   if (CS%active_shelf_dynamics) then
     CS%id_h_mask = register_diag_field('ice_shelf_model', 'h_mask', CS%diag%axesT1, CS%Time, &
        'ice shelf thickness mask', 'none', conversion=1.0)
