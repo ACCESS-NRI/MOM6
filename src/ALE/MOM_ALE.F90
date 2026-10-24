@@ -819,6 +819,7 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
       Tr => Reg%Tr(m)
       if ((Tr%id_remap_variance_production > 0) .and. (present(dt))) then
         rvp(:,:,:) = 0.0
+      endif
       do j = G%jsc,G%jec ; do i = G%isc,G%iec ; if (G%mask2dT(i,j)>0.) then
         ! Build the start and final grids
         h1(:) = h_old(i,j,:)

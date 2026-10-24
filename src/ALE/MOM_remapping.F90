@@ -340,7 +340,7 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, col_v
 
   if (present(col_var_production)) then
     call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
-                                                         isrc_start, isrc_end, h_sub, u_sub, col_var_production)
+                                       isrc_start, isrc_end, h_sub, u_sub, col_var_production)
   endif
 
 end subroutine remapping_core_h
