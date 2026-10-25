@@ -203,6 +203,7 @@ type, public :: ice_shelf_CS ; private
   logical :: buoy_flux_itt_bug           !< If true, fixes buoyancy iteration bug
   logical :: salt_flux_itt_bug           !< If true, fixes salt iteration bug
   real :: buoy_flux_itt_threshold        !< Buoyancy iteration threshold for convergence
+  real :: tideamp_scaling_factor         !< Tideamp scaling factor in friction velocity calculation
 
   !>@{ Diagnostic handles
   integer :: id_melt = -1, id_exch_vel_s = -1, id_exch_vel_t = -1, &
@@ -462,14 +463,17 @@ subroutine shelf_calc_flux(sfc_state_in, fluxes_in, Time, time_step_in, CS)
     if ((taux2 + tauy2 > 0.0) .and. .not.CS%ustar_shelf_from_vel) then
       if (CS%ustar_max >= 0.0) then
         fluxes%ustar_shelf(i,j) = MIN(CS%ustar_max, MAX(CS%ustar_bg, US%L_to_Z * &
-            sqrt(Irho0 * sqrt(taux2 + tauy2) + CS%cdrag*CS%utide(i,j)**2)))
+            sqrt(Irho0 * sqrt(taux2 + tauy2) + CS%tideamp_scaling_factor * &
+            (CS%cdrag*CS%utide(i,j)**2))))
       else
         fluxes%ustar_shelf(i,j) = MAX(CS%ustar_bg, US%L_to_Z * &
-            sqrt(Irho0 * sqrt(taux2 + tauy2) + CS%cdrag*CS%utide(i,j)**2))
+            sqrt(Irho0 * sqrt(taux2 + tauy2) + CS%tideamp_scaling_factor * &
+            (CS%cdrag*CS%utide(i,j)**2)))
       endif
     else   ! Take care of the cases when taux_shelf is not set or not allocated.
       fluxes%ustar_shelf(i,j) = MAX(CS%ustar_bg, US%L_TO_Z * &
-          sqrt(CS%cdrag*((u2_av + v2_av) + CS%utide(i,j)**2)))
+          sqrt(CS%cdrag*((u2_av + v2_av) + CS%tideamp_scaling_factor * & 
+          (CS%utide(i,j)**2))))
     endif
   else ! There is no shelf here.
     fluxes%ustar_shelf(i,j) = 0.0
@@ -1677,7 +1681,9 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
 
   call get_param(param_file, mdl, "READ_TIDEAMP", read_TIDEAMP, &
                  "If true, read a file (given by TIDEAMP_FILE) containing "//&
-                 "the tidal amplitude with INT_TIDE_DISSIPATION.", default=.false.)
+                 "the tidal amplitude with INT_TIDE_DISSIPATION. If true, "//&
+                 "also used as the tidal amplitude in the ice shelf melt "//&
+                 "parameterisation.", default=.false.)
   call get_param(param_file, mdl, "ICE_SHELF_LINEAR_SHELF_FRAC", CS%Zeta_N, &
                  "Ratio of HJ99 stability constant xi_N (ratio of maximum "//&
                  "mixing length to planetary boundary layer depth in "//&
@@ -1712,6 +1718,9 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
 
   call safe_alloc_ptr(CS%utide,isd,ied,jsd,jed) ; CS%utide(:,:) = 0.0
 
+  call get_param(param_file, mdl, "ICE_SHELF_TIDEAMP_SCALING_FACTOR", CS%tideamp_scaling_factor, &
+                 "Scale TIDEAMP_FILE or UTIDE by number in melt parameterisation "//&
+                 "friction velocity calculation.", units = "nondim", default=1.0)
   if (read_TIDEAMP) then
     call get_param(param_file, mdl, "TIDEAMP_FILE", TideAmp_file, &
                  "The path to the file containing the spatially varying tidal amplitudes.", &
@@ -1732,7 +1741,8 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
     endif
   else
     call get_param(param_file, mdl, "UTIDE", utide, &
-                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION.", &
+                 "The constant tidal amplitude used with INT_TIDE_DISSIPATION "//&
+                 "and the ice shelf melt parameterisation.", &
                  units="m s-1", default=0.0 , scale=US%m_s_to_L_T)
     CS%utide(:,:) = utide
   endif
