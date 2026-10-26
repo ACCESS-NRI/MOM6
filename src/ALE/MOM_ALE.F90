@@ -817,21 +817,21 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
     !$OMP parallel do default(shared) private(h1,h2,tr_column,Tr,PCM,work_conc,work_cont,work_2d,rvp)
     do m=1,ntr ! For each tracer
       Tr => Reg%Tr(m)
-      if ((Tr%id_remap_variance_production > 0) .and. (present(dt))) then
+      if ((Tr%id_varprod_remap > 0) .and. (present(dt))) then
         rvp(:,:,:) = 0.0
       endif
       do j = G%jsc,G%jec ; do i = G%isc,G%iec ; if (G%mask2dT(i,j)>0.) then
         ! Build the start and final grids
         h1(:) = h_old(i,j,:)
         h2(:) = h_new(i,j,:)
-        if (present(PCM_cell) .and. (Tr%id_remap_variance_production > 0) .and. (present(dt))) then
+        if (present(PCM_cell) .and. (Tr%id_varprod_remap > 0) .and. (present(dt))) then
           PCM(:) = PCM_cell(i,j,:)
           call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, PCM_cell=PCM, &
                                 col_var_production=rvp(i,j,:))
         else if (present(PCM_cell)) then
           PCM(:) = PCM_cell(i,j,:)
           call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, PCM_cell=PCM)
-        else if ((Tr%id_remap_variance_production > 0) .and. (present(dt))) then
+        else if ((Tr%id_varprod_remap > 0) .and. (present(dt))) then
           call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, &
                                 col_var_production=rvp(i,j,:))
         else
@@ -881,9 +881,9 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
         endif
 
         ! Diagnostic for variance production due to remapping
-        if (Tr%id_remap_variance_production > 0) then
+        if (Tr%id_varprod_remap > 0) then
           rvp = rvp * Idt
-          call post_data(Tr%id_remap_variance_production, rvp, CS%diag)
+          call post_data(Tr%id_varprod_remap, rvp, CS%diag)
         endif
       endif
     enddo ! m=1,ntr
