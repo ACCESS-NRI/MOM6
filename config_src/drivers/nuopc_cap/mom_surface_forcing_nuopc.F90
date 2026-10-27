@@ -92,9 +92,9 @@ type, public :: surface_forcing_CS ; private
                                 !! meltwater mixing line, so that melting the ice consumes latent
                                 !! heat. If false, srunoff enters the ocean at the ambient
                                 !! temperature.
-  real :: srunoff_depth         !< The depth over which the mass and heat from coupled submarine melt
-                                !! are spread, distributed uniformly by thickness. If 0, srunoff
-                                !! is applied entirely within the top layer [H ~> m or kg m-2].
+  real :: srunoff_depth_max     !< The maximum depth over which the mass and heat from coupled
+                                !! submarine melt are spread, distributed uniformly by thickness. If 0,
+                                !! srunoff is applied entirely within the top layer [H ~> m or kg m-2].
   real :: gust_const            !< constant unresolved background gustiness for ustar [R L Z T-2 ~> Pa]
   logical :: read_gust_2d       !< If true, use a 2-dimensional gustiness supplied
                                 !! from an input file.
@@ -342,7 +342,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
                                tau_mag=.true., ice_ncat=IOB%ice_ncat, srunoff=associated(IOB%srunoff))
     fluxes%latent_heat_fusion = CS%latent_heat_fusion
     fluxes%srunoff_latent_heat = CS%srunoff_latent_heat
-    fluxes%srunoff_depth = CS%srunoff_depth
+    fluxes%srunoff_depth_max = CS%srunoff_depth_max
     call safe_alloc_ptr(fluxes%omega_w2x,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dir,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dif,isd,ied,jsd,jed)
@@ -1246,8 +1246,8 @@ subroutine surface_forcing_init(Time, G, GV, US, param_file, diag, CS, restore_s
                  "LATENT_HEAT_FUSION/C_p, following the Gade (1979) meltwater mixing line, "//&
                  "so that melting the ice consumes latent heat. If false, srunoff enters "// &
                  "the ocean at the ambient temperature.", default=.false.)
-  call get_param(param_file, mdl, "SRUNOFF_DEPTH", CS%srunoff_depth, &
-                 "The depth over which the mass and heat from coupled submarine melt are spread, "//&
+  call get_param(param_file, mdl, "SRUNOFF_DEPTH_MAX", CS%srunoff_depth_max, &
+                 "The maximum depth over which the mass and heat from coupled submarine melt are spread, "//&
                  "distributed uniformly by thickness. If 0, srunoff is applied entirely "//&
                  "within the top layer.", units="m", default=0.0, scale=GV%m_to_H)
   call get_param(param_file, mdl, "MAX_P_SURF", CS%max_p_surf, &

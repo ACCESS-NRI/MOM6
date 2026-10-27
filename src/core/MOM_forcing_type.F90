@@ -235,10 +235,10 @@ type, public :: forcing
                                 !! (1979) meltwater mixing line, so that melting the ice consumes
                                 !! latent heat. If false, srunoff enters the ocean at the ambient
                                 !! temperature.
-  real :: srunoff_depth = 0.0  !< The depth over which the mass and heat from coupled submarine melt
-                                !! are spread, distributed uniformly by thickness. If 0, srunoff
-                                !! is applied entirely within the top layer. The same value as
-                                !! CS%srunoff_depth in surface_forcing_CS [H ~> m or kg m-2].
+  real :: srunoff_depth_max = 0.0 !< The maximum depth over which the mass and heat from coupled
+                                !! submarine melt are spread, distributed uniformly by thickness. If 0,
+                                !! srunoff is applied entirely within the top layer. The same value as
+                                !! CS%srunoff_depth_max in surface_forcing_CS [H ~> m or kg m-2].
 
   ! arrays needed in the some tracer modules, e.g., MOM_CFC_cap
   real, pointer, dimension(:,:) :: &
@@ -1050,8 +1050,8 @@ subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth,
 end subroutine extractFluxes2d
 
 !> Distribute the mass and (optionally) heat content of submarine melt (srunoff) uniformly by
-!! thickness over the upper fluxes%srunoff_depth of a column. If fluxes%srunoff_depth is 0, the
-!! distribution depth for a column instead falls back to that column's own top layer thickness,
+!! thickness over the upper fluxes%srunoff_depth_max of a column. If fluxes%srunoff_depth_max is 0,
+!! the distribution depth for a column instead falls back to that column's own top layer thickness,
 !! so that srunoff is deposited entirely within the top layer.
 !! This routine is called from both:
 !! - applyBoundaryFluxesInOut, to update thickness and temperature and dilute salinity.
@@ -1136,9 +1136,9 @@ subroutine distribute_srunoff(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, US, &
 
       dM_tot = GV%RZ_to_H * dt * fluxes%srunoff(i,j)
 
-      ! When fluxes%srunoff_depth is 0 (the default), fall back to this column's own top layer
+      ! When fluxes%srunoff_depth_max is 0 (the default), fall back to this column's own top layer
       ! thickness as the distribution depth, so srunoff is deposited within the top layer.
-      depth = fluxes%srunoff_depth
+      depth = fluxes%srunoff_depth_max
       if (depth <= 0.0) depth = max(h2d(i,1), GV%H_subroundoff)
 
       ! Cap the depth actually used at the full column thickness, so that a column shallower
@@ -4340,7 +4340,7 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
   fluxes%C_p = fluxes_in%C_p
   fluxes%latent_heat_fusion = fluxes_in%latent_heat_fusion
   fluxes%srunoff_latent_heat = fluxes_in%srunoff_latent_heat
-  fluxes%srunoff_depth = fluxes_in%srunoff_depth
+  fluxes%srunoff_depth_max = fluxes_in%srunoff_depth_max
   ! NOTE: gustless_accum_bug is set during allocation
 
   fluxes%num_msg = fluxes_in%num_msg
