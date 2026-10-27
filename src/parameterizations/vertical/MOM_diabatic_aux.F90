@@ -766,10 +766,10 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
     total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
     dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_srunoff, for
-                     ! the heat_content_srunoff diagnostic [Q H ~> J m-2]
+                     ! the heat_content_eff_srunoff diagnostic [Q H ~> J m-2]
     dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff,
-                     ! from distribute_srunoff, for the tv%TempxPmE diagnostic
-                     ! [C H ~> degC m or degC kg m-2]
+                     ! from distribute_srunoff, for the tv%TempxPmE and heat_content_srunoff
+                     ! diagnostics [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
     ! dz, &            ! Layer thicknesses in depth units [Z ~> m]
@@ -1022,10 +1022,14 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                                g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
                                dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
 
-      ! Add srunoff's contributions to relevant diagnostics.
+      ! Add srunoff's contributions to relevant diagnostics. heat_content_eff_srunoff is all of
+      ! the heat applied (i.e. heat content plus e.g. latent heat), while heat_content_srunoff is
+      ! only the heat content of the melt water at the ambient temperatures.
       do i=is,ie
+        if (associated(fluxes%heat_content_eff_srunoff)) &
+          fluxes%heat_content_eff_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
         if (associated(fluxes%heat_content_srunoff)) &
-          fluxes%heat_content_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
+          fluxes%heat_content_srunoff(i,j) = tv%C_p * dTempxPmE_srunoff(i) * GV%H_to_RZ / dt
         if (associated(tv%TempxPmE)) &
           tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
       enddo
