@@ -3383,6 +3383,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       res(i,j) = 0.0
       if (associated(fluxes%LW))               res(i,j) = res(i,j) + fluxes%lw(i,j)
       if (associated(fluxes%latent))           res(i,j) = res(i,j) + fluxes%latent(i,j)
+      if (associated(fluxes%latent_srunoff))   res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
       if (associated(fluxes%sens))             res(i,j) = res(i,j) + fluxes%sens(i,j)
       if (associated(fluxes%SW))               res(i,j) = res(i,j) + fluxes%sw(i,j)
       if (associated(fluxes%seaice_melt_heat)) res(i,j) = res(i,j) + fluxes%seaice_melt_heat(i,j)
@@ -3502,6 +3503,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = (fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j)
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       call post_data(handles%id_LwLatSens, res, diag)
     endif
 
@@ -3510,6 +3514,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = (fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j)
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       total_heat_flux = global_area_integral(res, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_total_LwLatSens, total_heat_flux, diag)
     endif
@@ -3519,6 +3526,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = ((fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j))
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       ave_heat_flux = global_area_mean(res, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_LwLatSens_ga, ave_heat_flux, diag)
     endif
