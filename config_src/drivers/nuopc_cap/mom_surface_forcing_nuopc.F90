@@ -694,6 +694,14 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
                       G%areaT(i,j)
       net_FW2(i,j) = net_FW(i,j) / G%areaT(i,j)
     enddo ; enddo
+    ! fluxes%srunoff is only associated when submarine-melt coupling is actually configured,
+    ! unlike the other water fluxes above, so it needs its own guard here.
+    if (associated(fluxes%srunoff)) then
+      do j=js,je ; do i=is,ie
+        net_FW(i,j) = net_FW(i,j) + fluxes%srunoff(i,j) * G%areaT(i,j)
+        net_FW2(i,j) = net_FW(i,j) / G%areaT(i,j)
+      enddo ; enddo
+    endif
 
     if (CS%adjust_net_fresh_water_by_scaling) then
       call adjust_area_mean_to_zero(net_FW2, G, fluxes%netFWGlobalScl, unscale=US%RZ_T_to_kg_m2s)
