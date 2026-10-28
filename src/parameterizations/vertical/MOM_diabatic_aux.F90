@@ -726,8 +726,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   integer :: numberOfGroundings, iGround(maxGroundings), jGround(maxGroundings)
   real :: H_limit_fluxes ! Surface fluxes are scaled down fluxes when the total depth of the ocean
                      ! drops below this value [H ~> m or kg m-2]
-  real :: srunoff_Teff ! The effective temperature carried by srunoff's contribution to
-                     ! net_heat_rate [C ~> degC]
   real :: IforcingDepthScale ! The inverse of the layer thickness below which mass losses are
                      ! shifted to the next deeper layer [H ~> m or kg m-2]
   real :: Idt        ! The inverse of the timestep [T-1 ~> s-1]
@@ -877,7 +875,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   !$OMP                                  pen_TKE_2d,Temp_in,Salin_in,RivermixConst,        &
   !$OMP                                  mixing_depth,A_brine,fraction_left_brine,         &
   !$OMP                                  plume_fraction,dK,total_h,dHeat_srunoff,          &
-  !$OMP                                  dTempxPmE_srunoff,srunoff_Teff)                   &
+  !$OMP                                  dTempxPmE_srunoff)                                &
   !$OMP                     firstprivate(SurfPressure,plume_flux)
   do j=js,je
   ! Work in vertical slices for efficiency
@@ -1002,15 +1000,14 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
       ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
       ! and heat associated with srunoff are treated as if they were applied at the surface,
-      ! analogous to how penetrating SW is handled.
+      ! analogous to how penetrating SW is handled. srunoff enters at the ambient temperature, so
+      ! only its latent heat of melting changes the temperature and is included in net_heat_rate.
       if (calculate_buoyancy) then
         do i=is,ie
           if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) > 0.0)) then
             netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
-            srunoff_Teff = T2d(i,1)
-            if (fluxes%srunoff_latent_heat) &
-              srunoff_Teff = srunoff_Teff - fluxes%latent_heat_fusion*US%J_kg_to_Q/tv%C_p
-            netheat_rate(i) = netheat_rate(i) + (GV%RZ_to_H * fluxes%srunoff(i,j)) * srunoff_Teff
+            if (associated(fluxes%latent_srunoff)) &
+              netheat_rate(i) = netheat_rate(i) + fluxes%latent_srunoff(i,j) * (GV%RZ_to_H / tv%C_p)
           endif
         enddo ! i
       endif
