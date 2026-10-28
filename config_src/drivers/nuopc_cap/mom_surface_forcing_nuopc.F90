@@ -521,7 +521,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%srunoff(i,j) = kg_m2_s_conversion * IOB%srunoff(i-i0,j-j0) * G%mask2dT(i,j)
       ! Total latent heat extracted by submarine melt (not depth-dependent)
       if (CS%srunoff_latent_heat) &
-        fluxes%latent_srunoff_diag(i,j) = - G%mask2dT(i,j) * &
+        fluxes%latent_srunoff(i,j) = - G%mask2dT(i,j) * &
             IOB%srunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
 
