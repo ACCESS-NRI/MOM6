@@ -6,7 +6,6 @@
 
 module MOM_cap_mod
 
-use field_manager_mod,        only: field_manager_init
 use MOM_domains,              only: get_domain_extent
 use MOM_io,                   only: stdout, io_infra_end
 use MOM_io,                   only: insert_ensemble_appendix
@@ -600,8 +599,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call NUOPC_CompAttributeSet(gcomp, "logunit", stdout, rc=rc)
   if (chkerr(rc,__LINE__,u_FILE_u)) return
   call MOM_infra_init(mpi_comm_mom)
-
-  call field_manager_init
 
   ! determine the calendar
   if (cesm_coupled) then

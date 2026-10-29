@@ -20,7 +20,9 @@ use MOM_coupler_types,         only: coupler_type_send_data
 use MOM_data_override,         only: data_override
 use MOM_domains,               only: domain2d, get_domain_extent
 use MOM_error_handler,         only: MOM_error, FATAL
-use MOM_file_parser,           only: param_file_type
+use MOM_field_manager_infra,   only: field_manager_init
+use MOM_file_parser,           only: param_file_type, get_param, close_param_file
+use MOM_get_input,             only: get_MOM_input
 use MOM_grid,                  only: ocean_grid_type
 use MOM_restart,               only: MOM_restart_CS, restart_init, restart_init_end, restart_end
 use MOM_restart,               only: restore_state, save_restart, determine_is_new_run
@@ -87,8 +89,28 @@ subroutine coupler_bcs_init(CS)
   type(coupler_bcs_CS), pointer :: CS !< A pointer to the control structure for the FMS coupler
       !! boundary conditions, which is allocated here if any are in use.
 
+  type(param_file_type) :: param_file ! A structure to parse for run-time parameters
+  logical :: use_OCMIP2_CFC         ! If true, the OCMIP2 CFC tracer package is enabled
+  logical :: use_MOM_generic_tracer ! If true, the generic tracer package is enabled
+
   if (associated(CS)) return
+
+  ! These checks must match those in call_tracer_flux_init, called below. They are duplicated
+  ! here to avoid unnecessarily calling the initialisation routines, particularly
+  ! field_manager_init, when no tracer package that registers a coupler flux is enabled.
+  call get_MOM_Input(param_file, check_params=.false.)
+  call get_param(param_file, mod_name, "USE_OCMIP2_CFC", use_OCMIP2_CFC, &
+                 default=.false., do_not_log=.true.)
+  call get_param(param_file, mod_name, "USE_generic_tracer", use_MOM_generic_tracer, &
+                 default=.false., do_not_log=.true.)
+  call close_param_file(param_file, quiet_close=.true.)
+  if (.not.(use_OCMIP2_CFC .or. use_MOM_generic_tracer)) return
+
   allocate(CS)
+
+  ! This reads the field table, but only if nothing else has already initialised the field manager,
+  ! so it must come before the atmos_ocean_type_fluxes_init call below.
+  call field_manager_init()
 
   call atmos_ocean_type_fluxes_init()
   ! FMScoupler's gas_exchange_init calls the FMS cap's ocean_model_flux_init at this point, but
