@@ -36,7 +36,7 @@ implicit none; private
 public :: coupler_bcs_init, coupler_bcs_end, coupler_bcs_spawn
 public :: coupler_bcs_data_override, coupler_bcs_update_fluxes
 public :: coupler_bcs_register_restarts, coupler_bcs_save_restart, coupler_bcs_restore
-public :: coupler_bcs_get_cmeps_name
+public :: coupler_bcs_get_cmeps_mapping
 
 character(len=*), parameter      :: mod_name = 'mom_cap_fms_coupler_bcs'
 real, parameter                  :: epsln=1.0e-30
@@ -309,25 +309,37 @@ subroutine coupler_bcs_save_restart(CS, G, Time, directory, time_stamped, name_p
 
 end subroutine coupler_bcs_save_restart
 
-!> \brief Return the CMEPS standard_name of the field that provides the input of an FMS coupler
-!! boundary condition, or an empty string if the coupler does not provide it.  Depending on the
-!! flux type, that input is an atmospheric concentration, an atmospheric deposition flux or a
-!! runoff flux.
+!> \brief Return the mapping from an FMS coupler boundary condition to the CMEPS field that
+!! provides its input. Returns both the standard_name of that field, and the factor that converts
+!! it into the units that the flux calculation expects. The standard_name is an empty string if
+!! the coupler does not provide the field. Depending on the flux type, that input is an
+!! atmospheric concentration, an atmospheric deposition flux or a runoff flux.
 !!
 !! The CMEPS standard names are a fixed external vocabulary, so a boundary condition can only be
 !! driven from the coupler if the mediator has been set up to provide its field.  Any other
 !! boundary condition has to have its input field, or its flux, supplied from the data_table, and
 !! mom_import issues a fatal error if neither is the case.
-function coupler_bcs_get_cmeps_name(name)
-  character(len=64)            :: coupler_bcs_get_cmeps_name !< CMEPS standard_name
-  character(len=*), intent(in) :: name !< FMS coupler boundary condition name
+subroutine coupler_bcs_get_cmeps_mapping(name, stdname, scale)
+  character(len=*),           intent(in)  :: name    !< FMS coupler boundary condition name
+  character(len=*),           intent(out) :: stdname !< CMEPS standard_name, or an empty string if
+                                                     !! the coupler does not provide the field
+  real,             optional, intent(out) :: scale   !< A factor that converts the CMEPS field into
+                                                     !! the units that the flux calculation
+                                                     !! expects [various]
+
+  real :: conversion ! A factor that converts the CMEPS field into the units that the flux
+                     ! calculation expects [various]
 
   ! Add other FMS coupler boundary conditions that the coupler can drive here.
   select case (trim(name))
-    case ('co2_flux') ; coupler_bcs_get_cmeps_name = "Sa_co2prog"
-    case default      ; coupler_bcs_get_cmeps_name = ""
+    ! Sa_co2prog is in ppm, flux calculation expects pcair in mol/mol
+    case ('co2_flux') ; stdname = "Sa_co2prog" ; conversion = 1.0e-6
+    case default      ; stdname = ""           ; conversion = 1.0
   end select
-end function coupler_bcs_get_cmeps_name
+
+  if (present(scale)) scale = conversion
+
+end subroutine coupler_bcs_get_cmeps_mapping
 
 !> \brief Calculate the FMS coupler_bc_type ocean tracer fluxes. Units should be mol/m^2/s.
 !! Upward flux is positive.

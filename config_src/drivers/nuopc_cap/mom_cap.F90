@@ -48,7 +48,7 @@ use time_utils_mod,          only: esmf2fms_time
 use MOM_coupler_types,        only: coupler_type_initialized, coupler_type_num_bcs
 use MOM_coupler_types,        only: coupler_type_get_bc
 use MOM_ocean_model_nuopc,    only: coupler_bcs_setup
-use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_get_cmeps_name
+use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_get_cmeps_mapping
 use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_data_override, coupler_bcs_update_fluxes
 
 use, intrinsic :: iso_fortran_env, only: output_unit
@@ -938,7 +938,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
     do n = 1, coupler_type_num_bcs(Ice_ocean_boundary%fluxes)
       call coupler_type_get_bc(Ice_ocean_boundary%fluxes, n, name=bc_name)
-      stdname = coupler_bcs_get_cmeps_name(bc_name)
+      call coupler_bcs_get_cmeps_mapping(bc_name, stdname)
       if (len_trim(stdname) > 0) &
         call fld_list_add(fldsToOcn_num, fldsToOcn, stdname, "will provide")
     enddo

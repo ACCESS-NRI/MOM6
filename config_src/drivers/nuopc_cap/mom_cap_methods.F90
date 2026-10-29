@@ -30,7 +30,7 @@ use MOM_coupler_types,         only: set_coupler_type_data, coupler_type_initial
 use MOM_coupler_types,         only: coupler_type_num_bcs, coupler_type_get_bc, coupler_type_get_field
 use MOM_coupler_types,         only: ind_pcair, ind_u10, ind_psurf, ind_runoff, ind_deposition
 use MOM_coupler_types,         only: ind_flux
-use MOM_cap_fms_coupler_bcs,   only: coupler_bcs_get_cmeps_name
+use MOM_cap_fms_coupler_bcs,   only: coupler_bcs_get_cmeps_mapping
 use MOM_error_handler,         only: MOM_error, FATAL
 
 ! By default make data private
@@ -114,6 +114,9 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
   character(len=128)              :: flux_type  ! The type of flux that it describes
   character(len=128)              :: field_name ! The name of its input field
   integer                         :: field_index
+  real                            :: scale       ! A factor that converts an imported field into
+                                                 ! the units that the flux calculation expects
+                                                 ! [various]
   logical                         :: area_correct ! True if the input field is a flux, and so needs
                                                  ! an area correction onto the model grid
   logical                         :: found       ! True if the coupler provides the input field
@@ -633,7 +636,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
                                   name=field_name, override=overridden)
 
       found = .false.
-      stdname = coupler_bcs_get_cmeps_name(bc_name)
+      call coupler_bcs_get_cmeps_mapping(bc_name, stdname, scale)
       if ((len_trim(stdname) > 0) .and. (.not.overridden)) then
         if (area_correct) then
           call state_getimport(importState, trim(stdname), isc, iec, jsc, jec, work, &
@@ -644,7 +647,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
         endif
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
         if (found) &
-          call set_coupler_type_data(work, n, ice_ocean_boundary%atm_fields, &
+          call set_coupler_type_data(work, n, ice_ocean_boundary%atm_fields, scale_factor=scale, &
                 idim=(/isc,isc,iec,iec/), jdim=(/jsc,jsc,jec,jec/), field_index=field_index)
       endif
 
@@ -658,7 +661,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
           "coupler boundary condition "//trim(bc_name)//&
           " is neither provided by the coupler nor overridden from the data_table, so its flux "//&
           "would be calculated from zeros.  Add the CMEPS standard_name that provides it to "//&
-          "coupler_bcs_get_cmeps_name, check that the mediator is connecting that field, or "//&
+          "coupler_bcs_get_cmeps_mapping, check that the mediator is connecting that field, or "//&
           "override either the field or the flux from the data_table.")
     enddo ! n-loop over boundary conditions
     deallocate(work)
