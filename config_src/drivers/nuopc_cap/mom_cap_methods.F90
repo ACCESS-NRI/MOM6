@@ -114,6 +114,8 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
   character(len=128)              :: flux_type  ! The type of flux that it describes
   character(len=128)              :: field_name ! The name of its input field
   integer                         :: field_index
+  logical                         :: area_correct ! True if the input field is a flux, and so needs
+                                                 ! an area correction onto the model grid
   logical                         :: found       ! True if the coupler provides the input field
   logical                         :: overridden  ! True if an input field is set from the data_table
   logical                         :: flux_overridden ! True if a flux is set from the data_table
@@ -603,14 +605,20 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
       call coupler_type_get_bc(ice_ocean_boundary%atm_fields, n, name=bc_name, flux_type=flux_type)
 
       if (trim(flux_type) == 'air_sea_deposition') then
+        ! ind_deposition is a flux, so it is area corrected.
         field_index = ind_deposition
+        area_correct = .true.
       elseif (trim(flux_type) == 'land_sea_runoff') then
+        ! ind_runoff is the tracer concentration, so it is not area corrected.
         field_index = ind_runoff
-      else
-        ! This is a gas flux, which is also calculated from the 10 m wind speed and the surface
-        ! pressure. Note, we set these fields even though the pcair field may not be set below.
-        ! This is to allow flux calculation with overridden pcair fields.
+        area_correct = .false.
+      else ! air-sea gas flux
+        ! ind_pcair is the atmospheric concentration, so it is not area corrected.
+        ! This flux calculation also requires the 10 m wind speed and the surface pressure. We set
+        ! these fields even though the pcair field may not be set below. This is to allow flux
+        ! calculation with overridden pcair fields.
         field_index = ind_pcair
+        area_correct = .false.
         call coupler_type_get_field(ice_ocean_boundary%atm_fields, n, ind_u10, override=overridden)
         if (.not.overridden) &
           call set_coupler_type_data(sqrt(ice_ocean_boundary%u10_sqr), n, ice_ocean_boundary%atm_fields, &
@@ -627,7 +635,13 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
       found = .false.
       stdname = coupler_bcs_get_cmeps_name(bc_name)
       if ((len_trim(stdname) > 0) .and. (.not.overridden)) then
-        call state_getimport(importState, trim(stdname), isc, iec, jsc, jec, work, found=found, rc=rc)
+        if (area_correct) then
+          call state_getimport(importState, trim(stdname), isc, iec, jsc, jec, work, &
+                               areacor=med2mod_areacor, found=found, rc=rc)
+        else
+          call state_getimport(importState, trim(stdname), isc, iec, jsc, jec, work, &
+                               found=found, rc=rc)
+        endif
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
         if (found) &
           call set_coupler_type_data(work, n, ice_ocean_boundary%atm_fields, &
