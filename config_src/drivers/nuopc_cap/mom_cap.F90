@@ -2556,14 +2556,20 @@ subroutine MOM_RealizeFields(state, nfields, field_defs, tag, ice_ocean_boundary
         ESMF_LOGMSG_INFO)
 
       if (present(ice_ocean_boundary)) then
+        ! These arrays are only allocated with MARBL. The same fields can be advertised for an
+        ! FMS coupler boundary condition, which stores them elsewhere.
         if (trim(field_defs(i)%stdname) == 'Sa_co2prog') then
-          if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%atm_co2_prog"
-          deallocate(ice_ocean_boundary%atm_co2_prog)
-          nullify(ice_ocean_boundary%atm_co2_prog)
+          if (associated(ice_ocean_boundary%atm_co2_prog)) then
+            if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%atm_co2_prog"
+            deallocate(ice_ocean_boundary%atm_co2_prog)
+            nullify(ice_ocean_boundary%atm_co2_prog)
+          endif
         elseif (trim(field_defs(i)%stdname) == 'Sa_co2diag') then
-          if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%atm_co2_diag"
-          deallocate(ice_ocean_boundary%atm_co2_diag)
-          nullify(ice_ocean_boundary%atm_co2_diag)
+          if (associated(ice_ocean_boundary%atm_co2_diag)) then
+            if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%atm_co2_diag"
+            deallocate(ice_ocean_boundary%atm_co2_diag)
+            nullify(ice_ocean_boundary%atm_co2_diag)
+          endif
         endif
       endif
 
@@ -2624,17 +2630,23 @@ subroutine fld_list_add(num, fldlist, stdname, transferOffer, shortname, ungridd
   integer, optional,          intent(in)    :: ungridded_ubound
 
   ! local variables
+  integer :: i
   integer :: rc
   character(len=*), parameter :: subname='(MOM_cap:fld_list_add)'
 
+  ! Return if this field has already been added
+  do i = 1, num
+    if (trim(fldlist(i)%stdname) == trim(stdname)) return
+  enddo
+
   ! fill in the new entry
-  num = num + 1
-  if (num > fldsMax) then
+  if (num + 1 > fldsMax) then
     call ESMF_LogSetError(ESMF_RC_VAL_OUTOFRANGE, &
          msg=trim(subname)//": ERROR number of field exceeded fldsMax: "//trim(stdname), &
          line=__LINE__, file=__FILE__, rcToReturn=rc)
     return
   endif
+  num = num + 1
 
   fldlist(num)%stdname        = trim(stdname)
   if (present(shortname)) then
