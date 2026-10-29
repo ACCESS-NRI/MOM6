@@ -17,6 +17,7 @@ use MOM_coupler_types,         only: coupler_type_get_bc, coupler_type_get_field
 use MOM_coupler_types,         only: coupler_type_set_field
 use MOM_coupler_types,         only: coupler_type_set_diags
 use MOM_coupler_types,         only: coupler_type_send_data
+use MOM_couplertype_infra,     only: atmos_ocn_type_fluxes_init, atmos_ocn_fluxes_init
 use MOM_data_override,         only: data_override
 use MOM_domains,               only: domain2d, get_domain_extent
 use MOM_error_handler,         only: MOM_error, FATAL
@@ -28,11 +29,6 @@ use MOM_restart,               only: MOM_restart_CS, restart_init, restart_init_
 use MOM_restart,               only: restore_state, save_restart, determine_is_new_run
 use MOM_time_manager,          only: time_type
 use MOM_tracer_flow_control,   only: call_tracer_flux_init
-
-! This FMS module has no MOM6 infrastructure wrapper.  The solo drivers supply a stub of it that
-! provides only aof_set_coupler_flux, and adding stubs of the routines used here for the sake of
-! the NUOPC cap seems backwards.
-use atmos_ocean_fluxes_mod,    only: atmos_ocean_type_fluxes_init, atmos_ocean_fluxes_init
 
 implicit none; private
 
@@ -109,15 +105,15 @@ subroutine coupler_bcs_init(CS)
   allocate(CS)
 
   ! This reads the field table, but only if nothing else has already initialised the field manager,
-  ! so it must come before the atmos_ocean_type_fluxes_init call below.
+  ! so it must come before the atmos_ocn_type_fluxes_init call below.
   call field_manager_init()
 
-  call atmos_ocean_type_fluxes_init()
+  call atmos_ocn_type_fluxes_init()
   ! FMScoupler's gas_exchange_init calls the FMS cap's ocean_model_flux_init at this point, but
   ! that is just a wrapper on call_tracer_flux_init, which is called directly here because this
   ! module cannot use the MOM_ocean_model_nuopc module without a circular dependency.
   call call_tracer_flux_init()
-  call atmos_ocean_fluxes_init(CS%gas_fluxes, CS%gas_fields_atm, CS%gas_fields_ocn)
+  call atmos_ocn_fluxes_init(CS%gas_fluxes, CS%gas_fields_atm, CS%gas_fields_ocn)
 
   ! No enabled tracer package registered a coupler flux, so there is nothing for this module to
   ! do. Return an unassociated control structure.

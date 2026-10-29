@@ -17,6 +17,7 @@ use coupler_types_mod, only : ind_alpha, ind_csurf, ind_sc_no
 use coupler_types_mod, only : ind_runoff, ind_deposition
 use coupler_types_mod, only : coupler_1d_bc_type, coupler_2d_bc_type, coupler_3d_bc_type
 use atmos_ocean_fluxes_mod, only : aof_set_coupler_flux
+use atmos_ocean_fluxes_mod, only : atmos_ocean_type_fluxes_init, atmos_ocean_fluxes_init
 use MOM_domain_infra,  only : domain2D
 use MOM_time_manager,  only : time_type
 
@@ -27,7 +28,7 @@ public :: CT_set_diags, CT_send_data, CT_data_override, CT_write_chksums
 public :: CT_set_data,  CT_increment_data, CT_rescale_data
 public :: CT_copy_data, CT_extract_data, CT_redistribute_data
 public :: CT_num_bcs, CT_is_double_precision, CT_get_bc, CT_get_field, CT_set_field
-public :: atmos_ocn_coupler_flux
+public :: atmos_ocn_coupler_flux, atmos_ocn_type_fluxes_init, atmos_ocn_fluxes_init
 public :: ind_flux, ind_deltap, ind_kw, ind_flux0
 public :: ind_pcair, ind_u10, ind_psurf
 public :: ind_alpha, ind_csurf, ind_sc_no
@@ -113,6 +114,27 @@ function atmos_ocn_coupler_flux(name, flux_type, implementation, param, mol_wt, 
                               units=units, caller=caller, verbosity=verbosity)
 
 end function atmos_ocn_coupler_flux
+
+!> Define the types of atmosphere-ocean tracer fluxes that may be used, along with the fields
+!! that each of them is calculated from.
+subroutine atmos_ocn_type_fluxes_init()
+  call atmos_ocean_type_fluxes_init()
+end subroutine atmos_ocn_type_fluxes_init
+
+!> Set the properties of the atmosphere-ocean tracer fluxes that have been registered, and of the
+!! atmospheric and ocean surface fields that they are calculated from.
+subroutine atmos_ocn_fluxes_init(gas_fluxes, gas_fields_atm, gas_fields_ocn)
+  type(coupler_1d_bc_type), intent(inout) :: gas_fluxes !< Structure containing the gas fluxes
+                                                       !! between the atmosphere and the ocean and
+                                                       !! parameters related to their calculation
+  type(coupler_1d_bc_type), intent(inout) :: gas_fields_atm !< Structure containing the atmospheric
+                                                       !! surface fields used in that calculation
+  type(coupler_1d_bc_type), intent(inout) :: gas_fields_ocn !< Structure containing the ocean
+                                                       !! surface fields used in that calculation
+
+  call atmos_ocean_fluxes_init(gas_fluxes, gas_fields_atm, gas_fields_ocn)
+
+end subroutine atmos_ocn_fluxes_init
 
 !> Generate a 2-D coupler type using a 1-D coupler type as a template.
 subroutine CT_spawn_1d_2d(var_in, var, idim, jdim, suffix, as_needed, copy_param)
