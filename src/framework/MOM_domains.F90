@@ -140,6 +140,8 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
   character(len=40) :: niproc_nm, njproc_nm
   character(len=200) :: topo_config
   integer :: id_clock_auto_mask
+  integer :: default_answer_date        ! The default setting for the various _ANSWER_DATE parameters
+  integer :: define_layout_answer_date  ! The vintage of the algorithm used to determine PE layouts
   character(len=:), allocatable :: masktable_desc
   character(len=:), allocatable :: auto_mask_table_fname ! Auto-generated mask table file name
   ! This include declares and sets the variable "version".
@@ -308,6 +310,17 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
     call get_param(param_file, mdl, "TOPO_CONFIG", topo_config, default="file", do_not_log=.true.)
   endif
 
+  call get_param(param_file, mdl, "DEFAULT_ANSWER_DATE", default_answer_date, &
+                 "This sets the default value for the various _ANSWER_DATE parameters.", &
+                 default=99991231, do_not_log=.true.)
+  call get_param(param_file, mdl, "DEFINE_LAYOUT_ANSWER_DATE", define_layout_answer_date, &
+                 "The vintage of the algorithm used to determine PE layouts. Values below "//&
+                 "20261030 recover the layout that was chosen before all of the divisors of the "//&
+                 "PE count were examined. This parameter applies to the model layout when LAYOUT "//&
+                 "is not set explicitly, to the mask table that AUTO_MASKTABLE generates, and to "//&
+                 "the unmasked domain that is used to write out the ocean geometry.", &
+                 default=default_answer_date, layoutParam=.true.)
+
   auto_mask_table = .false.
   if (.not. present(param_suffix) .and. .not. is_static .and. trim(topo_config) == 'file') then
      call get_param(param_file, mdl, 'AUTO_MASKTABLE', auto_mask_table, &
@@ -340,7 +353,8 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
     call cpu_clock_begin(id_clock_auto_mask)
     if (is_root_PE()) then
       call gen_auto_mask_table(n_global, reentrant, tripolar_N, PEs_used, param_file, inputdir, &
-                               auto_mask_table_fname, target_io_pes, auto_layout, auto_io_layout, US)
+                               auto_mask_table_fname, target_io_pes, auto_layout, auto_io_layout, &
+                               define_layout_answer_date, US)
     endif
     call broadcast(auto_layout, length=2)
     call broadcast(auto_io_layout, length=2)
@@ -400,7 +414,7 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
     endif
 
     if ( (layout(1) == 0) .and. (layout(2) == 0) ) &
-      call MOM_define_layout(n_global, PEs_used, layout)
+      call MOM_define_layout(n_global, PEs_used, layout, answer_date=define_layout_answer_date)
     if ( (layout(1) /= 0) .and. (layout(2) == 0) ) layout(2) = PEs_used / layout(1)
     if ( (layout(1) == 0) .and. (layout(2) /= 0) ) layout(1) = PEs_used / layout(2)
 
@@ -466,7 +480,7 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
 
   ! Create an unmasked domain if requested. This is used for writing out unmasked ocean geometry.
   if (present(MOM_dom_unmasked) .and. mask_table_exists) then
-    call MOM_define_layout(n_global, PEs_used, layout_unmasked)
+    call MOM_define_layout(n_global, PEs_used, layout_unmasked, answer_date=define_layout_answer_date)
     call create_MOM_domain(MOM_dom_unmasked, n_global, n_halo, reentrant, tripolar_N, layout_unmasked, &
                            domain_name=domain_name, symmetric=symmetric, thin_halos=thin_halos, &
                            nonblocking=nonblocking)
@@ -482,41 +496,57 @@ end subroutine MOM_domains_init
 !! processors in the two directions where the total number of processors is the product of
 !! the two layouts and number of points in the partitioned arrays are as close as possible
 !! to an aspect ratio of 1.
-subroutine MOM_define_layout(n_global, ndivs, layout)
+subroutine MOM_define_layout(n_global, ndivs, layout, answer_date)
   integer, dimension(2), intent(in)  :: n_global !< The total number of gridpoints in 2 directions
   integer,               intent(in)  :: ndivs    !< The total number of (logical) PEs
   integer, dimension(2), intent(out) :: layout   !< The generated layout of PEs
+  integer, optional,     intent(in)  :: answer_date !< The vintage of the layout selection.
 
   ! Local variables
   integer :: isz, jsz, idiv, jdiv
   real :: squareness      ! A measure of the squareness of a candidate layout [gridpoints]
   real :: best_squareness ! The largest squareness found so far [gridpoints]
+  integer :: ans_date     ! The vintage of the layout selection
 
-  ! This algorithm differs from mpp_define_layout, which searches only downwards from the
-  ! idiv that would make the subdomains exactly square.  That search can miss a better
-  ! divisor just above the target, so all divisors of ndivs are examined here instead.
+  ans_date = 99991231 ; if (present(answer_date)) ans_date = answer_date
 
   isz = n_global(1) ; jsz = n_global(2)
-  layout(1) = 1
-  best_squareness = 0.0
-  ! Loop over all divisors and find the one that gives the highest squareness
-  do idiv=1,ndivs
-    if (mod(ndivs, idiv) /= 0) cycle
-    jdiv = ndivs / idiv
-    ! The shorter of the two side lengths gives a measure of the squareness since the
-    ! product of the two side lengths is isz*jsz/ndivs for every candidate layout
-    squareness = min(real(isz) / real(idiv), real(jsz) / real(jdiv))
-    if (squareness > best_squareness) then
-      best_squareness = squareness
-      layout(1) = idiv
-    endif
-  enddo
+
+  if (ans_date < 20261030) then
+    ! This algorithm is a copy of mpp_define_layout.  First try to divide ndivs to match the
+    ! domain aspect ratio.  If this is not an even divisor of ndivs, reduce idiv until a factor
+    ! is found.
+    idiv = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
+    do while( mod(ndivs,idiv) /= 0 )
+      idiv = idiv - 1
+    enddo ! This will terminate at idiv=1 if not before.
+    layout(1) = idiv
+  else
+    ! The search above only looks downwards from the idiv that would make the subdomains exactly
+    ! square, so it can miss a better divisor just above the target.  All of the divisors of
+    ! ndivs are examined here instead.
+    layout(1) = 1
+    best_squareness = 0.0
+    ! Loop over all divisors and find the one that gives the highest squareness
+    do idiv=1,ndivs
+      if (mod(ndivs, idiv) /= 0) cycle
+      jdiv = ndivs / idiv
+      ! The shorter of the two side lengths gives a measure of the squareness since the
+      ! product of the two side lengths is isz*jsz/ndivs for every candidate layout
+      squareness = min(real(isz) / real(idiv), real(jsz) / real(jdiv))
+      if (squareness > best_squareness) then
+        best_squareness = squareness
+        layout(1) = idiv
+      endif
+    enddo
+  endif
   layout(2) = ndivs / layout(1)
 end subroutine MOM_define_layout
 
 !> Given a desired number of active npes, generate a layout and mask_table
 subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file, &
-                               inputdir, filename, target_io_pes, layout, io_layout, US)
+                               inputdir, filename, target_io_pes, layout, io_layout, &
+                               answer_date, US)
   integer, dimension(2), intent(in)         :: n_global   !< The total number of gridpoints in 2 directions
   logical, dimension(2), intent(in)         :: reentrant  !< True if the x- and y- directions are periodic.
   logical,               intent(in)         :: tripolar_N !< A flag indicating whether there is n. tripolar connectivity
@@ -527,6 +557,7 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
   integer,               intent(inout)      :: target_io_pes !< Target number of IO PEs when auto_mask_table is True.
   integer, dimension(2), intent(out)        :: layout     !< The generated layout of PEs (incl. masked blocks)
   integer, dimension(2), intent(out)        :: io_layout  !< The generated IO layout based on target_io_pes.
+  integer,               intent(in)         :: answer_date !< The vintage of the generated PE layout
   type(unit_scale_type), optional, pointer  :: US         !< A dimensional unit scaling type
 
   ! Local variables
@@ -651,7 +682,7 @@ subroutine gen_auto_mask_table(n_global, reentrant, tripolar_N, npes, param_file
     do p = p_up, npes, -1
 
       ! compute the layout for the current division count, p
-      call MOM_define_layout(n_global, p, layout)
+      call MOM_define_layout(n_global, p, layout, answer_date=answer_date)
 
       ! don't bother checking this p if the aspect ratio is extreme
       ar = (real(nx)/layout(1)) / (real(ny)/layout(2))
