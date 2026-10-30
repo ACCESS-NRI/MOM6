@@ -786,6 +786,8 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
                                                        ! cell thickness [H T-1 ~> m s-1 or kg m-2 s-1]
   real, dimension(SZI_(G),SZJ_(G))          :: work_2d ! The rate of change of column-integrated tracer
                                                        ! content [Conc H T-1 ~> Conc m s-1 or Conc kg m-2 s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: rvp ! Variance production due to the ALE remapping
+                                                   ! [Conc2 H T-1 ~> Conc2 m s-1 or Conc2 kg m-2 s-1]
   logical :: PCM(GV%ke) ! If true, do PCM remapping from a cell.
   real :: Idt           ! The inverse of the timestep [T-1 ~> s-1]
   real :: h1(GV%ke)     ! A column of source grid layer thicknesses [H ~> m or kg m-2]
@@ -812,16 +814,26 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
   ! Remap all registered tracers, including temperature and salinity.
   if (ntr>0) then
     if (show_call_tree) call callTree_waypoint("remapping tracers (ALE_remap_tracers)")
-    !$OMP parallel do default(shared) private(h1,h2,tr_column,Tr,PCM,work_conc,work_cont,work_2d)
+    !$OMP parallel do default(shared) private(h1,h2,tr_column,Tr,PCM,work_conc,work_cont,work_2d,rvp)
     do m=1,ntr ! For each tracer
       Tr => Reg%Tr(m)
+      if ((Tr%id_varprod_remap > 0) .and. (present(dt))) then
+        rvp(:,:,:) = 0.0
+      endif
       do j = G%jsc,G%jec ; do i = G%isc,G%iec ; if (G%mask2dT(i,j)>0.) then
         ! Build the start and final grids
         h1(:) = h_old(i,j,:)
         h2(:) = h_new(i,j,:)
-        if (present(PCM_cell)) then
+        if (present(PCM_cell) .and. (Tr%id_varprod_remap > 0) .and. (present(dt))) then
+          PCM(:) = PCM_cell(i,j,:)
+          call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, PCM_cell=PCM, &
+                                col_var_production=rvp(i,j,:))
+        else if (present(PCM_cell)) then
           PCM(:) = PCM_cell(i,j,:)
           call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, PCM_cell=PCM)
+        else if ((Tr%id_varprod_remap > 0) .and. (present(dt))) then
+          call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column, &
+                                col_var_production=rvp(i,j,:))
         else
           call remapping_core_h(CS%remapCS, nz, h1, Tr%t(i,j,:), nz, h2, tr_column)
         endif
@@ -866,6 +878,12 @@ subroutine ALE_remap_tracers(CS, G, GV, h_old, h_new, Reg, debug, dt, PCM_cell)
             enddo
           enddo ; enddo
           call post_data(Tr%id_remap_cont_2d, work_2d, CS%diag)
+        endif
+
+        ! Diagnostic for variance production due to remapping
+        if (Tr%id_varprod_remap > 0) then
+          rvp = rvp * Idt
+          call post_data(Tr%id_varprod_remap, rvp, CS%diag)
         endif
       endif
     enddo ! m=1,ntr
