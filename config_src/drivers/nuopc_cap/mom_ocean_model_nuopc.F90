@@ -260,6 +260,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
                       !! min(HFrz, OBLD), where OBLD is the boundary layer depth.
                       !! If HFrz <= 0 (default), melt potential will not be computed.
   logical :: use_melt_pot !< If true, allocate melt_potential array
+  logical :: dynamic_shelf_mass ! If true, the ice shelf mass can evolve with time
 
 
 ! This include declares and sets the variable "version".
@@ -370,6 +371,12 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
 
   call get_param(param_file, mdl, "ICE_SHELF",  OS%use_ice_shelf, &
                  "If true, enables the ice shelf model.", default=.false.)
+  if (OS%use_ice_shelf) then
+    call get_param(param_file, mdl, "DYNAMIC_SHELF_MASS", dynamic_shelf_mass, &
+                   default=.false., do_not_log=.true.)  ! This is logged from MOM_ice_shelf.F90.
+    if (dynamic_shelf_mass) call MOM_error(FATAL, "ocean_model_init: "//&
+        "DYNAMIC_SHELF_MASS = True is not currently supported by the NUOPC cap.")
+  endif
 
   call get_param(param_file, mdl, "ICEBERGS_APPLY_RIGID_BOUNDARY",  OS%icebergs_alter_ocean, &
                  "If true, allows icebergs to change boundary condition felt by ocean", default=.false.)
