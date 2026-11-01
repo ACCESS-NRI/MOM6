@@ -20,7 +20,7 @@ use ESMF,                      only: ESMF_RC_VAL_OUTOFRANGE, ESMF_INDEX_DELOCAL,
 use ESMF,                      only: ESMF_TYPEKIND_R8, ESMF_FIELDSTATUS_COMPLETE
 use ESMF,                      only: ESMF_FieldStatus_Flag, ESMF_LOGMSG_ERROR, ESMF_FAILURE, ESMF_MAXSTR
 use ESMF,                      only: operator(/=), operator(==)
-use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type
+use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type, get_ocean_mask
 use MOM_surface_forcing_nuopc, only: ice_ocean_boundary_type
 use MOM_grid,                  only: ocean_grid_type
 use MOM_domains,               only: pass_var
@@ -675,7 +675,7 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
   integer                         :: dt_int
   real                            :: inv_dt_int  !< The inverse of coupling time interval in s-1.
   type(ESMF_StateItem_Flag)       :: itemFlag
-  real(ESMF_KIND_R8), allocatable :: omask(:,:)
+  integer           , allocatable :: omask(:,:)
   real(ESMF_KIND_R8), allocatable :: melt_potential(:,:)
   real(ESMF_KIND_R8), allocatable :: ocz(:,:), ocm(:,:)
   real(ESMF_KIND_R8), allocatable :: ocz_rot(:,:), ocm_rot(:,:)
@@ -710,15 +710,9 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
   ! -------
 
   allocate(omask(isc:iec, jsc:jec))
-  do j = jsc, jec
-    jg = j + ocean_grid%jsc - jsc
-    do i = isc, iec
-      ig = i + ocean_grid%isc - isc
-      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg)) - ceiling(ocean_state%fluxes%frac_shelf_h(ig,jg))
-    enddo
-  enddo
+  call get_ocean_mask(ocean_state, omask)
 
-  call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, omask, ocean_grid, rc=rc)
+  call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, real(omask, ESMF_KIND_R8), ocean_grid, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   deallocate(omask)
