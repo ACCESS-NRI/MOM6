@@ -48,7 +48,7 @@ use MOM_tracer_flow_control, only : tracer_flow_control_CS, call_tracer_set_forc
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
 use MOM_verticalGrid,        only : verticalGrid_type
-use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS
+use MOM_ice_shelf,           only : initialize_ice_shelf, shelf_calc_flux, ice_shelf_CS, ice_shelf_query
 use MOM_ice_shelf,           only : add_shelf_forces, ice_shelf_end, ice_shelf_save_restart
 use MOM_ice_shelf,           only : adjust_ice_sheet_frazil
 use MOM_ice_shelf,           only : initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
@@ -88,6 +88,7 @@ public ocean_public_type_chksum
 public get_ocean_grid, query_ocean_state
 public get_eps_omesh
 public stoch_restart_needed
+public get_ocean_mask
 
 !> This type is used for communication with other components via the FMS coupler.
 !! The element names and types can be changed only with great deliberation, hence
@@ -140,7 +141,7 @@ end type ocean_public_type
 !> The ocean_state_type contains all information about the state of the ocean,
 !! with a format that is private so it can be readily changed without disrupting
 !! other coupled components.
-type, public :: ocean_state_type
+type, public :: ocean_state_type ; private
   ! This type is private, and can therefore vary between different ocean models.
   logical :: is_ocean_PE = .false.  !< True if this is an ocean PE.
   type(time_type) :: Time     !< The ocean model's time and master clock.
@@ -1233,5 +1234,40 @@ logical function stoch_restart_needed(OS)
   type(ocean_state_type), intent(in) :: OS
   stoch_restart_needed = OS%do_sppt .OR. OS%pert_epbl .OR. OS%do_skeb
 end function stoch_restart_needed
+
+!> Return the ocean mask that is shared with the coupler on the ocean compute domain.  This is
+!! the ocean model's land mask, but with any cells covered by an ice shelf also masked out.
+subroutine get_ocean_mask(OS, omask)
+  type(ocean_state_type),  pointer     :: OS    !< A structure containing the internal ocean state.
+  integer, dimension(:,:), intent(out) :: omask !< The ocean mask on the compute domain, which is 1
+                                                !! for exposed ocean and 0 for land or ice shelf.
+
+  ! Local variables
+  real, allocatable :: frac_shelf(:,:) ! The fractional ice shelf coverage of each cell [nondim]
+  logical :: is_shelf_partial ! True if any ocean cell is partially covered by an ice shelf
+  integer :: i, j, is, ie, js, je
+
+  is = OS%grid%isc ; ie = OS%grid%iec ; js = OS%grid%jsc ; je = OS%grid%jec
+
+  do j=js,je ; do i=is,ie
+    omask(i-is+1,j-js+1) = nint(OS%grid%mask2dT(i,j))
+  enddo ; enddo
+
+  if (OS%use_ice_shelf) then
+    ! Query the ice shelf directly, as fluxes%frac_shelf_h can also include the area of icebergs.
+    allocate(frac_shelf(OS%grid%isd:OS%grid%ied, OS%grid%jsd:OS%grid%jed))
+    call ice_shelf_query(OS%ice_shelf_CSp, OS%grid, frac_shelf_h=frac_shelf)
+    is_shelf_partial = .false.
+    do j=js,je ; do i=is,ie ; if (omask(i-is+1,j-js+1) == 1) then
+      if ((frac_shelf(i,j) > 0.0) .and. (frac_shelf(i,j) < 1.0)) is_shelf_partial = .true.
+      if (frac_shelf(i,j) > 0.0) omask(i-is+1,j-js+1) = 0
+    endif ; enddo ; enddo
+    deallocate(frac_shelf)
+
+    if (is_shelf_partial) call MOM_error(FATAL, "get_ocean_mask: "//&
+        "Partial ice shelf coverage is not currently supported by the NUOPC cap.")
+  endif
+
+end subroutine get_ocean_mask
 
 end module MOM_ocean_model_nuopc

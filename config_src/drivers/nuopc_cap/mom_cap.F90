@@ -23,7 +23,7 @@ use MOM_domains,              only: MOM_infra_init, MOM_infra_end
 use MOM_file_parser,          only: get_param, log_version, param_file_type, close_param_file
 use MOM_get_input,            only: get_MOM_input, directories
 use MOM_domains,              only: pass_var, pe_here
-use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe, WARNING
+use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe
 use MOM_grid,                 only: ocean_grid_type, get_global_grid_size
 use MOM_ocean_model_nuopc,    only: ice_ocean_boundary_type
 use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocean_state_type
@@ -31,6 +31,7 @@ use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc
 use MOM_ocean_model_nuopc,    only: ocean_model_init, update_ocean_model, ocean_model_end
 use MOM_ocean_model_nuopc,    only: get_ocean_grid, get_eps_omesh, query_ocean_state
 use MOM_ocean_model_nuopc,    only: stoch_restart_needed
+use MOM_ocean_model_nuopc,    only: get_ocean_mask
 use MOM_cap_time,             only: AlarmInit
 use MOM_cap_methods,          only: mom_import, mom_export, mom_set_geomtype, mod2med_areacor
 use MOM_cap_methods,          only: med2mod_areacor, state_diagnose
@@ -1047,6 +1048,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   real(ESMF_KIND_R8)    , pointer            :: lat(:), latMesh(:)
   real(ESMF_KIND_R8)    , pointer            :: lon(:), lonMesh(:)
   integer(ESMF_KIND_I4) , pointer            :: mask(:), maskMesh(:)
+  integer               , allocatable        :: omask(:,:)
   real(ESMF_KIND_R8)                         :: diff_lon, diff_lat
   real                                       :: eps_omesh
   real(ESMF_KIND_R8)                         :: L2_to_rad2
@@ -1288,17 +1290,20 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call get_domain_extent(ocean_public%domain, isc, iec, jsc, jec)
+    allocate(omask(isc:iec, jsc:jec))
+    call get_ocean_mask(ocean_state, omask)
     n = 0
     do j = jsc, jec
       jg = j + ocean_grid%jsc - jsc
       do i = isc, iec
         ig = i + ocean_grid%isc - isc
         n = n+1
-        mask(n) = ocean_grid%mask2dT(ig,jg)
+        mask(n) = omask(i,j)
         lon(n)  = ocean_grid%geolonT(ig,jg)
         lat(n)  = ocean_grid%geolatT(ig,jg)
       enddo
     enddo
+    deallocate(omask)
 
     eps_omesh = get_eps_omesh(ocean_state)
     do n = 1,lsize
@@ -1322,7 +1327,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         frmt = "('ERROR: ESMF mesh and MOM6 domain masks are inconsistent! - "//&
                "MOM n, maskMesh(n), mask(n) = ',3(i8,2x))"
         write(err_msg, frmt)n,maskMesh(n),mask(n)
-        call MOM_error(WARNING, err_msg)
+        call MOM_error(FATAL, err_msg)
       endif
     enddo
 
@@ -1567,13 +1572,15 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
       return
     endif
 
+    allocate(omask(isc:iec, jsc:jec))
+    call get_ocean_mask(ocean_state, omask)
     do j = jsc, jec
       j1 = j + lbnd2 - jsc
       jg = j + ocean_grid%jsc - jsc
       do i = isc, iec
         i1 = i + lbnd1 - isc
         ig = i + ocean_grid%isc - isc
-        dataPtr_mask(i1,j1)  = ocean_grid%mask2dT(ig,jg)
+        dataPtr_mask(i1,j1)  = omask(i,j)
         dataPtr_xcen(i1,j1)  = ocean_grid%geolonT(ig,jg)
         dataPtr_ycen(i1,j1)  = ocean_grid%geolatT(ig,jg)
         if (grid_attach_area) then
@@ -1581,6 +1588,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         endif
       enddo
     enddo
+    deallocate(omask)
 
     jlast = jec
     if (jec == nyg)jlast = jec+1
