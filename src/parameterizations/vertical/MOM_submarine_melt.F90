@@ -23,17 +23,22 @@ contains
 !> Distribute the mass and (optionally) heat content of submarine melt (srunoff) uniformly by
 !! thickness over the upper fluxes%srunoff_depth_max of a column. If fluxes%srunoff_depth_max is 0,
 !! the distribution depth for a column instead falls back to that column's own top layer thickness,
-!! so that srunoff is deposited entirely within the top layer.
+!! so that srunoff is deposited entirely within the top layer, unless that layer is thinner than
+!! minimum_forcing_depth, in which case srunoff is spread over the upper minimum_forcing_depth.
 !! This routine is called from both:
 !! - applyBoundaryFluxesInOut, to update thickness and temperature and dilute salinity.
 !! - applyTracerBoundaryFluxesInOut, to dilute a tracer concentration.
-subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, &
+subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, C2d, T2d, C_p, &
                                      g_Hconv2, cTKE, dSV_dT, dSV_dS, dHeat_total, dTempxPmE_total)
   type(ocean_grid_type),            intent(in)    :: G              !< Grid structure
   type(verticalGrid_type),          intent(in)    :: GV             !< Ocean vertical grid structure
   real,                             intent(in)    :: dt             !< Time step [T ~> s]
   type(forcing),                    intent(in)    :: fluxes         !< Surface fluxes, including srunoff
   integer,                          intent(in)    :: j              !< j-index to work on
+  real,                             intent(in)    :: minimum_forcing_depth !< The smallest depth over
+                                                                    !! which srunoff is distributed when
+                                                                    !! fluxes%srunoff_depth_max is 0
+                                                                    !! [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZK_(GV)), &
                                     intent(inout) :: h2d            !< Layer thicknesses [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZK_(GV)), &
@@ -104,9 +109,12 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, h2d, C2d, T2d, C_p, &
       dM_tot = GV%RZ_to_H * dt * fluxes%srunoff(i,j)
 
       ! When fluxes%srunoff_depth_max is 0 (the default), fall back to this column's own top layer
-      ! thickness as the distribution depth, so srunoff is deposited within the top layer.
+      ! thickness as the distribution depth, so srunoff is deposited within the top layer. If the
+      ! top layer is thinner than minimum_forcing_depth, srunoff is instead spread over the upper
+      ! minimum_forcing_depth, as for other surface fluxes, so a near-vanished layer is not
+      ! swamped by the melt.
       depth = fluxes%srunoff_depth_max
-      if (depth <= 0.0) depth = max(h2d(i,1), GV%H_subroundoff)
+      if (depth <= 0.0) depth = max(h2d(i,1), minimum_forcing_depth, GV%H_subroundoff)
 
       ! Cap the depth actually used at the full column thickness, so that a column shallower
       ! than the requested depth still receives all of dM_tot.
