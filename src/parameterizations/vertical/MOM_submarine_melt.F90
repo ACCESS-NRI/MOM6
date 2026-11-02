@@ -76,23 +76,23 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
                                                                     !! [C H ~> degC m or degC kg m-2]
 
   ! Local variables
-  real :: dM_tot     ! Total mass of srunoff to be distributed this timestep [H ~> m or kg m-2]
-  real :: dM_k       ! The portion of dM_tot applied to a layer [H ~> m or kg m-2]
-  real :: dHeat      ! The heat added to the column so far, accumulated for diagnostics [Q H ~> J m-2]
-  real :: dTempxPmE  ! The ambient-temperature-weighted mass added to the column so far,
-                     ! accumulated for diagnostics [C H ~> degC m or degC kg m-2]
-  real :: depth      ! The requested depth over which srunoff is distributed [H ~> m or kg m-2]
-  real :: total_h    ! The full thickness of the water column [H ~> m or kg m-2]
-  real :: eff_depth  ! The depth actually spanned in this column, capped at total_h so that the
+  real :: dM_tot      ! Total mass of srunoff to be distributed this timestep [H ~> m or kg m-2]
+  real :: dM_k        ! The portion of dM_tot applied to a layer [H ~> m or kg m-2]
+  real :: dHeat       ! The heat added to the column so far, accumulated for diagnostics [Q H ~> J m-2]
+  real :: dTempxPmE   ! The ambient-temperature-weighted mass added to the column so far,
+                      ! accumulated for diagnostics [C H ~> degC m or degC kg m-2]
+  real :: depth       ! The requested depth over which srunoff is distributed [H ~> m or kg m-2]
+  real :: total_h     ! The full thickness of the water column [H ~> m or kg m-2]
+  real :: eff_depth   ! The depth actually spanned in this column, capped at total_h so that the
                       ! full amount of srunoff is always distributed even in a column shallower
                       ! than depth [H ~> m or kg m-2]
-  real :: h_above    ! Cumulative thickness above the current layer, before adding srunoff [H ~> m or kg m-2]
-  real :: h_in_range ! The portion of a layer's thickness within eff_depth [H ~> m or kg m-2]
-  real :: T_eff      ! The effective temperature carried by srunoff mass added to a layer [C ~> degC]
-  real :: hOld       ! The layer thickness before adding srunoff mass [H ~> m or kg m-2]
-  real :: I_Habs     ! The inverse of eff_depth [H-1 ~> m-1 or m2 kg-1]
-  logical :: do_heat        ! If true, T2d and C_p are present and get updated
-  logical :: do_energetics  ! If true, cTKE and its supporting arguments are also present
+  real :: h_above     ! Cumulative thickness above the current layer, before adding srunoff [H ~> m or kg m-2]
+  real :: h_in_range  ! The portion of a layer's thickness within eff_depth [H ~> m or kg m-2]
+  real :: T_eff       ! The effective temperature carried by srunoff mass added to a layer [C ~> degC]
+  real :: hOld        ! The layer thickness before adding srunoff mass [H ~> m or kg m-2]
+  real :: I_eff_depth ! The inverse of eff_depth [H-1 ~> m-1 or m2 kg-1]
+  logical :: do_heat       ! If true, T2d and C_p are present and get updated
+  logical :: do_energetics ! If true, cTKE and its supporting arguments are also present
   integer :: i, k, is, ie, nz
 
   is = G%isc ; ie = G%iec ; nz = GV%ke
@@ -118,12 +118,12 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
 
       ! Cap the depth actually used at the full column thickness, so that a column shallower
       ! than the requested depth still receives all of dM_tot.
-      ! Note, with the currently implementation, if the column is zero thickness any srunoff
+      ! Note, with the current implementation, if the column is zero thickness any srunoff
       ! is just dropped.
       total_h = 0.0
       do k=1,nz ; total_h = total_h + h2d(i,k) ; enddo
       eff_depth = min(depth, total_h)
-      I_Habs = 0.0 ; if (eff_depth > 0.0) I_Habs = 1.0 / eff_depth
+      I_eff_depth = 0.0 ; if (eff_depth > 0.0) I_eff_depth = 1.0 / eff_depth
 
       h_above = 0.0
       dHeat = 0.0
@@ -135,7 +135,7 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
         h_in_range = max(0.0, min(h_above + h2d(i,k), eff_depth) - h_above)
         h_above = h_above + h2d(i,k)
         if (h_in_range > 0.0) then
-          dM_k = dM_tot * (h_in_range * I_Habs)
+          dM_k = dM_tot * (h_in_range * I_eff_depth)
           hOld = h2d(i,k)
 
           if (do_heat) then
