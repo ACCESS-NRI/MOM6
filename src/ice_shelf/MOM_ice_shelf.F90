@@ -1845,8 +1845,10 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
                                 "Ice shelf area in cell", "m2", conversion=US%L_to_m**2)
     call register_restart_field(ISS%h_shelf, "h_shelf", .true., CS%restart_CSp, &
                                 "ice sheet/shelf thickness", "m", conversion=US%Z_to_m)
-    call register_restart_field(ISS%hmask, "h_mask", .true., CS%restart_CSp, &
-                                "ice sheet/shelf thickness mask" ,"none")
+    if (CS%active_shelf_dynamics .or. (CS%override_shelf_movement .and. .not. CS%mass_from_file)) then
+      call register_restart_field(ISS%hmask, "h_mask", .true., CS%restart_CSp, &
+                                  "ice sheet/shelf thickness mask" ,"none")
+    endif
   endif
   if (CS%calve_ice_shelf_bergs) then
     restore_shelf_state = .true.
