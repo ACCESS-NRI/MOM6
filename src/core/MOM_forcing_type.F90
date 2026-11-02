@@ -2590,17 +2590,6 @@ subroutine fluxes_accumulate(flux_tmp, fluxes, G, wt2, forces)
       fluxes%heat_content_frunoff(i,j) = wt1*fluxes%heat_content_frunoff(i,j) + wt2*flux_tmp%heat_content_frunoff(i,j)
     enddo ; enddo
   endif
-  if (associated(fluxes%heat_content_srunoff) .and. associated(flux_tmp%heat_content_srunoff)) then
-    do j=js,je ; do i=is,ie
-      fluxes%heat_content_srunoff(i,j) = wt1*fluxes%heat_content_srunoff(i,j) + wt2*flux_tmp%heat_content_srunoff(i,j)
-    enddo ; enddo
-  endif
-  if (associated(fluxes%heat_content_eff_srunoff) .and. associated(flux_tmp%heat_content_eff_srunoff)) then
-    do j=js,je ; do i=is,ie
-      fluxes%heat_content_eff_srunoff(i,j) = wt1*fluxes%heat_content_eff_srunoff(i,j) + &
-                                             wt2*flux_tmp%heat_content_eff_srunoff(i,j)
-    enddo ; enddo
-  endif
   if (associated(fluxes%heat_content_lrunoff_glc) .and. associated(flux_tmp%heat_content_lrunoff_glc)) then
     do j=js,je ; do i=is,ie
       fluxes%heat_content_lrunoff_glc(i,j) = wt1*fluxes%heat_content_lrunoff_glc(i,j) + &
