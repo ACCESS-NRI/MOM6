@@ -1016,7 +1016,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       ! Distribute srunoff's mass and heat over a range of depths, if requested,
       ! updating temperature and salinity together. This is done before loops A and B
       ! below so loop B sees the srunoff-fattened column, making grounding less likely.
-      call distribute_submarine_melt(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, &
+      call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, tv%S(:,j,:), &
+                                     T2d=T2d, C_p=tv%C_p, &
                                      g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
                                      dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
 
