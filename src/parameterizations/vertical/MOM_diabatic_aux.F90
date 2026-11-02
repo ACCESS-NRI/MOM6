@@ -15,7 +15,7 @@ use MOM_EOS,           only : calculate_specific_vol_derivs, calculate_density_d
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, callTree_showQuery
 use MOM_error_handler, only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,   only : get_param, log_param, log_version, param_file_type
-use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint, distribute_srunoff
+use MOM_forcing_type,  only : forcing, extractFluxes1d, forcing_SinglePointPrint
 use MOM_grid,          only : ocean_grid_type
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_interpolate,   only : init_external_field, time_interp_external, time_interp_external_init
@@ -23,6 +23,7 @@ use MOM_interpolate,   only : external_field
 use MOM_io,            only : slasher
 use MOM_opacity,       only : set_opacity, opacity_CS, extract_optics_slice, extract_optics_fields
 use MOM_opacity,       only : optics_type, optics_nbands, absorbRemainingSW, sumSWoverBands
+use MOM_submarine_melt, only : distribute_submarine_melt
 use MOM_tracer_flow_control, only : get_chl_from_model, tracer_flow_control_CS
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs
@@ -763,10 +764,10 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     netMassInOut_rate, & ! netmassinout but for dt=1 [H T-1 ~> m s-1 or kg m-2 s-1]
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
     total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
-    dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_srunoff, for
+    dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_submarine_melt, for
                      ! the heat_content_eff_srunoff diagnostic [Q H ~> J m-2]
     dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff,
-                     ! from distribute_srunoff, for the tv%TempxPmE and heat_content_srunoff
+                     ! from distribute_submarine_melt, for the tv%TempxPmE and heat_content_srunoff
                      ! diagnostics [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
@@ -1015,9 +1016,9 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       ! Distribute srunoff's mass and heat over a range of depths, if requested,
       ! updating temperature and salinity together. This is done before loops A and B
       ! below so loop B sees the srunoff-fattened column, making grounding less likely.
-      call distribute_srunoff(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, US=US, &
-                               g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
-                               dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
+      call distribute_submarine_melt(G, GV, dt, fluxes, j, h2d, tv%S(:,j,:), T2d=T2d, C_p=tv%C_p, &
+                                     g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
+                                     dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
 
       ! Add srunoff's contributions to relevant diagnostics. heat_content_eff_srunoff is all of
       ! the heat applied (i.e. heat content plus e.g. latent heat), while heat_content_srunoff is

@@ -37,7 +37,6 @@ use MOM_string_functions, only : uppercase
 use MOM_spatial_means,    only : adjust_area_mean_to_zero
 use MOM_unit_scaling,     only : unit_scale_type
 use MOM_variables,        only : surface
-use MOM_verticalGrid,     only : verticalGrid_type
 use user_revise_forcing,  only : user_alter_forcing, user_revise_forcing_init
 use user_revise_forcing,  only : user_revise_forcing_CS
 use iso_fortran_env,      only : int64
@@ -87,14 +86,6 @@ type, public :: surface_forcing_CS ; private
   logical :: use_marbl_tracers  !< enables the MARBL tracer package.
   logical :: enthalpy_cpl       !< Controls if enthalpy terms are provided by the coupler or computed
                                 !! internally.
-  logical :: srunoff_latent_heat !< If true, give submarine melt (srunoff) an effective temperature
-                                !! offset by latent_heat_fusion/C_p, following the Gade (1979)
-                                !! meltwater mixing line, so that melting the ice consumes latent
-                                !! heat. If false, srunoff enters the ocean at the ambient
-                                !! temperature.
-  real :: srunoff_depth_max     !< The maximum depth over which the mass and heat from coupled
-                                !! submarine melt are spread, distributed uniformly by thickness. If 0,
-                                !! srunoff is applied entirely within the top layer [H ~> m or kg m-2].
   real :: gust_const            !< constant unresolved background gustiness for ustar [R L Z T-2 ~> Pa]
   logical :: read_gust_2d       !< If true, use a 2-dimensional gustiness supplied
                                 !! from an input file.
@@ -343,9 +334,6 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
                                press=.true., fix_accum_bug=.not.CS%ustar_gustless_bug, &
                                cfc=CS%use_CFC, marbl=CS%use_marbl_tracers, hevap=CS%enthalpy_cpl, &
                                tau_mag=.true., ice_ncat=IOB%ice_ncat, srunoff=associated(IOB%srunoff))
-    fluxes%latent_heat_fusion = CS%latent_heat_fusion
-    fluxes%srunoff_latent_heat = CS%srunoff_latent_heat
-    fluxes%srunoff_depth_max = CS%srunoff_depth_max
     call safe_alloc_ptr(fluxes%omega_w2x,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dir,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dif,isd,ied,jsd,jed)
@@ -523,7 +511,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
     if (associated(IOB%srunoff)) then
       fluxes%srunoff(i,j) = kg_m2_s_conversion * IOB%srunoff(i-i0,j-j0) * G%mask2dT(i,j)
       ! Total latent heat extracted by submarine melt (not depth-dependent)
-      if (CS%srunoff_latent_heat) &
+      if (fluxes%srunoff_latent_heat) &
         fluxes%latent_srunoff(i,j) = - G%mask2dT(i,j) * &
             IOB%srunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
@@ -1184,10 +1172,9 @@ subroutine forcing_save_restart(CS, G, Time, directory, time_stamped, &
 end subroutine forcing_save_restart
 
 !> Initialize the surface forcing, including setting parameters and allocating permanent memory.
-subroutine surface_forcing_init(Time, G, GV, US, param_file, diag, CS, restore_salt, restore_temp, use_waves)
+subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, restore_salt, restore_temp, use_waves)
   type(time_type),          intent(in)    :: Time !< The current model time
   type(ocean_grid_type),    intent(in)    :: G    !< The ocean's grid structure
-  type(verticalGrid_type),  intent(in)    :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),    intent(in)    :: US   !< A dimensional unit scaling type
   type(param_file_type),    intent(in)    :: param_file !< A structure to parse for run-time parameters
   type(diag_ctrl), target,  intent(inout) :: diag !< A structure that is used to regulate
@@ -1252,15 +1239,6 @@ subroutine surface_forcing_init(Time, G, GV, US, param_file, diag, CS, restore_s
                  "The latent heat of fusion.", units="J/kg", default=hlf)
   call get_param(param_file, mdl, "LATENT_HEAT_VAPORIZATION", CS%latent_heat_vapor, &
                  "The latent heat of fusion.", units="J/kg", default=hlv)
-  call get_param(param_file, mdl, "SRUNOFF_LATENT_HEAT", CS%srunoff_latent_heat, &
-                 "If true, give submarine melt (srunoff) an effective temperature offset by "//&
-                 "LATENT_HEAT_FUSION/C_p, following the Gade (1979) meltwater mixing line, "//&
-                 "so that melting the ice consumes latent heat. If false, srunoff enters "// &
-                 "the ocean at the ambient temperature.", default=.false.)
-  call get_param(param_file, mdl, "SRUNOFF_DEPTH_MAX", CS%srunoff_depth_max, &
-                 "The maximum depth over which the mass and heat from coupled submarine melt are spread, "//&
-                 "distributed uniformly by thickness. If 0, srunoff is applied entirely "//&
-                 "within the top layer.", units="m", default=0.0, scale=GV%m_to_H)
   call get_param(param_file, mdl, "MAX_P_SURF", CS%max_p_surf, &
                  "The maximum surface pressure that can be exerted by the "//&
                  "atmosphere and floating sea-ice or ice shelves. This is "//&
