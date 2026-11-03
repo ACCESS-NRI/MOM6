@@ -184,14 +184,18 @@ subroutine submarine_melt_init(param_file, GV, US, fluxes)
   ! the tracer column physics, distributes it in the same way.
   call log_version(param_file, mdl, version, "")
   call get_param(param_file, mdl, "SRUNOFF_LATENT_HEAT", fluxes%srunoff_latent_heat, &
-                 "If true, give submarine melt (srunoff) an effective temperature offset by "//&
-                 "LATENT_HEAT_FUSION/C_p, following the Gade (1979) meltwater mixing line, "//&
-                 "so that melting the ice consumes latent heat. If false, srunoff enters "// &
-                 "the ocean at the ambient temperature.", default=.false.)
+                 "If true, submarine melt (srunoff) enters each layer at an effective temperature "//&
+                 "equal to the layer temperature minus LATENT_HEAT_FUSION/C_p, so that melting the ice "//&
+                 "takes latent heat from the layers the meltwater enters. This is a simplified form "//&
+                 "of the Gade (1979) meltwater mixing line, neglecting the heat needed to warm the "//&
+                 "ice to the freezing point and the meltwater from the freezing point to the ambient "//&
+                 "temperature. If false, srunoff enters the ocean at the ambient temperature.", &
+                 default=.false.)
   call get_param(param_file, mdl, "SRUNOFF_DEPTH_MAX", fluxes%srunoff_depth_max, &
                  "The maximum depth over which the mass and heat from coupled submarine melt are spread, "//&
-                 "distributed uniformly by thickness. If 0, srunoff is applied entirely "//&
-                 "within the top layer.", units="m", default=0.0, scale=GV%m_to_H)
+                 "distributed uniformly by thickness. If 0, srunoff is applied within the top "//&
+                 "layer, or over MINIMUM_FORCING_DEPTH if the top layer is thinner than that.", &
+                 units="m", default=0.0, scale=GV%m_to_H)
   call get_param(param_file, mdl, "LATENT_HEAT_FUSION", fluxes%latent_heat_fusion, &
                  "The latent heat of fusion.", units="J/kg", default=hlf, scale=US%J_kg_to_Q, &
                  do_not_log=.not.fluxes%srunoff_latent_heat)

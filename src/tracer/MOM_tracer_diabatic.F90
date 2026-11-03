@@ -11,7 +11,7 @@ use MOM_grid,             only : ocean_grid_type
 use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_forcing_type,     only : forcing
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
-use MOM_submarine_melt, only : distribute_submarine_melt
+use MOM_submarine_melt,   only : distribute_submarine_melt
 
 implicit none ; private
 
