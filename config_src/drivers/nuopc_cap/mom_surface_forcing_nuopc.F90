@@ -166,7 +166,7 @@ end type surface_forcing_CS
 type, public :: ice_ocean_boundary_type
   real, pointer, dimension(:,:) :: lrunoff           =>NULL() !< liquid runoff [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff           =>NULL() !< ice runoff [km m-2 s-1]
-  real, pointer, dimension(:,:) :: srunoff           =>NULL() !< submarine melt [km m-2 s-1]
+  real, pointer, dimension(:,:) :: srunoff           =>NULL() !< submarine melt [kg m-2 s-1]
   real, pointer, dimension(:,:) :: lrunoff_glc       =>NULL() !< liquid glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff_glc       =>NULL() !< frozen glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: u_flux            =>NULL() !< i-direction wind stress [Pa]
@@ -510,10 +510,6 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
     ! submarine melt flux
     if (associated(IOB%srunoff)) then
       fluxes%srunoff(i,j) = kg_m2_s_conversion * IOB%srunoff(i-i0,j-j0) * G%mask2dT(i,j)
-      ! Total latent heat extracted by submarine melt (not depth-dependent)
-      if (fluxes%srunoff_latent_heat) &
-        fluxes%latent_srunoff(i,j) = - G%mask2dT(i,j) * &
-            IOB%srunoff(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
 
     ! add liquid glc runoff flux via rof
@@ -571,7 +567,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
           IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
     ! Submarine melt (srunoff) is not included in fluxes%latent since it is depth-dependent not a
-    ! surface flux. The latent heat associated with srunoff is included in latent heat diagnostics
+    ! surface flux. The latent heat associated with srunoff is included in latent heat diagnostics.
     if (associated(IOB%q_flux)) then
       fluxes%latent(i,j)           = fluxes%latent(i,j) + &
           IOB%q_flux(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_vapor

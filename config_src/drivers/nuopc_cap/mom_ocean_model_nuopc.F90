@@ -38,8 +38,8 @@ use MOM_get_input,           only : Get_MOM_Input, directories
 use MOM_grid,                only : ocean_grid_type
 use MOM_io,                  only : close_file, file_exists, read_data, write_version_number
 use MOM_marine_ice,          only : iceberg_forces, iceberg_fluxes, marine_ice_init, marine_ice_CS
-use MOM_submarine_melt,      only : submarine_melt_init
 use MOM_string_functions,    only : uppercase
+use MOM_submarine_melt,      only : submarine_melt_init
 use MOM_time_manager,        only : time_type, get_time, set_time, operator(>)
 use MOM_time_manager,        only : operator(+), operator(-), operator(*), operator(/)
 use MOM_time_manager,        only : operator(/=), operator(<=), operator(>=)
@@ -599,7 +599,6 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     endif
   else
     OS%flux_tmp%C_p = OS%fluxes%C_p
-    OS%flux_tmp%srunoff_latent_heat = OS%fluxes%srunoff_latent_heat
     if (do_thermo) &
       call convert_IOB_to_fluxes(Ice_ocean_boundary, OS%flux_tmp, index_bnds, OS%Time, dt_coupling, &
                                OS%grid, OS%US, OS%forcing_CSp, OS%sfc_state, OS%restore_salinity, OS%restore_temp)

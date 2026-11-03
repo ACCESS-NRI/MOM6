@@ -792,6 +792,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
            Ice_ocean_boundary% p (isc:iec,jsc:jec),               &
            Ice_ocean_boundary% lrunoff (isc:iec,jsc:jec),         &
            Ice_ocean_boundary% frunoff (isc:iec,jsc:jec),         &
+           Ice_ocean_boundary% srunoff (isc:iec,jsc:jec),         &
            source=0.0)
 
   ! Allocate memory for fields coming from multiple ice categories
@@ -1334,7 +1335,6 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
                            ice_ocean_boundary=Ice_ocean_boundary, mesh=Emesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call allocate_optional_iob_fields(importState, Ice_ocean_boundary, isc, iec, jsc, jec)
 
     call MOM_RealizeFields(exportState, fldsFrOcn_num, fldsFrOcn, "Ocn export", mesh=Emesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -1629,7 +1629,6 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
          ice_ocean_boundary=Ice_ocean_boundary, grid=gridIn, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    call allocate_optional_iob_fields(importState, Ice_ocean_boundary, isc, iec, jsc, jec)
 
     call MOM_RealizeFields(exportState, fldsFrOcn_num, fldsFrOcn, "Ocn export", grid=gridOut, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2450,24 +2449,6 @@ subroutine State_SetScalar(value, scalar_id, State, mytask, scalar_name, scalar_
 
 end subroutine State_SetScalar
 
-!> Allocate ice_ocean_boundary fields whose presence depends on whether the coupler
-!! actually connects the corresponding field, rather than on a compile-time flag.
-subroutine allocate_optional_iob_fields(importState, ice_ocean_boundary, isc, iec, jsc, jec)
-  type(ESMF_State)             , intent(in)    :: importState !< Import ESMF_State object.
-  type(ice_ocean_boundary_type), intent(inout) :: ice_ocean_boundary !< Fields from the mediator.
-  integer                      , intent(in)    :: isc !< Start i-index of the computational domain.
-  integer                      , intent(in)    :: iec !< End i-index of the computational domain.
-  integer                      , intent(in)    :: jsc !< Start j-index of the computational domain.
-  integer                      , intent(in)    :: jec !< End j-index of the computational domain.
-  character(len=*), parameter :: subname = '(MOM_cap:allocate_optional_iob_fields)'
-
-  if (NUOPC_IsConnected(importState, fieldName='Foxx_rofs')) then
-    if (is_root_pe()) write(stdout,*) subname // " Allocating ice_ocean_boundary%srunoff"
-    allocate(ice_ocean_boundary%srunoff(isc:iec,jsc:jec), source=0.0)
-  endif
-
-end subroutine allocate_optional_iob_fields
-
 !> Realize the import and export fields using either a grid or a mesh.
 subroutine MOM_RealizeFields(state, nfields, field_defs, tag, ice_ocean_boundary, grid, mesh, rc)
   type(ESMF_State)             , intent(inout)           :: state !< ESMF_State object for
@@ -2568,6 +2549,10 @@ subroutine MOM_RealizeFields(state, nfields, field_defs, tag, ice_ocean_boundary
           if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%atm_co2_diag"
           deallocate(ice_ocean_boundary%atm_co2_diag)
           nullify(ice_ocean_boundary%atm_co2_diag)
+        elseif (trim(field_defs(i)%stdname) == 'Foxx_rofs') then
+          if (is_root_pe()) write(stdout,*) subname // tag // " Nullifying ice_ocean_boundary%srunoff"
+          deallocate(ice_ocean_boundary%srunoff)
+          nullify(ice_ocean_boundary%srunoff)
         endif
       endif
 
@@ -3031,7 +3016,7 @@ end subroutine shr_log_setLogUnit
 !!     <td>kg m-2 s-1</td>
 !!     <td>runoff</td>
 !!     <td>mass flux of submarine melt. Only allocated in Ice_ocean_boundary if
-!!     advertised by the coupler.</td>
+!!     connected by the coupler.</td>
 !!     <td></td>
 !! </tr>
 !! <tr>

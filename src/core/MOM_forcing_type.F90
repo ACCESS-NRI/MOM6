@@ -233,14 +233,15 @@ type, public :: forcing
                                 !! C_p is is the same value as in thermovar_ptrs_type.
   real :: latent_heat_fusion    !< The latent heat of fusion, used for submarine melt (srunoff)
                                 !! [Q ~> J kg-1].
-  logical :: srunoff_latent_heat = .false. !< If true, give submarine melt (srunoff) an effective
-                                !! temperature offset by latent_heat_fusion/C_p, following the Gade
-                                !! (1979) meltwater mixing line, so that melting the ice consumes
-                                !! latent heat. If false, srunoff enters the ocean at the ambient
-                                !! temperature.
+  logical :: srunoff_latent_heat = .false. !< If true, submarine melt (srunoff) enters each layer at
+                                !! the layer temperature minus latent_heat_fusion/C_p, a simplified
+                                !! form of the Gade (1979) meltwater mixing line that includes only
+                                !! the latent heat of melting. If false, srunoff enters the ocean at
+                                !! the ambient temperature.
   real :: srunoff_depth_max = 0.0 !< The maximum depth over which the mass and heat from coupled
                                 !! submarine melt are spread, distributed uniformly by thickness. If 0,
-                                !! srunoff is applied entirely within the top layer [H ~> m or kg m-2].
+                                !! srunoff is applied within the top layer, or over the minimum forcing
+                                !! depth if the top layer is thinner than that [H ~> m or kg m-2].
 
   ! arrays needed in the some tracer modules, e.g., MOM_CFC_cap
   real, pointer, dimension(:,:) :: &
@@ -1050,6 +1051,7 @@ subroutine extractFluxes2d(G, GV, US, fluxes, optics, nsw, dt, FluxRescaleDepth,
   enddo
 
 end subroutine extractFluxes2d
+
 
 !> This routine calculates surface buoyancy flux by adding up the heat, FW & salt fluxes.
 !! These are actual fluxes, with units of stuff per time. Setting dt=1 in the call to
@@ -2519,17 +2521,11 @@ subroutine fluxes_accumulate(flux_tmp, fluxes, G, wt2, forces)
 
     fluxes%salt_flux(i,j) = wt1*fluxes%salt_flux(i,j) + wt2*flux_tmp%salt_flux(i,j)
   enddo ; enddo
-  ! Unlike the other water-group and heat fields above, fluxes%srunoff and fluxes%latent_srunoff
-  ! are only associated when submarine-melt coupling is actually configured, so they need their
-  ! own guards here.
+  ! Unlike the other water-group fields above, fluxes%srunoff is only associated when
+  ! submarine-melt coupling is actually configured, so it needs its own guard here.
   if (associated(fluxes%srunoff) .and. associated(flux_tmp%srunoff)) then
     do j=js,je ; do i=is,ie
       fluxes%srunoff(i,j) = wt1*fluxes%srunoff(i,j) + wt2*flux_tmp%srunoff(i,j)
-    enddo ; enddo
-  endif
-  if (associated(fluxes%latent_srunoff) .and. associated(flux_tmp%latent_srunoff)) then
-    do j=js,je ; do i=is,ie
-      fluxes%latent_srunoff(i,j) = wt1*fluxes%latent_srunoff(i,j) + wt2*flux_tmp%latent_srunoff(i,j)
     enddo ; enddo
   endif
   if (associated(fluxes%salt_flux_in) .and. associated(flux_tmp%salt_flux_in)) then
@@ -3475,7 +3471,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
     if ((handles%id_lat_srunoff > 0) .and. associated(fluxes%latent_srunoff)) then
       call post_data(handles%id_lat_srunoff, fluxes%latent_srunoff, diag)
     endif
-    if (handles%id_total_lat_srunoff > 0 .and. associated(fluxes%latent_srunoff)) then
+    if ((handles%id_total_lat_srunoff > 0) .and. associated(fluxes%latent_srunoff)) then
       total_heat_flux = global_area_integral(fluxes%latent_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_total_lat_srunoff, total_heat_flux, diag)
     endif

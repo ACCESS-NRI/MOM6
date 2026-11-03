@@ -765,10 +765,10 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
     total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
     dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_submarine_melt, for
-                     ! the heat_content_eff_srunoff diagnostic [Q H ~> J m-2]
+                     ! fluxes%heat_content_eff_srunoff [Q H ~> J m-2]
     dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff,
-                     ! from distribute_submarine_melt, for the tv%TempxPmE and heat_content_srunoff
-                     ! diagnostics [C H ~> degC m or degC kg m-2]
+                     ! from distribute_submarine_melt, for tv%TempxPmE and
+                     ! fluxes%heat_content_srunoff [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
     ! dz, &            ! Layer thicknesses in depth units [Z ~> m]
@@ -998,6 +998,14 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
     enddo
 
     if (associated(fluxes%srunoff)) then
+      ! The latent heat of melting srunoff, used below for the surface buoyancy flux and in the
+      ! latent heat diagnostics.
+      if (associated(fluxes%latent_srunoff)) then ; do i=is,ie
+        fluxes%latent_srunoff(i,j) = 0.0
+        if (fluxes%srunoff_latent_heat) &
+          fluxes%latent_srunoff(i,j) = -fluxes%latent_heat_fusion * fluxes%srunoff(i,j)
+      enddo ; endif
+
       ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
       ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
       ! and heat associated with srunoff are treated as if they were applied at the surface,
@@ -1029,8 +1037,12 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
           fluxes%heat_content_eff_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
         if (associated(fluxes%heat_content_srunoff)) &
           fluxes%heat_content_srunoff(i,j) = tv%C_p * dTempxPmE_srunoff(i) * GV%H_to_RZ / dt
-        if (associated(tv%TempxPmE)) &
-          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
+        ! As for the other mass fluxes, tv%TempxPmE is only accumulated here when the heat content
+        ! of mass fluxes is not provided by the coupler.
+        if (.not. associated(fluxes%heat_content_evap)) then
+          if (associated(tv%TempxPmE)) &
+            tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
+        endif
       enddo
     endif
 
@@ -1283,6 +1295,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
       call absorbRemainingSW(G, GV, US, h2d, opacityBand, nsw, optics, j, dt, H_limit_fluxes, &
                              .false., .true., T2d, Pen_SW_bnd)
     endif
+
 
     ! Step D/ copy updated thickness and temperature
     ! 2d slice now back into model state.
