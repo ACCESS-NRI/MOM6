@@ -240,7 +240,7 @@ contains
 !!   This subroutine initializes both the ocean state and the ocean surface type.
 !! Because of the way that indicies and domains are handled, Ocean_sfc must have
 !! been used in a previous call to initialize_ocean_type.
-subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_file, inst_index)
+subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_file, inst_index, use_srunoff)
   type(ocean_public_type), target, &
                        intent(inout) :: Ocean_sfc !< A structure containing various publicly
                                 !! visible ocean surface properties after initialization,
@@ -252,6 +252,8 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
   type(time_type),     intent(in)    :: Time_in   !< The time at which to initialize the ocean model.
   character(len=*), optional, intent(in) :: input_restart_file !< If present, name of restart file to read
   integer, optional :: inst_index !< Ensemble index provided by the cap (instead of FMS ensemble manager)
+  logical, optional, intent(in) :: use_srunoff !< If present and true, coupled submarine melt (srunoff)
+                                               !! is received from the mediator.
 
   ! Local variables
   real :: Rho0        ! The Boussinesq ocean density, in kg m-3.
@@ -262,6 +264,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
                       !! If HFrz <= 0 (default), melt potential will not be computed.
   logical :: use_melt_pot !< If true, allocate melt_potential array
   logical :: dynamic_shelf_mass ! If true, the ice shelf mass can evolve with time
+  logical :: use_submarine_melt ! If true, coupled submarine melt (srunoff) is received.
 
 
 ! This include declares and sets the variable "version".
@@ -416,7 +419,8 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
   call surface_forcing_init(Time_in, OS%grid, OS%US, param_file, OS%diag, &
                             OS%forcing_CSp, OS%restore_salinity, OS%restore_temp, OS%use_waves)
 
-  call submarine_melt_init(param_file, OS%GV, OS%US, OS%fluxes)
+  use_submarine_melt = .false. ; if (present(use_srunoff)) use_submarine_melt = use_srunoff
+  call submarine_melt_init(param_file, OS%GV, OS%US, OS%fluxes, log_params=use_submarine_melt)
 
   if (OS%use_ice_shelf)  then
     call initialize_ice_shelf_fluxes(OS%ice_shelf_CSp, OS%grid, OS%US, OS%fluxes)

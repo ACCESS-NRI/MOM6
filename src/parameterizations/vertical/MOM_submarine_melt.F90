@@ -168,21 +168,25 @@ end subroutine distribute_submarine_melt
 
 !> Initialize the parameters that control the distribution of submarine melt, and store them in
 !! the forcing type, where they are used by distribute_submarine_melt.
-subroutine submarine_melt_init(param_file, GV, US, fluxes)
+subroutine submarine_melt_init(param_file, GV, US, fluxes, log_params)
   type(param_file_type),   intent(in)    :: param_file !< A structure to parse for run-time parameters.
   type(verticalGrid_type), intent(in)    :: GV         !< The ocean's vertical grid structure.
   type(unit_scale_type),   intent(in)    :: US         !< A dimensional unit scaling type
   type(forcing),           intent(inout) :: fluxes     !< A structure containing pointers to
                                                        !! thermodynamic forcing fields, in which
                                                        !! the submarine melt parameters are set.
+  logical,                 intent(in)    :: log_params !< If true, log the submarine melt parameters.
+                                                       !! This should be true when coupled
+                                                       !! submarine melt (srunoff) is used.
 
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
   character(len=40) :: mdl = "MOM_submarine_melt" ! This module's name.
 
+  call log_version(param_file, mdl, version, "")
+
   ! These are stored in the forcing type so that every routine that applies srunoff, including
   ! the tracer column physics, distributes it in the same way.
-  call log_version(param_file, mdl, version, "")
   call get_param(param_file, mdl, "SRUNOFF_LATENT_HEAT", fluxes%srunoff_latent_heat, &
                  "If true, submarine melt (srunoff) enters each layer at an effective temperature "//&
                  "equal to the layer temperature minus LATENT_HEAT_FUSION/C_p, so that melting the ice "//&
@@ -190,15 +194,15 @@ subroutine submarine_melt_init(param_file, GV, US, fluxes)
                  "of the Gade (1979) meltwater mixing line, neglecting the heat needed to warm the "//&
                  "ice to the freezing point and the meltwater from the freezing point to the ambient "//&
                  "temperature. If false, srunoff enters the ocean at the ambient temperature.", &
-                 default=.false.)
+                 default=.false., do_not_log=.not.log_params)
   call get_param(param_file, mdl, "SRUNOFF_DEPTH_MAX", fluxes%srunoff_depth_max, &
                  "The maximum depth over which the mass and heat from coupled submarine melt are spread, "//&
                  "distributed uniformly by thickness. If 0, srunoff is applied within the top "//&
                  "layer, or over MINIMUM_FORCING_DEPTH if the top layer is thinner than that.", &
-                 units="m", default=0.0, scale=GV%m_to_H)
+                 units="m", default=0.0, scale=GV%m_to_H, do_not_log=.not.log_params)
   call get_param(param_file, mdl, "LATENT_HEAT_FUSION", fluxes%latent_heat_fusion, &
                  "The latent heat of fusion.", units="J/kg", default=hlf, scale=US%J_kg_to_Q, &
-                 do_not_log=.not.fluxes%srunoff_latent_heat)
+                 do_not_log=.not.(log_params .and. fluxes%srunoff_latent_heat))
 
 end subroutine submarine_melt_init
 
