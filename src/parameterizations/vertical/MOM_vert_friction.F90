@@ -93,6 +93,9 @@ type, public :: vertvisc_CS ; private
   real    :: CFL_truncS      !< The start value of CFL_trunc [nondim]
   real    :: CFL_truncE      !< The end/target value of CFL_trunc [nondim]
   logical :: CFLrampingIsActivated = .false. !< True if the ramping has been initialized
+  logical :: CFL_report_follow !< If true, the CFL used for reporting matches that
+                               !! of the CFL used for truncations, used for reporting
+                               !! truncations during the ramping period.
   type(time_type) :: rampStartTime !< The time at which the ramping of CFL_trunc starts
 
   real ALLOCABLE_, dimension(NIMEMB_PTR_,NJMEM_,NK_INTERFACE_) :: &
@@ -2611,7 +2614,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
       endif
       if (CFL > CS%CFL_trunc) trunc_any = .true.
-      if (CFL > CS%CFL_report) then
+      if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
+          ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
         dowrite(I,j) = .true.
         do_any_write = .true.
         vel_report(I,j) = min(vel_report(I,j), abs(u(I,j,k)))
@@ -2676,7 +2680,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         CFL = (v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
       endif
       if (CFL > CS%CFL_trunc) trunc_any = .true.
-      if (CFL > CS%CFL_report) then
+      if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
+          ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
         dowrite(i,J) = .true.
         do_any_write = .true.
         vel_report(i,J) = min(vel_report(i,J), abs(v(i,J,k)))
@@ -2996,10 +3001,21 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
                  "The value of the CFL number that will cause velocity "//&
                  "components to be truncated; instability can occur past 0.5.", &
                  units="nondim", default=0.5)
-  call get_param(param_file, mdl, "CFL_REPORT", CS%CFL_report, &
-                 "The value of the CFL number that causes accelerations "//&
-                 "to be reported; the default is CFL_TRUNCATE.", &
-                 units="nondim", default=CS%CFL_trunc)
+  call get_param(param_file, mdl, "CFL_REPORT_FOLLOW", CS%CFL_report_follow, &
+                 "Whether the reporting CFL should follow the current value "//&
+                 "of the truncation CFL (which may change if the truncation "//&
+                 "value is ramping over time).", default=.false.)
+  if (.not. CS%CFL_report_follow) then
+    call get_param(param_file, mdl, "CFL_REPORT", CS%CFL_report, &
+                  "The value of the CFL number that causes accelerations "//&
+                  "to be reported; the default is CFL_TRUNCATE.", &
+                  units="nondim", default=CS%CFL_trunc)
+  else
+    ! because Fortran logic isn't short-circuiting, the CFL_report value will
+    ! still be involved in the reporting check. this way we prevent an uninit
+    ! value access
+    CS%CFL_report = CS%CFL_trunc
+  endif
   call get_param(param_file, mdl, "CFL_TRUNCATE_RAMP_TIME", CS%truncRampTime, &
                  "The time over which the CFL truncation value is ramped "//&
                  "up at the beginning of the run.", &
