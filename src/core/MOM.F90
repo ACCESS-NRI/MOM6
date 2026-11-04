@@ -726,30 +726,21 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
         write(mesg, '(A,ES11.4,A,ES11.4,A,ES11.4,A)') "DT = ", US%T_to_s*CS%dt, " s would be reduced to ", &
             US%T_to_s*dt, " s to fit a time interval of ", US%T_to_s*time_interval, " s."
         call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//&
-            "  DT should be no longer than, and divide evenly into, the forcing or coupling interval.")
+            "  DT should be no longer than, and divide evenly into, the forcing or coupling interval.  "//&
+            "Note that the first call of a cold-started coupled run may cover two coupling intervals.")
       endif
 
       last_step = dt_therm
       if ((.not.thermo_does_span_coupling) .and. (MOD(n_max, ntstep) /= 0)) last_step = dt*MOD(n_max, ntstep)
-      if ((abs(dt_therm - CS%dt_therm) > 1.0e-6*CS%dt_therm) .or. (last_step < dt_therm)) then
-        write(mesg, '(A,ES11.4,A,ES11.4,A,ES11.4,A,ES11.4,A)') "DT_THERM = ", US%T_to_s*CS%dt_therm, &
-            " s would be applied as steps of ", US%T_to_s*dt_therm, " s, the last of which is ", &
-            US%T_to_s*last_step, " s, in a time interval of ", US%T_to_s*time_interval, " s."
-        call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//&
-            "  DT_THERM should divide evenly into the interval, or be a multiple of it with "//&
-            "THERMO_SPANS_COUPLING.")
-      endif
+      if ((abs(dt_therm - CS%dt_therm) > 1.0e-6*CS%dt_therm) .or. (last_step < dt_therm)) &
+        call adjusted_timestep_error("DT_THERM", "THERMO_SPANS_COUPLING", CS%dt_therm, dt_therm, last_step, &
+                                     time_interval, US)
 
       last_step = dt_tr_adv
       if ((.not.tradv_does_span_coupling) .and. (MOD(n_max, ntastep) /= 0)) last_step = dt*MOD(n_max, ntastep)
-      if ((abs(dt_tr_adv - CS%dt_tr_adv) > 1.0e-6*CS%dt_tr_adv) .or. (last_step < dt_tr_adv)) then
-        write(mesg, '(A,ES11.4,A,ES11.4,A,ES11.4,A,ES11.4,A)') "DT_TRACER_ADVECT = ", US%T_to_s*CS%dt_tr_adv, &
-            " s would be applied as steps of ", US%T_to_s*dt_tr_adv, " s, the last of which is ", &
-            US%T_to_s*last_step, " s, in a time interval of ", US%T_to_s*time_interval, " s."
-        call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//&
-            "  DT_TRACER_ADVECT should divide evenly into the interval, or be a multiple of it with "//&
-            "TRADV_SPANS_COUPLING.")
-      endif
+      if ((abs(dt_tr_adv - CS%dt_tr_adv) > 1.0e-6*CS%dt_tr_adv) .or. (last_step < dt_tr_adv)) &
+        call adjusted_timestep_error("DT_TRACER_ADVECT", "TRADV_SPANS_COUPLING", CS%dt_tr_adv, dt_tr_adv, last_step, &
+                                     time_interval, US)
     endif
 
     !---------- Initiate group halo pass of the forcing fields
@@ -1202,6 +1193,35 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   call cpu_clock_end(id_clock_ocean)
 
 end subroutine step_MOM
+
+!> Stop with a fatal error because step_MOM would change a thermodynamic or tracer advection time step,
+!! or shorten the last such step, to fit the time interval of a call.
+subroutine adjusted_timestep_error(param_name, spans_name, configured, used, last_step, time_interval, US)
+  character(len=*),      intent(in) :: param_name    !< The name of the time step parameter
+  character(len=*),      intent(in) :: spans_name    !< The parameter that lets this step span coupling intervals
+  real,                  intent(in) :: configured    !< The configured time step [T ~> s]
+  real,                  intent(in) :: used          !< The time step that step_MOM would use [T ~> s]
+  real,                  intent(in) :: last_step     !< The length of the last such step in the call [T ~> s]
+  real,                  intent(in) :: time_interval !< The time interval covered by the call [T ~> s]
+  type(unit_scale_type), intent(in) :: US            !< A dimensional unit scaling type
+
+  ! Local variables
+  logical :: changed          ! If true, the time step would be changed.
+  character(len=240) :: mesg  ! The error message
+
+  changed = (abs(used - configured) > 1.0e-6*configured)
+  write(mesg, '(A,ES11.4,A)') trim(param_name)//" = ", US%T_to_s*configured, " s would be"
+  if (changed) write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " changed to ", US%T_to_s*used, " s"
+  if (changed .and. (last_step < used)) write(mesg(len_trim(mesg)+1:), '(A)') " and"
+  if (last_step < used) &
+    write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " applied with a final step of ", US%T_to_s*last_step, " s"
+  write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " in a time interval of ", US%T_to_s*time_interval, " s."
+
+  call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//"  "//&
+      trim(param_name)//" should divide evenly into the interval or, with "//trim(spans_name)//&
+      ", be a multiple of the interval that is more than 1.5 times it.  Note that the first call "//&
+      "of a cold-started coupled run may cover two coupling intervals.")
+end subroutine adjusted_timestep_error
 
 !> Time step the ocean dynamics, including the momentum and continuity equations
 subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
