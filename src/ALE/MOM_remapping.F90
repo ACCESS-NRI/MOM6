@@ -1590,20 +1590,24 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
 
   ! Local variables
   integer :: i1, j2 ! Loop counters
+  real :: du        ! Difference between a sub-cell value and its cell mean [A]
 
   if (n0 == n1) then
     do i1 = 1, n1
-      col_var_production(i1) = 0
+      col_var_production(i1) = 0.0
       do j2 = isrc_start(i1), isrc_end(i1)
-        col_var_production(i1) = col_var_production(i1) + (h_sub(j2) * (u_sub(j2) - u0(i1))**2)
+        du = u_sub(j2) - u0(i1)
+        col_var_production(i1) = col_var_production(i1) + h_sub(j2) * (du * du)
       enddo
       do j2 = itgt_start(i1), itgt_end(i1)
-        col_var_production(i1) = col_var_production(i1) - (h_sub(j2) * (u_sub(j2) - u1(i1))**2)
+        du = u_sub(j2) - u1(i1)
+        col_var_production(i1) = col_var_production(i1) - h_sub(j2) * (du * du)
       enddo
     enddo
-  else ! if n1 > n0
-    call MOM_error(FATAL, "Source and target grids need to have same number of "// &
-                    "levels for this diagnostic to be meaningful.")
+  else
+    call MOM_error(FATAL, "MOM_remapping, remapping_variance_production: "// &
+                   "Source and target grids need to have same number of "// &
+                   "levels for this diagnostic to be meaningful.")
   endif
 end subroutine remapping_variance_production
 
