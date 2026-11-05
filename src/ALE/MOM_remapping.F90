@@ -88,8 +88,6 @@ public initialize_remapping, end_remapping, remapping_set_param, extract_member_
 public remapping_unit_tests, build_reconstructions_1d, average_value_ppoly
 public interpolate_column, reintegrate_column, dzFromH1H2
 
-private remapping_variance_production
-
 ! The following are private parameter constants
 integer, parameter  :: REMAPPING_PCM        = 0 !< O(h^1) remapping scheme
 integer, parameter  :: REMAPPING_PLM        = 2 !< O(h^2) remapping scheme
