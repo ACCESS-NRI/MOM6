@@ -6,6 +6,12 @@ name: MacOS verification
 
 on: [push, pull_request]
 
+# Cancel earlier running jobs on the same branch as many commits exhaust
+# ACCESS-NRIs GitHub-hosted runner allocation quickly
+concurrency:
+  group: mom6-macos-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CC: gcc
   FC: gfortran
