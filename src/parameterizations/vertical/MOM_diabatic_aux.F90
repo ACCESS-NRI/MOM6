@@ -23,6 +23,7 @@ use MOM_interpolate,   only : external_field
 use MOM_io,            only : slasher
 use MOM_opacity,       only : set_opacity, opacity_CS, extract_optics_slice, extract_optics_fields
 use MOM_opacity,       only : optics_type, optics_nbands, absorbRemainingSW, sumSWoverBands
+use MOM_submarine_melt, only : distribute_submarine_melt
 use MOM_tracer_flow_control, only : get_chl_from_model, tracer_flow_control_CS
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs
@@ -762,7 +763,12 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                      ! [S H T-1 ~> ppt m s-1 or ppt kg m-2 s-1]
     netMassInOut_rate, & ! netmassinout but for dt=1 [H T-1 ~> m s-1 or kg m-2 s-1]
     mixing_depth, &  ! The mixing depth for brine plumes [H ~> m or kg m-2]
-    total_h          ! Total thickness of the water column [H ~> m or kg m-2]
+    total_h, &       ! Total thickness of the water column [H ~> m or kg m-2]
+    dHeat_srunoff, & ! The heat added to each column by srunoff, from distribute_submarine_melt, for
+                     ! fluxes%heat_content_eff_srunoff [Q H ~> J m-2]
+    dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff,
+                     ! from distribute_submarine_melt, for tv%TempxPmE and
+                     ! fluxes%heat_content_srunoff [C H ~> degC m or degC kg m-2]
   real, dimension(SZI_(G), SZK_(GV)) :: &
     h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
     ! dz, &            ! Layer thicknesses in depth units [Z ~> m]
@@ -869,7 +875,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   !$OMP                                  drhodt,drhods,pen_sw_bnd_rate,                    &
   !$OMP                                  pen_TKE_2d,Temp_in,Salin_in,RivermixConst,        &
   !$OMP                                  mixing_depth,A_brine,fraction_left_brine,         &
-  !$OMP                                  plume_fraction,dK,total_h)                        &
+  !$OMP                                  plume_fraction,dK,total_h,dHeat_srunoff,          &
+  !$OMP                                  dTempxPmE_srunoff)                                &
   !$OMP                     firstprivate(SurfPressure,plume_flux)
   do j=js,je
   ! Work in vertical slices for efficiency
@@ -989,6 +996,55 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
         fluxes%netMassIn(i,j) = 0.0
       endif
     enddo
+
+    if (associated(fluxes%srunoff)) then
+      ! The latent heat of melting srunoff, used below for the surface buoyancy flux and in the
+      ! latent heat diagnostics.
+      if (associated(fluxes%latent_srunoff)) then ; do i=is,ie
+        fluxes%latent_srunoff(i,j) = 0.0
+        if (fluxes%srunoff_latent_heat) &
+          fluxes%latent_srunoff(i,j) = -fluxes%latent_heat_fusion * fluxes%srunoff(i,j)
+      enddo ; endif
+
+      ! Add srunoff's contribution to netmassinout_rate/net_heat_rate, used for the surface
+      ! buoyancy flux. This means that for the purposes of the surface buoyancy flux, the mass
+      ! and heat associated with srunoff are treated as if they were applied at the surface,
+      ! analogous to how penetrating SW is handled. srunoff enters at the ambient temperature, so
+      ! only its latent heat of melting changes the temperature and is included in net_heat_rate.
+      if (calculate_buoyancy) then
+        do i=is,ie
+          if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) > 0.0)) then
+            netmassinout_rate(i) = netmassinout_rate(i) + GV%RZ_to_H * fluxes%srunoff(i,j)
+            if (associated(fluxes%latent_srunoff)) &
+              netheat_rate(i) = netheat_rate(i) + fluxes%latent_srunoff(i,j) * (GV%RZ_to_H / tv%C_p)
+          endif
+        enddo ! i
+      endif
+
+      ! Distribute srunoff's mass and heat over a range of depths, if requested,
+      ! updating temperature and salinity together. This is done before loops A and B
+      ! below so loop B sees the srunoff-fattened column, making grounding less likely.
+      call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, tv%S(:,j,:), &
+                                     T2d=T2d, C_p=tv%C_p, &
+                                     g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
+                                     dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
+
+      ! Add srunoff's contributions to relevant diagnostics. heat_content_eff_srunoff is all of
+      ! the heat applied (i.e. heat content plus e.g. latent heat), while heat_content_srunoff is
+      ! only the heat content of the melt water at the ambient temperatures.
+      do i=is,ie
+        if (associated(fluxes%heat_content_eff_srunoff)) &
+          fluxes%heat_content_eff_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
+        if (associated(fluxes%heat_content_srunoff)) &
+          fluxes%heat_content_srunoff(i,j) = tv%C_p * dTempxPmE_srunoff(i) * GV%H_to_RZ / dt
+        ! As for the other mass fluxes, tv%TempxPmE is only accumulated here when the heat content
+        ! of mass fluxes is not provided by the coupler.
+        if (.not. associated(fluxes%heat_content_evap)) then
+          if (associated(tv%TempxPmE)) &
+            tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
+        endif
+      enddo
+    endif
 
     ! Apply the surface boundary fluxes in three steps:
     ! A/ update mass, temp, and salinity due to all terms except mass leaving

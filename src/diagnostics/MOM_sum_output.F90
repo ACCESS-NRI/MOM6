@@ -1061,6 +1061,13 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
             (((fluxes%lprec(i,j) + fluxes%vprec(i,j)) + (fluxes%lrunoff(i,j) + fluxes%lrunoff_glc(i,j))) + &
               (fluxes%fprec(i,j) + (fluxes%frunoff(i,j) + fluxes%frunoff_glc(i,j)))))
       enddo ; enddo
+      ! fluxes%srunoff is only associated when submarine-melt coupling is actually configured,
+      ! unlike the other water-group fields above, so it needs its own guard here.
+      if (associated(fluxes%srunoff)) then
+        do j=js,je ; do i=is,ie
+          FW_in(i,j) = FW_in(i,j) + dt*G%areaT(i,j)*fluxes%srunoff(i,j)
+        enddo ; enddo
+      endif
     else
       call MOM_error(WARNING, &
         "accumulate_net_input called with associated evap field, but no precip field.")
@@ -1102,6 +1109,14 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
                         fluxes%heat_content_cond(i,j) + fluxes%heat_content_fprec(i,j) + &
                         fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j))
       enddo ; enddo
+      ! fluxes%heat_content_eff_srunoff is only associated when submarine-melt coupling is actually
+      ! configured, unlike the other heat_content fields above, so it needs its own guard here.
+      ! The effective heat content of submarine melt includes its latent contribution.
+      if (associated(fluxes%heat_content_eff_srunoff)) then
+        do j=js,je ; do i=is,ie
+          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * fluxes%heat_content_eff_srunoff(i,j)
+        enddo ; enddo
+      endif
     elseif (associated(tv%TempxPmE)) then
       do j=js,je ; do i=is,ie
         heat_in(i,j) = heat_in(i,j) + (tv%C_p * G%areaT(i,j)) * tv%TempxPmE(i,j)
@@ -1110,6 +1125,15 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
       do j=js,je ; do i=is,ie
         heat_in(i,j) = heat_in(i,j) + (tv%C_p * sfc_state%SST(i,j)) * FW_in(i,j)
       enddo ; enddo
+    endif
+
+    ! Without coupler enthalpies, only the sensible heat content of submarine melt is included above,
+    ! so add the rest of the heat it applies (e.g. the latent heat of melting).
+    if (.not. associated(fluxes%heat_content_evap)) then
+      if (associated(fluxes%heat_content_eff_srunoff)) then ; do j=js,je ; do i=is,ie
+        heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
+                       (fluxes%heat_content_eff_srunoff(i,j) - fluxes%heat_content_srunoff(i,j))
+      enddo ; enddo ; endif
     endif
 
     ! The following heat sources may or may not be used.

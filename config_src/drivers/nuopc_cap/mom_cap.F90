@@ -494,6 +494,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   logical                                :: use_waves  ! If true, the wave modules are active.
   character(len=40)                      :: wave_method ! Wave coupling method.
   logical                                :: use_MARBL  ! If true, MARBL tracers are being used.
+  logical                                :: use_srunoff ! If true, couple submarine melt (Foxx_rofs).
   integer                                :: userRc
   integer                                :: localPeCount
   integer                                :: iostat
@@ -673,6 +674,22 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     endif
   end if
 
+  !-----------------
+  ! optional input of submarine melt from the runoff component
+  !-----------------
+
+  use_srunoff = .false.
+  if (cesm_coupled) then
+    ! Note that flds_rofs is shared with the mediator and runoff component
+    call NUOPC_CompAttributeGet(gcomp, name='flds_rofs', value=cvalue, &
+         isPresent=isPresent, isSet=isSet, rc=rc)
+    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (isPresent .and. isSet) read(cvalue,*) use_srunoff
+    if (is_root_pe()) then
+        write(stdout,*) 'flds_rofs = ', use_srunoff
+    endif
+  end if
+
   if (is_root_pe()) then
     write(stdout,*) subname//'start time: y,m,d-',year,month,day,'h,m,s=',hour,minute,second
   endif
@@ -761,9 +778,10 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   ocean_public%is_ocean_pe = .true.
   if (cesm_coupled .and. len_trim(inst_suffix)>0) then
     call ocean_model_init(ocean_public, ocean_state, time0, time_start, &
-      input_restart_file=trim(adjustl(restartfiles)), inst_index=inst_index)
+      input_restart_file=trim(adjustl(restartfiles)), inst_index=inst_index, use_srunoff=use_srunoff)
   else
-    call ocean_model_init(ocean_public, ocean_state, time0, time_start, input_restart_file=trim(adjustl(restartfiles)))
+    call ocean_model_init(ocean_public, ocean_state, time0, time_start, &
+      input_restart_file=trim(adjustl(restartfiles)), use_srunoff=use_srunoff)
   endif
 
   call ocean_model_init_sfc(ocean_state, ocean_public)
@@ -793,6 +811,9 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
            Ice_ocean_boundary% lrunoff (isc:iec,jsc:jec),         &
            Ice_ocean_boundary% frunoff (isc:iec,jsc:jec),         &
            source=0.0)
+
+  if (use_srunoff) &
+    allocate(Ice_ocean_boundary% srunoff (isc:iec,jsc:jec), source=0.0)
 
   ! Allocate memory for fields coming from multiple ice categories
   if (Ice_ocean_boundary%ice_ncat > 0) &
@@ -877,6 +898,8 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Sa_pslv"        , "will provide")
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofl"      , "will provide") !-> liquid runoff
   call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofi"      , "will provide") !-> ice runoff
+  if (use_srunoff) &
+    call fld_list_add(fldsToOcn_num, fldsToOcn, "Foxx_rofs"      , "will provide") !-> submarine melt
   if (cesm_coupled) then
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofl_glc"  , "will provide") !-> liquid glc runoff
     call fld_list_add(fldsToOcn_num, fldsToOcn, "Forr_rofi_glc"  , "will provide") !-> frozen glc runoff
@@ -3003,6 +3026,14 @@ end subroutine shr_log_setLogUnit
 !!     <td>kg m-2 s-1</td>
 !!     <td>runoff</td>
 !!     <td>mass flux of frozen runoff</td>
+!!     <td></td>
+!! </tr>
+!! <tr>
+!!     <td>Foxx_rofs</td>
+!!     <td>kg m-2 s-1</td>
+!!     <td>runoff</td>
+!!     <td>mass flux of submarine melt. Only advertised, and allocated in Ice_ocean_boundary,
+!!     if the flds_rofs attribute is true.</td>
 !!     <td></td>
 !! </tr>
 !! <tr>

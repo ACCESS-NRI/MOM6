@@ -249,6 +249,7 @@ target_sources(mom6shared PRIVATE
   parameterizations/vertical/MOM_set_diffusivity.F90
   parameterizations/vertical/MOM_set_viscosity.F90
   parameterizations/vertical/MOM_sponge.F90
+  parameterizations/vertical/MOM_submarine_melt.F90
   parameterizations/vertical/MOM_tidal_mixing.F90
   parameterizations/vertical/MOM_vert_friction.F90
 

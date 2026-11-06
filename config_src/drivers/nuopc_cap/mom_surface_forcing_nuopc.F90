@@ -166,6 +166,7 @@ end type surface_forcing_CS
 type, public :: ice_ocean_boundary_type
   real, pointer, dimension(:,:) :: lrunoff           =>NULL() !< liquid runoff [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff           =>NULL() !< ice runoff [km m-2 s-1]
+  real, pointer, dimension(:,:) :: srunoff           =>NULL() !< submarine melt [kg m-2 s-1]
   real, pointer, dimension(:,:) :: lrunoff_glc       =>NULL() !< liquid glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: frunoff_glc       =>NULL() !< frozen glc runoff via rof [km m-2 s-1]
   real, pointer, dimension(:,:) :: u_flux            =>NULL() !< i-direction wind stress [Pa]
@@ -332,7 +333,7 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
     call allocate_forcing_type(G, fluxes, water=.true., heat=.true., ustar=.true., &
                                press=.true., fix_accum_bug=.not.CS%ustar_gustless_bug, &
                                cfc=CS%use_CFC, marbl=CS%use_marbl_tracers, hevap=CS%enthalpy_cpl, &
-                               tau_mag=.true., ice_ncat=IOB%ice_ncat)
+                               tau_mag=.true., ice_ncat=IOB%ice_ncat, srunoff=associated(IOB%srunoff))
     call safe_alloc_ptr(fluxes%omega_w2x,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dir,isd,ied,jsd,jed)
     call safe_alloc_ptr(fluxes%sw_vis_dif,isd,ied,jsd,jed)
@@ -506,6 +507,11 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%frunoff(i,j) = kg_m2_s_conversion * IOB%frunoff(i-i0,j-j0) * G%mask2dT(i,j)
     endif
 
+    ! submarine melt flux
+    if (associated(IOB%srunoff)) then
+      fluxes%srunoff(i,j) = kg_m2_s_conversion * IOB%srunoff(i-i0,j-j0) * G%mask2dT(i,j)
+    endif
+
     ! add liquid glc runoff flux via rof
     if (associated(IOB%lrunoff_glc)) then
       fluxes%lrunoff_glc(i,j) = kg_m2_s_conversion * IOB%lrunoff_glc(i-i0,j-j0) * G%mask2dT(i,j)
@@ -560,6 +566,8 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
       fluxes%latent_frunoff_glc_diag(i,j) = fluxes%latent_frunoff_glc_diag(i,j) - G%mask2dT(i,j) * &
           IOB%frunoff_glc(i-i0,j-j0) * US%W_m2_to_QRZ_T * CS%latent_heat_fusion
     endif
+    ! Submarine melt (srunoff) is not included in fluxes%latent since it is depth-dependent not a
+    ! surface flux. The latent heat associated with srunoff is included in latent heat diagnostics.
     if (associated(IOB%q_flux)) then
       fluxes%latent(i,j)           = fluxes%latent(i,j) + &
           IOB%q_flux(i-i0,j-j0)*US%W_m2_to_QRZ_T*CS%latent_heat_vapor
@@ -673,6 +681,14 @@ subroutine convert_IOB_to_fluxes(IOB, fluxes, index_bounds, Time, valid_time, G,
                       G%areaT(i,j)
       net_FW2(i,j) = net_FW(i,j) / G%areaT(i,j)
     enddo ; enddo
+    ! fluxes%srunoff is only associated when submarine-melt coupling is actually configured,
+    ! unlike the other water fluxes above, so it needs its own guard here.
+    if (associated(fluxes%srunoff)) then
+      do j=js,je ; do i=is,ie
+        net_FW(i,j) = net_FW(i,j) + fluxes%srunoff(i,j) * G%areaT(i,j)
+        net_FW2(i,j) = net_FW(i,j) / G%areaT(i,j)
+      enddo ; enddo
+    endif
 
     if (CS%adjust_net_fresh_water_by_scaling) then
       call adjust_area_mean_to_zero(net_FW2, G, fluxes%netFWGlobalScl, unscale=US%RZ_T_to_kg_m2s)
@@ -1584,6 +1600,9 @@ subroutine ice_ocn_bnd_type_chksum(id, timestep, iobt)
   chks = field_chksum( iobt%fprec          ) ; if (root) write(outunit,100) 'iobt%fprec          ', chks
   chks = field_chksum( iobt%lrunoff        ) ; if (root) write(outunit,100) 'iobt%lrunoff        ', chks
   chks = field_chksum( iobt%frunoff        ) ; if (root) write(outunit,100) 'iobt%frunoff        ', chks
+  if (associated(iobt%srunoff)) then
+    chks = field_chksum( iobt%srunoff      ) ; if (root) write(outunit,100) 'iobt%srunoff        ', chks
+  endif
   chks = field_chksum( iobt%lrunoff_glc    ) ; if (root) write(outunit,100) 'iobt%lrunoff_glc    ', chks
   chks = field_chksum( iobt%frunoff_glc    ) ; if (root) write(outunit,100) 'iobt%frunoff_glc    ', chks
   chks = field_chksum( iobt%p              ) ; if (root) write(outunit,100) 'iobt%p              ', chks

@@ -11,6 +11,7 @@ use MOM_grid,             only : ocean_grid_type
 use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_forcing_type,     only : forcing
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
+use MOM_submarine_melt,   only : distribute_submarine_melt
 
 implicit none ; private
 
@@ -529,6 +530,12 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
       netMassOut(i) = fluxes%netMassOut(i,j)
       netMassIn(i)  = fluxes%netMassIn(i,j)
     enddo
+
+    ! Distribute submarine melt (srunoff) mass over a range of depths, if requested, diluting
+    ! this tracer accordingly. This is done before loops A and B below so loop B sees the
+    ! srunoff-fattened column, making grounding less likely.
+    if (associated(fluxes%srunoff)) &
+      call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, Tr2d)
 
     ! Apply the surface boundary fluxes in three steps:
     ! A/ update concentration from mass entering the ocean
