@@ -289,6 +289,9 @@ type, public :: MOM_control_struct ; private
   logical :: thermo_spans_coupling   !< If true, thermodynamic and tracer time
                                      !! steps can span multiple coupled time steps.
   logical :: tradv_spans_coupling    !< If true, thermodynamic and tracer time
+  logical :: check_timestep_consistency !< If true, stop with a fatal error if the dynamic, thermodynamic
+                                     !! or tracer advection time steps would be adjusted to fit the
+                                     !! forcing or coupling time interval.
   integer :: nstep_tot = 0           !< The total number of dynamic timesteps taken
                                      !! so far in this run segment
   logical :: count_calls = .false.   !< If true, count the calls to step_MOM, rather than the
@@ -566,6 +569,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   real :: dt_tr_adv       ! time step for tracer advection [T ~> s]
   real :: dt_therm        ! a limited and quantized version of CS%dt_therm [T ~> s]
   real :: dt_tradv_here   ! a further limited value of dt_tr_adv [T ~> s]
+  real :: last_step       ! The length of the last thermodynamic or tracer advection step in this call [T ~> s]
 
   real :: wt_end, wt_beg  ! Fractional weights of the future pressure at the end
                           ! and beginning of the current time step [nondim]
@@ -610,6 +614,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   type(time_type) :: Time_local, end_time_thermo
   type(group_pass_type) :: pass_tau_ustar_psurf
   logical :: showCallTree
+  character(len=240) :: mesg  ! A message for errors
 
   ! External forcing fields on the model index map
   type(mech_forcing), pointer :: forces     ! Mechanical forcing
@@ -712,6 +717,30 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     else
       ntastep = MAX(1, MIN(n_max, floor(CS%dt_tr_adv/dt + 0.001)))
       dt_tr_adv = dt*ntastep
+    endif
+
+    if (CS%check_timestep_consistency .and. do_thermo) then
+      ! Stop if a time step has been adjusted to fit into time_interval, or if the last
+      ! thermodynamic or tracer advection step in this call would be shortened.
+      if (abs(dt - CS%dt) > 1.0e-6*CS%dt) then
+        write(mesg, '(A,ES11.4,A,ES11.4,A,ES11.4,A)') "DT = ", US%T_to_s*CS%dt, " s would be reduced to ", &
+            US%T_to_s*dt, " s to fit a time interval of ", US%T_to_s*time_interval, " s."
+        call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//&
+            "  DT should be no longer than, and divide evenly into, the forcing or coupling interval.  "//&
+            "Note that the first call of a cold-started coupled run may cover two coupling intervals.")
+      endif
+
+      last_step = dt_therm
+      if ((.not.thermo_does_span_coupling) .and. (MOD(n_max, ntstep) /= 0)) last_step = dt*MOD(n_max, ntstep)
+      if ((abs(dt_therm - CS%dt_therm) > 1.0e-6*CS%dt_therm) .or. (last_step < dt_therm)) &
+        call adjusted_timestep_error("DT_THERM", "THERMO_SPANS_COUPLING", CS%dt_therm, dt_therm, last_step, &
+                                     time_interval, US)
+
+      last_step = dt_tr_adv
+      if ((.not.tradv_does_span_coupling) .and. (MOD(n_max, ntastep) /= 0)) last_step = dt*MOD(n_max, ntastep)
+      if ((abs(dt_tr_adv - CS%dt_tr_adv) > 1.0e-6*CS%dt_tr_adv) .or. (last_step < dt_tr_adv)) &
+        call adjusted_timestep_error("DT_TRACER_ADVECT", "TRADV_SPANS_COUPLING", CS%dt_tr_adv, dt_tr_adv, last_step, &
+                                     time_interval, US)
     endif
 
     !---------- Initiate group halo pass of the forcing fields
@@ -1164,6 +1193,35 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   call cpu_clock_end(id_clock_ocean)
 
 end subroutine step_MOM
+
+!> Stop with a fatal error because step_MOM would change a thermodynamic or tracer advection time step,
+!! or shorten the last such step, to fit the time interval of a call.
+subroutine adjusted_timestep_error(param_name, spans_name, configured, used, last_step, time_interval, US)
+  character(len=*),      intent(in) :: param_name    !< The name of the time step parameter
+  character(len=*),      intent(in) :: spans_name    !< The parameter that lets this step span coupling intervals
+  real,                  intent(in) :: configured    !< The configured time step [T ~> s]
+  real,                  intent(in) :: used          !< The time step that step_MOM would use [T ~> s]
+  real,                  intent(in) :: last_step     !< The length of the last such step in the call [T ~> s]
+  real,                  intent(in) :: time_interval !< The time interval covered by the call [T ~> s]
+  type(unit_scale_type), intent(in) :: US            !< A dimensional unit scaling type
+
+  ! Local variables
+  logical :: changed          ! If true, the time step would be changed.
+  character(len=240) :: mesg  ! The error message
+
+  changed = (abs(used - configured) > 1.0e-6*configured)
+  write(mesg, '(A,ES11.4,A)') trim(param_name)//" = ", US%T_to_s*configured, " s would be"
+  if (changed) write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " changed to ", US%T_to_s*used, " s"
+  if (changed .and. (last_step < used)) write(mesg(len_trim(mesg)+1:), '(A)') " and"
+  if (last_step < used) &
+    write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " applied with a final step of ", US%T_to_s*last_step, " s"
+  write(mesg(len_trim(mesg)+1:), '(A,ES11.4,A)') " in a time interval of ", US%T_to_s*time_interval, " s."
+
+  call MOM_error(FATAL, "step_MOM: CHECK_TIMESTEP_CONSISTENCY is true, but "//trim(mesg)//"  "//&
+      trim(param_name)//" should divide evenly into the interval or, with "//trim(spans_name)//&
+      ", be a multiple of the interval that is more than 1.5 times it.  Note that the first call "//&
+      "of a cold-started coupled run may cover two coupling intervals.")
+end subroutine adjusted_timestep_error
 
 !> Time step the ocean dynamics, including the momentum and continuity equations
 subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
@@ -2562,6 +2620,21 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "case is the largest integer multiple of the coupling "//&
                  "timestep that is less than or equal to DT_TRACER_ADVECT.", &
                  default=CS%thermo_spans_coupling)
+  call get_param(param_file, "MOM", "CHECK_TIMESTEP_CONSISTENCY", CS%check_timestep_consistency, &
+                 "If true, stop with a fatal error if DT, DT_THERM or DT_TRACER_ADVECT would be "//&
+                 "adjusted to fit into the forcing or coupling time interval, or if the last "//&
+                 "thermodynamic or tracer advection step in that interval would be shortened. "//&
+                 "With THERMO_SPANS_COUPLING or TRADV_SPANS_COUPLING, steps that are integer "//&
+                 "multiples of the interval are allowed. This also requires DT_THERM to be an "//&
+                 "integer multiple of DT_TRACER_ADVECT. The time steps are only checked when the "//&
+                 "dynamics and thermodynamics are advanced in the same call to step_MOM.", &
+                 default=.false.)
+  if (CS%check_timestep_consistency) then
+    if ((CS%dt_therm < 0.5*CS%dt_tr_adv) .or. &
+        (abs(CS%dt_therm - CS%dt_tr_adv*real(nint(CS%dt_therm/CS%dt_tr_adv))) > 1.0e-6*CS%dt_therm)) &
+      call MOM_error(FATAL, "MOM: If CHECK_TIMESTEP_CONSISTENCY is true, DT_THERM must be an "//&
+                            "integer multiple of DT_TRACER_ADVECT.")
+  endif
   if ( CS%diabatic_first .and. (CS%dt_tr_adv /= CS%dt_therm) ) then
     call MOM_error(FATAL,"MOM: If using DIABATIC_FIRST, DT_TRACER_ADVECT must equal DT_THERM.")
   endif
