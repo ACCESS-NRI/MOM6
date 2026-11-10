@@ -118,6 +118,8 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
     # -gpu=... must also be passed at link (not just compile), since it selects
     # which GPU runtime/memory-model/compute-capability support gets linked in.
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu ${_mom6_offload_gpu}")
+    # Keep the offload flags for the OpenMP feature probes below.
+    set(MOM6_OFFLOAD_FC_FLAGS "${_mom6_offload_flags}")
     unset(_mom6_offload_gpu)
     unset(_mom6_offload_cc)
     unset(_mom6_offload_flags)
@@ -205,6 +207,53 @@ endif()
 
 if(MOM6_OPENMP)
   find_package(OpenMP REQUIRED COMPONENTS Fortran)
+endif()
+
+# Check whether the OpenMP loop construct supports the bind clause, which the
+# GPU-offloaded loops request as `!$omp target teams loop LOOP_BIND_TEAMS_PARALLEL`
+# (see src/framework/omp_loop_bind_compat.h).  Mirrors the autoconf
+# MOM6_FC_OMP_LOOP_BIND check (ac/m4/mom6_fc_omp_loop_bind.m4) and uses the same
+# test program.  Without this define the macro expands to nothing, and NVHPC then
+# launches the loop with one thread per team.  The directives are comments unless
+# OpenMP is enabled, so the check is only done then, and it has to be run with the
+# OpenMP flags that the sources are compiled with.
+if(MOM6_OPENMP OR MOM6_OPENMP_OFFLOAD)
+  set(CMAKE_REQUIRED_FLAGS "")
+  if(MOM6_OPENMP)
+    string(APPEND CMAKE_REQUIRED_FLAGS " ${OpenMP_Fortran_FLAGS}")
+  endif()
+  if(MOM6_OPENMP_OFFLOAD)
+    string(APPEND CMAKE_REQUIRED_FLAGS " ${MOM6_OFFLOAD_FC_FLAGS}")
+  endif()
+  # Like the autoconf check, only compile the test program.
+  if(DEFINED CMAKE_TRY_COMPILE_TARGET_TYPE)
+    set(_mom6_try_compile_target_type ${CMAKE_TRY_COMPILE_TARGET_TYPE})
+  endif()
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  include(CheckFortranSourceCompiles)
+  check_fortran_source_compiles(
+"program test
+  implicit none
+  integer :: i
+  !$omp target teams
+  !$omp loop bind(teams,parallel)
+  do i=1,2
+  end do
+  !$omp end target teams
+end program test"
+    HAVE_FC_OMP_LOOP_BIND
+    SRC_EXT F90
+  )
+  if(DEFINED _mom6_try_compile_target_type)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE ${_mom6_try_compile_target_type})
+    unset(_mom6_try_compile_target_type)
+  else()
+    unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+  endif()
+  unset(CMAKE_REQUIRED_FLAGS)
+  if(HAVE_FC_OMP_LOOP_BIND)
+    add_compile_definitions(HAVE_FC_OMP_LOOP_BIND=1)
+  endif()
 endif()
 
 #[==============================================================================[
