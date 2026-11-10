@@ -6,9 +6,9 @@
 
 module MOM_cap_mod
 
-use field_manager_mod,        only: field_manager_init, field_manager_end
 use MOM_domains,              only: get_domain_extent
 use MOM_io,                   only: stdout, io_infra_end
+use MOM_io,                   only: insert_ensemble_appendix
 use mpp_domains_mod,          only: mpp_get_compute_domains
 use mpp_domains_mod,          only: mpp_get_ntile_count, mpp_get_pelist, mpp_get_global_domain
 use mpp_domains_mod,          only: mpp_get_domain_npes
@@ -26,10 +26,10 @@ use MOM_error_handler,        only: MOM_error, FATAL, is_root_pe
 use MOM_grid,                 only: ocean_grid_type, get_global_grid_size
 use MOM_ocean_model_nuopc,    only: ice_ocean_boundary_type
 use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocean_state_type
-use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc
+use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc, ocean_model_flux_init
 use MOM_ocean_model_nuopc,    only: ocean_model_init, update_ocean_model, ocean_model_end
 use MOM_ocean_model_nuopc,    only: get_ocean_grid, get_eps_omesh, query_ocean_state
-use MOM_ocean_model_nuopc,    only: get_ocean_mask
+use MOM_ocean_model_nuopc,    only: stoch_restart_needed
 use MOM_cap_time,             only: AlarmInit
 use MOM_cap_methods,          only: mom_import, mom_export, mom_set_geomtype, mod2med_areacor
 use MOM_cap_methods,          only: med2mod_areacor, state_diagnose
@@ -44,12 +44,6 @@ use shr_log_mod,             only: shr_log_setLogUnit
 use nuopc_shr_methods,       only: get_component_instance
 #endif
 use time_utils_mod,          only: esmf2fms_time
-
-use MOM_coupler_types,        only: coupler_type_initialized, coupler_type_num_bcs
-use MOM_coupler_types,        only: coupler_type_get_bc
-use MOM_ocean_model_nuopc,    only: coupler_bcs_setup
-use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_get_cmeps_name
-use MOM_cap_fms_coupler_bcs,  only: coupler_bcs_data_override, coupler_bcs_update_fluxes
 
 use, intrinsic :: iso_fortran_env, only: output_unit
 
@@ -111,7 +105,7 @@ use shr_is_restart_fh_mod, only : init_is_restart_fh, is_restart_fh, is_restart_
 #endif
 use mom_cap_profiling, only: cap_profiling_init, cap_profiling
 
-implicit none; private
+implicit none ; private
 
 public SetServices
 public SetVM
@@ -439,7 +433,7 @@ subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
   if (isPresent .and. isSet) then
      if (trim(value) .eq. '.true.') restart_eor = .true.
-  end if
+  endif
 
   if (localPet == 0) call cap_profiling("mom", "InitializeP0", "E")
 
@@ -483,7 +477,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   integer                                :: mpi_comm_mom
   integer                                :: i,n
   character(len=256)                     :: stdname, shortname
-  character(len=128)                     :: bc_name ! The name of an FMS coupler boundary condition
   character(len=32)                      :: starttype            ! model start type
   character(len=512)                     :: diro
   character(len=512)                     :: logfile
@@ -515,7 +508,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
 
   if (localPet == 0) call cap_profiling("mom", "InitializeAdvertise", "B")
 
-  if(write_runtimelog) timeiads = MPI_Wtime()
+  if (write_runtimelog) timeiads = MPI_Wtime()
 
   call ESMF_LogWrite(subname//' enter', ESMF_LOGMSG_INFO)
 
@@ -580,7 +573,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
 
       if (cesm_coupled) then
         ! Multiinstance logfile name needs a correction
-        if(len_trim(inst_suffix) > 0) then
+        if (len_trim(inst_suffix) > 0) then
           n = index(logfile, '.')
           logfile = logfile(1:n-1)//trim(inst_suffix)//logfile(n:)
         endif
@@ -599,8 +592,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   call NUOPC_CompAttributeSet(gcomp, "logunit", stdout, rc=rc)
   if (chkerr(rc,__LINE__,u_FILE_u)) return
   call MOM_infra_init(mpi_comm_mom)
-
-  call field_manager_init
 
   ! determine the calendar
   if (cesm_coupled) then
@@ -671,7 +662,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     if (is_root_pe()) then
         write(stdout,*) 'ice_ncat = ', Ice_ocean_boundary%ice_ncat
     endif
-  end if
+  endif
 
   if (is_root_pe()) then
     write(stdout,*) subname//'start time: y,m,d-',year,month,day,'h,m,s=',hour,minute,second
@@ -766,6 +757,9 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     call ocean_model_init(ocean_public, ocean_state, time0, time_start, input_restart_file=trim(adjustl(restartfiles)))
   endif
 
+  ! GMM, this call is not needed in CESM. Check with EMC if it can be deleted.
+  call ocean_model_flux_init(ocean_state)
+
   call ocean_model_init_sfc(ocean_state, ocean_public)
 
   call get_domain_extent(ocean_public%domain, isc, iec, jsc, jec)
@@ -828,12 +822,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
               source=0.0)
     endif
   endif
-
-  ! Allocate any required FMS coupler_bc_type tracer flux structures and register their
-  ! diagnostics. These are only set when there are modules enabled that use them.
-  call coupler_bcs_setup(ocean_state, Ice_ocean_boundary%fluxes, &
-                         Ice_ocean_boundary%atm_fields, ocean_public%axes(1:2), &
-                         time_start, isc, iec, jsc, jec)
 
   if (use_waves) then
     if (wave_method == "EFACTOR") then
@@ -936,16 +924,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     endif
   endif
 
-  ! Add import fields required for any FMS coupler_bc_type tracer fluxes.
-  if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
-    do n = 1, coupler_type_num_bcs(Ice_ocean_boundary%fluxes)
-      call coupler_type_get_bc(Ice_ocean_boundary%fluxes, n, name=bc_name)
-      stdname = coupler_bcs_get_cmeps_name(bc_name)
-      if (len_trim(stdname) > 0) &
-        call fld_list_add(fldsToOcn_num, fldsToOcn, stdname, "will provide")
-    enddo
-  endif
-
   !--------- export fields -------------
   call fld_list_add(fldsFrOcn_num, fldsFrOcn, "So_omask"   , "will provide")
   call fld_list_add(fldsFrOcn_num, fldsFrOcn, "So_t"       , "will provide")
@@ -960,8 +938,6 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     call fld_list_add(fldsFrOcn_num, fldsFrOcn, "Faoo_fco2_ocn", "will provide")
   endif
 
-  ! TODO: dts: How to handle export fields from FMS coupler_bc_type structures?
-
   do n = 1,fldsToOcn_num
     call NUOPC_Advertise(importState, standardName=fldsToOcn(n)%stdname, name=fldsToOcn(n)%shortname, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -971,7 +947,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     call NUOPC_Advertise(exportState, standardName=fldsFrOcn(n)%stdname, name=fldsFrOcn(n)%shortname, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
   enddo
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeiads
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeiads
 
   if (localPet == 0) call cap_profiling("mom", "InitializeAdvertise", "E")
 
@@ -1046,7 +1022,6 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   real(ESMF_KIND_R8)    , pointer            :: lat(:), latMesh(:)
   real(ESMF_KIND_R8)    , pointer            :: lon(:), lonMesh(:)
   integer(ESMF_KIND_I4) , pointer            :: mask(:), maskMesh(:)
-  integer               , allocatable        :: omask(:,:)
   real(ESMF_KIND_R8)                         :: diff_lon, diff_lat
   real                                       :: eps_omesh
   real(ESMF_KIND_R8)                         :: L2_to_rad2
@@ -1071,7 +1046,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
 
   if (localPet == 0) call cap_profiling("mom", "InitializeRealize", "B")
 
-  if(write_runtimelog) timeirls = MPI_Wtime()
+  if (write_runtimelog) timeirls = MPI_Wtime()
 
   call shr_log_setLogUnit (stdout)
 
@@ -1280,7 +1255,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     do n = 1,numOwnedElements
       lonMesh(n) = ownedElemCoords(2*n-1)
       latMesh(n) = ownedElemCoords(2*n)
-    end do
+    enddo
 
     elemMaskArray = ESMF_ArrayCreate(Distgrid, maskMesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -1288,20 +1263,17 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
     call get_domain_extent(ocean_public%domain, isc, iec, jsc, jec)
-    allocate(omask(isc:iec, jsc:jec))
-    call get_ocean_mask(ocean_state, omask)
     n = 0
     do j = jsc, jec
       jg = j + ocean_grid%jsc - jsc
       do i = isc, iec
         ig = i + ocean_grid%isc - isc
         n = n+1
-        mask(n) = omask(i,j)
+        mask(n) = ocean_grid%mask2dT(ig,jg)
         lon(n)  = ocean_grid%geolonT(ig,jg)
         lat(n)  = ocean_grid%geolatT(ig,jg)
-      end do
-    end do
-    deallocate(omask)
+      enddo
+    enddo
 
     eps_omesh = get_eps_omesh(ocean_state)
     do n = 1,lsize
@@ -1327,7 +1299,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         write(err_msg, frmt)n,maskMesh(n),mask(n)
         call MOM_error(FATAL, err_msg)
       endif
-    end do
+    enddo
 
     ! realize the import and export fields using the mesh
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
@@ -1372,8 +1344,8 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
           mod2med_areacor(k) = model_areas(k) / mesh_areas(k)
           med2mod_areacor(k) = mesh_areas(k) / model_areas(k)
         endif
-      end do
-    end do
+      enddo
+    enddo
     deallocate(mesh_areas)
     deallocate(model_areas)
 
@@ -1570,15 +1542,13 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
       return
     endif
 
-    allocate(omask(isc:iec, jsc:jec))
-    call get_ocean_mask(ocean_state, omask)
     do j = jsc, jec
       j1 = j + lbnd2 - jsc
       jg = j + ocean_grid%jsc - jsc
       do i = isc, iec
         i1 = i + lbnd1 - isc
         ig = i + ocean_grid%isc - isc
-        dataPtr_mask(i1,j1)  = omask(i,j)
+        dataPtr_mask(i1,j1)  = ocean_grid%mask2dT(ig,jg)
         dataPtr_xcen(i1,j1)  = ocean_grid%geolonT(ig,jg)
         dataPtr_ycen(i1,j1)  = ocean_grid%geolatT(ig,jg)
         if (grid_attach_area) then
@@ -1586,7 +1556,6 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         endif
       enddo
     enddo
-    deallocate(omask)
 
     jlast = jec
     if (jec == nyg)jlast = jec+1
@@ -1654,7 +1623,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   if (use_cdeps_inline) then
      call mom_inline_init(gcomp, clock, eMesh, localPet, rc=rc)
      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !---------------------------------
   ! write out diagnostics
@@ -1665,7 +1634,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   !if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   timere = 0.
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeirls
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeirls
 
   if (localPet == 0) call cap_profiling("mom", "InitializeRealize", "E")
 
@@ -1702,7 +1671,7 @@ subroutine DataInitialize(gcomp, rc)
 
   if (localPet == 0) call cap_profiling("mom", "DataInitialize", "B")
 
-  if(write_runtimelog) timedis = MPI_Wtime()
+  if (write_runtimelog) timedis = MPI_Wtime()
 
   ! query the Component for its clock, importState and exportState
   call ESMF_GridCompGet(gcomp, clock=clock, importState=importState, exportState=exportState, rc=rc)
@@ -1764,7 +1733,7 @@ subroutine DataInitialize(gcomp, rc)
     enddo
   endif
 
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timedis
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timedis
 
   if (localPet == 0) call cap_profiling("mom", "DataInitialize", "E")
 
@@ -1798,7 +1767,6 @@ subroutine ModelAdvance(gcomp, rc)
   type(ocean_internalstate_wrapper)      :: ocean_internalstate
   type(ocean_grid_type)        , pointer :: ocean_grid
   type(time_type)                        :: Time
-  type(time_type)                        :: Time_import
   type(time_type)                        :: Time_step_coupled
   type(time_type)                        :: Time_restart_current
   integer                                :: dth, dtm, dts
@@ -1809,17 +1777,16 @@ subroutine ModelAdvance(gcomp, rc)
   character(240)                         :: msgString
   character(ESMF_MAXSTR)                 :: casename
   integer                                :: iostat
-  integer                                :: writeunit
+  integer                                :: rpointer_unit
   type(ESMF_VM)                          :: vm
-  integer                                :: n
+  integer                                :: n, i
   character(240)                         :: import_timestr, export_timestr
   character(len=128)                     :: fldname
   character(len=*),parameter             :: subname='(MOM_cap:ModelAdvance)'
+  character(len=8)                       :: suffix
   character(len=:), allocatable          :: rpointer_filename
   character(len=17)                      :: timestamp
   integer                                :: num_rest_files
-  character(240)                         :: coupler_bc_restartname
-  integer                                :: num_coupler_bc_rest_files
   real(8)                                :: MPI_Wtime, timers
   logical                                :: write_restart, write_restartfh
   logical                                :: write_restart_eor
@@ -1828,10 +1795,10 @@ subroutine ModelAdvance(gcomp, rc)
 
   if (localPet == 0) call cap_profiling("mom", "ModelAdvance", "B")
 
-  if(profile_memory) call ESMF_VMLogMemInfo("Entering MOM Model_ADVANCE: ")
-  if(write_runtimelog) then
+  if (profile_memory) call ESMF_VMLogMemInfo("Entering MOM Model_ADVANCE: ")
+  if (write_runtimelog) then
      timers = MPI_Wtime()
-     if(timere>0. .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time since last time step ',timers-timere
+     if (timere>0. .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time since last time step ',timers-timere
   endif
 
   call shr_log_setLogUnit (stdout)
@@ -1864,7 +1831,6 @@ subroutine ModelAdvance(gcomp, rc)
 
   Time_step_coupled = esmf2fms_time(timeStep)
   Time = esmf2fms_time(currTime)
-  Time_import = Time
 
   !---------------
   ! Apply ocean lag for startup runs:
@@ -1940,28 +1906,14 @@ subroutine ModelAdvance(gcomp, rc)
     ! Import data
     !---------------
 
-    if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
-      ! Override any FMS coupler_bc_type tracer fluxes and their inputs from the data_table before
-      ! importing, so that mom_import knows which of them the data_table has already provided.
-      call coupler_bcs_data_override(Ice_ocean_boundary%fluxes, Ice_ocean_boundary%atm_fields, &
-                                     Time_import)
-    endif
-
     call mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,  &
                     set_missing_stks_to_zero, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    if (coupler_type_initialized(Ice_ocean_boundary%fluxes)) then
-      ! Calculate the FMS coupler_bc_type tracer fluxes for this coupling step
-      call coupler_bcs_update_fluxes(Ice_ocean_boundary%fluxes, Ice_ocean_boundary%atm_fields, &
-                                     ocean_public%fields, Ice_ocean_boundary%ice_fraction, &
-                                     ocean_public%domain, Time_import)
-    endif
-
     if (use_cdeps_inline) then
       call mom_inline_run(clock, ocean_public, ocean_grid, ice_ocean_boundary, dbug, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    end if
+    endif
 
     !---------------
     ! Update MOM6
@@ -2006,7 +1958,7 @@ subroutine ModelAdvance(gcomp, rc)
       ! turn off the alarm
       call ESMF_AlarmRingerOff(restart_alarm, rc=rc )
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    end if
+    endif
 
     write_restart_eor = .false.
     if (restart_eor) then
@@ -2016,8 +1968,8 @@ subroutine ModelAdvance(gcomp, rc)
         ! turn off the alarm
         call ESMF_AlarmRingerOff(stop_alarm, rc=rc )
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      end if
-    end if
+      endif
+    endif
 
 #ifndef CESMCOUPLED
     call is_restart_fh(clock, restartfh_info, write_restartfh)
@@ -2044,25 +1996,44 @@ subroutine ModelAdvance(gcomp, rc)
           rpointer_filename = trim(rpointer_filename//timestamp)
         endif
 
-        write(restartname,'(A,".mom6.r",A)') &
-             trim(casename), timestamp
+        write(restartname,'(A,".mom6.r",A)') trim(casename), timestamp
+        write(stoch_restartname,'(A,".mom6.r_stoch",A,".nc")')  trim(casename), timestamp
+
+        call insert_ensemble_appendix(stoch_restartname, ".mom6")
+
         call ESMF_LogWrite("MOM_cap: Writing restart :  "//trim(restartname), ESMF_LOGMSG_INFO)
         ! write restart file(s)
-        call ocean_model_restart(ocean_state, restartname=restartname, num_rest_files=num_rest_files, &
-                                 coupler_bc_restartname=coupler_bc_restartname, &
-                                 num_coupler_bc_rest_files=num_coupler_bc_rest_files)
+        call ocean_model_restart(ocean_state, restartname=restartname, &
+                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files)
         if (localPet == 0) then
            ! Write name of restart file in the rpointer file - this is currently hard-coded for the ocean
-          open(newunit=writeunit, file=rpointer_filename, form='formatted', status='unknown', iostat=iostat)
+          open(newunit=rpointer_unit, file=rpointer_filename, form='formatted', status='unknown', iostat=iostat)
           if (iostat /= 0) then
             call ESMF_LogSetError(ESMF_RC_FILE_OPEN, &
                  msg=subname//' ERROR opening '//rpointer_filename, line=__LINE__, file=u_FILE_u, rcToReturn=rc)
             return
           endif
-          call write_rpointer_filenames(writeunit, restartname, num_rest_files, inst_suffix)
-          if (num_coupler_bc_rest_files > 0) &
-            call write_rpointer_filenames(writeunit, coupler_bc_restartname, num_coupler_bc_rest_files, inst_suffix)
-          close(writeunit)
+
+          call insert_ensemble_appendix(restartname, ".mom6")
+
+          write(rpointer_unit,'(a)') trim(restartname)//'.nc'
+          if (num_rest_files > 1) then
+            ! append i.th restart file name to rpointer
+            do i=1, num_rest_files-1
+              if (i < 10) then
+                write(suffix,'("_",I1)') i
+              else
+                write(suffix,'("_",I2)') i
+              endif
+              write(rpointer_unit,'(a)') trim(restartname) // trim(suffix) // '.nc'
+            enddo
+          endif
+
+          if (stoch_restart_needed(ocean_state)) then
+            write(rpointer_unit,'(a)') trim(stoch_restartname)
+          endif
+
+          close(rpointer_unit)
         endif
       else  ! not cesm_coupled
         write(restartname,'(i4.4,2(i2.2),A,3(i2.2),A)') year, month, day,".", hour, minute, seconds, &
@@ -2073,7 +2044,7 @@ subroutine ModelAdvance(gcomp, rc)
 
         ! write restart file(s)
         call ocean_model_restart(ocean_state, restartname=restartname, &
-                                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files)
+                                stoch_restartname='RESTART/'//stoch_restartname, num_rest_files=num_rest_files)
 
         call outputlog_restart(clock, num_rest_files, rc=rc)
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2109,12 +2080,12 @@ subroutine ModelAdvance(gcomp, rc)
     enddo
   endif
 
-  if(write_runtimelog) then
+  if (write_runtimelog) then
     timere = MPI_Wtime()
-    if(is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', timere-timers
+    if (is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', timere-timers
   endif
 
-  if(profile_memory) call ESMF_VMLogMemInfo("Leaving MOM Model_ADVANCE: ")
+  if (profile_memory) call ESMF_VMLogMemInfo("Leaving MOM Model_ADVANCE: ")
 
   if (localPet == 0) call cap_profiling("mom", "ModelAdvance", "E")
 
@@ -2129,6 +2100,7 @@ subroutine ModelSetRunClock(gcomp, rc)
   type(ESMF_Clock)         :: mclock, dclock
   type(ESMF_Time)          :: mcurrtime, dcurrtime
   type(ESMF_Time)          :: mstoptime, dstoptime
+  type(ESMF_Time)          :: mstoptime_prev ! model stop time before it is updated by this routine
   type(ESMF_TimeInterval)  :: mtimestep, dtimestep
   character(len=128)       :: mtimestring, dtimestring
   character(len=256)       :: cvalue
@@ -2156,7 +2128,8 @@ subroutine ModelSetRunClock(gcomp, rc)
                      stopTime=dstoptime, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-  call ESMF_ClockGet(mclock, currTime=mcurrtime, timeStep=mtimestep, rc=rc)
+  call ESMF_ClockGet(mclock, currTime=mcurrtime, timeStep=mtimestep, &
+                     stopTime=mstoptime_prev, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   !--------------------------------
@@ -2280,12 +2253,21 @@ subroutine ModelSetRunClock(gcomp, rc)
     endif
 
     ! create a 1-shot alarm at the driver stop time
-    stop_alarm = ESMF_AlarmCreate(mclock, ringtime=dstopTime, name = "stop_alarm", rc=rc)
-    call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (cesm_coupled) then
+      stop_alarm = ESMF_AlarmCreate(mclock, ringtime=mstoptime_prev, name = "stop_alarm", rc=rc)
+      call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
+      if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    call ESMF_TimeGet(dstoptime, timestring=timestr, rc=rc)
-    call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+      call ESMF_TimeGet(mstoptime_prev, timestring=timestr, rc=rc)
+      call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+    else
+      stop_alarm = ESMF_AlarmCreate(mclock, ringtime=dstopTime, name = "stop_alarm", rc=rc)
+      call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
+      if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+      call ESMF_TimeGet(dstoptime, timestring=timestr, rc=rc)
+      call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+    endif
 
     call outputlog_init(gcomp, mclock, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2337,7 +2319,7 @@ subroutine ocean_model_finalize(gcomp, rc)
     write(stdout,*) 'MOM: --- finalize called ---'
   endif
   rc = ESMF_SUCCESS
-  if(write_runtimelog) timefs = MPI_Wtime()
+  if (write_runtimelog) timefs = MPI_Wtime()
 
   call ESMF_GridCompGetInternalState(gcomp, ocean_internalstate, rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2363,8 +2345,6 @@ subroutine ocean_model_finalize(gcomp, rc)
 
   call ocean_model_end(ocean_public, ocean_State, Time, write_restart=write_restart)
 
-  call field_manager_end()
-
   call io_infra_end()
   call MOM_infra_end()
 
@@ -2374,42 +2354,12 @@ subroutine ocean_model_finalize(gcomp, rc)
   call outputlog_run(clock, .true., rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timefs
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timefs
 
   if (localPet == 0) call cap_profiling("mom", "ocean_model_finalize", "E")
 
 end subroutine ocean_model_finalize
 
-!> Write the names of a set of restart files to an open restart pointer file, following the
-!! convention that save_restart uses when it names them.
-subroutine write_rpointer_filenames(writeunit, restartname, num_files, first_suffix)
-  integer,          intent(in) :: writeunit   !< The unit of the open restart pointer file
-  character(len=*), intent(in) :: restartname !< The name root shared by the restart files
-  integer,          intent(in) :: num_files   !< The number of files in the set
-  character(len=*), optional, intent(in) :: first_suffix !< A suffix that is appended to the name
-                                              !! of the first file only, as the instance suffix is.
-                                              !! An empty string is treated as though it were absent.
-
-  ! Local variables
-  character(len=8) :: suffix  ! The index appended to the names of the files after the first
-  logical :: use_first_suffix ! True if a non-empty suffix was supplied for the first file
-  integer :: i
-
-  use_first_suffix = .false.
-  if (present(first_suffix)) use_first_suffix = (len_trim(first_suffix) > 0)
-
-  if (use_first_suffix) then
-    write(writeunit,'(a)') trim(restartname)//'.'//trim(first_suffix)//'.nc'
-  else
-    write(writeunit,'(a)') trim(restartname)//'.nc'
-  endif
-
-  do i=1,num_files-1
-    write(suffix,'("_",I0)') i
-    write(writeunit,'(a)') trim(restartname)//trim(suffix)//'.nc'
-  enddo
-
-end subroutine write_rpointer_filenames
 
 !> Set scalar data from state for a particula name
 subroutine State_SetScalar(value, scalar_id, State, mytask, scalar_name, scalar_count,  rc)

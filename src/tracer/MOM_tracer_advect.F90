@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <do_concurrent_compat.h>
+
 !>  This module contains the subroutines that advect tracers along coordinate surfaces.
 module MOM_tracer_advect
 
@@ -40,6 +42,8 @@ type, public :: tracer_advect_CS ; private
                                    !! This is provided for compatibility with legacy simuations.
   type(group_pass_type) :: pass_uhr_vhr_t_hprev !< A structure used for group passes
   integer :: default_advect_scheme = -1 !< Determines which reconstruction to use
+  integer :: nkblock               !< The k-direction block size used in tracer advection calculations,
+                                   !! or 0 to use the full vertical column [nondim].
 end type tracer_advect_CS
 
 !>@{ CPU time clocks
@@ -53,7 +57,8 @@ contains
 !> This routine time steps the tracer concentration using a
 !! monotonic, conservative, weakly diffusive scheme.
 subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first_in, &
-                         vol_prev, max_iter_in, update_vol_prev, uhr_out, vhr_out)
+                         vol_prev, max_iter_in, update_vol_prev, uhr_out, vhr_out, &
+                         flux_type)
   type(ocean_grid_type),   intent(inout) :: G     !< ocean grid structure
   type(verticalGrid_type), intent(in)    :: GV    !< ocean vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -71,7 +76,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   type(tracer_registry_type), pointer    :: Reg   !< pointer to tracer registry
   logical,       optional, intent(in)    :: x_first_in !< If present, indicate whether to update
                                                   !! first in the x- or y-direction.
-  ! The remaining optional arguments are only used in offline tracer mode.
+  ! The next four optional arguments are only used in offline tracer mode.
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                  optional, intent(inout) :: vol_prev !< Cell volume before advection [H L2 ~> m3 or kg].
                                                   !! If update_vol_prev is true, the returned value is
@@ -87,7 +92,15 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
                  optional, intent(out)   :: vhr_out !< Remaining accumulated volume or mass fluxes
                                                   !! through the meridional faces [H L2 ~> m3 or kg]
+  ! The next optional argument is for diagnosing resolved vs parameterized tracer flux and control
+  ! which diagnostics are written. The tracers are only updated if flux_type = 0 (the default). Otherwise
+  ! the routines are dry run to collect diagnostics.
+  integer,       optional, intent(in)    :: flux_type !< Indicates whether uhtr, vhtr are the flux due to
+                                                      !! the residual (= 0), resolved (= 1), or parameterized (= 2)
+                                                      !! flow
 
+  ! local variables
+  integer :: flux_type_ctrl        !< To allow setting a default value for flux_type
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
     hprev           ! cell volume at the end of previous tracer change [H L2 ~> m3 or kg]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: &
@@ -104,18 +117,26 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   logical :: domore_u(SZJ_(G),SZK_(GV))  ! domore_u and domore_v indicate whether there is more
   logical :: domore_v(SZJB_(G),SZK_(GV)) ! advection to be done in the corresponding row or column.
   logical :: x_first            ! If true, advect in the x-direction first.
+  logical :: advect_this_tracer(Reg%ntr) ! If true, advect the mth tracer. Diagnostics of advection due to the
+                                       ! resolved and parameterized flow are collected by re-running the advection
+                                       ! routines with different advecting fluxes without updating the tracer.
+                                       ! This can be expensive if there are lots of tracers and only a few you
+                                       ! want diagnostics about. We therefore only calculate advection on the
+                                       ! tracers for which there are active resolved/parameterized diagnostics.
   integer :: max_iter           ! maximum number of iterations in each layer
   integer :: domore_k(SZK_(GV))
   integer :: stencil            ! stencil of the advection scheme
   integer :: nsten_halo         ! number of stencils that fit in the halos
-  integer :: i, j, k, m, is, ie, js, je, isd, ied, jsd, jed, nz, itt, ntr, do_any
+  integer :: i, j, k, kk, m, is, ie, js, je, isd, ied, jsd, jed, nz, itt, ntr, do_any
   integer :: isv, iev, jsv, jev ! The valid range of the indices.
   integer :: IsdB, IedB, JsdB, JedB
   integer :: stencil_local          ! Stencil for the local adection scheme
   integer :: local_advect_scheme(Reg%ntr) ! contains the list of the advection for each tracer
+  integer :: domore_k_tmp
+  integer :: nkk                ! The number of layers in each k block [nondim].
+  integer :: ksb, keb           ! The first and last layers of the current k block [nondim].
+  integer :: kke                ! The number of layers in the current k block [nondim].
 
-  domore_u(:,:) = .false.
-  domore_v(:,:) = .false.
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -130,14 +151,32 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   if (.not. associated(Reg)) call MOM_error(FATAL, "MOM_tracer_advect: "// &
        "register_tracer must be called before advect_tracer.")
   if (Reg%ntr==0) return
+
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = nz
+
+  !$omp target enter data map(to: OBC, Reg, Reg%Tr(:))
+  !$omp target enter data map(alloc: domore_u, domore_v, uhr, vhr, &
+  !$omp   uh_neglect, vh_neglect, hprev, local_advect_scheme, advect_this_tracer)
+
+  do concurrent (k=1:nz, j=jsd:jed)
+    domore_u(j,k) = .false.
+  enddo
+  do concurrent (k=1:nz, j=jsdB:jedB)
+    domore_v(j,k) = .false.
+  enddo
+  do concurrent (m=1:ntr)
+    advect_this_tracer(m) = .false.
+  enddo
+
   call cpu_clock_begin(id_clock_advect)
   x_first = (MOD(G%first_direction,2) == 0)
 
   ! Choose the maximum stencil from all the local advection scheme
-  do m = 1,ntr
+  do concurrent (m = 1:ntr)
 
      local_advect_scheme(m) = Reg%Tr(m)%advect_scheme
-     if(local_advect_scheme(m) < 0) local_advect_scheme(m) = CS%default_advect_scheme
+     if (local_advect_scheme(m) < 0) local_advect_scheme(m) = CS%default_advect_scheme
 
      if (local_advect_scheme(m) == ADVECT_PLM) then
        stencil_local = 2
@@ -153,6 +192,8 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
      stencil = max(stencil, stencil_local)
   enddo
 
+  !$omp target update from(local_advect_scheme)
+
   if (min(is-isd,ied-ie,js-jsd,jed-je) < stencil) then
     call MOM_error(FATAL, "MOM_tracer_advect: "//&
       "stencil is wider than the halo.")
@@ -162,6 +203,10 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   if (present(max_iter_in)) max_iter = max_iter_in
   if (present(x_first_in))  x_first = x_first_in
+
+  flux_type_ctrl = 0
+  if (present(flux_type)) flux_type_ctrl = flux_type ! default to residual flow
+
   call cpu_clock_begin(id_clock_pass)
   call create_group_pass(CS%pass_uhr_vhr_t_hprev, uhr, vhr, G%Domain)
   call create_group_pass(CS%pass_uhr_vhr_t_hprev, hprev, G%Domain)
@@ -170,24 +215,31 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   enddo
   call cpu_clock_end(id_clock_pass)
 
-  !$OMP parallel default(shared)
-
   ! This initializes the halos of uhr and vhr because pass_vector might do
   ! calculations on them, even though they are never used.
-  !$OMP do
-  do k=1,nz
-    do j=jsd,jed ; do I=IsdB,IedB ; uhr(I,j,k) = 0.0 ; enddo ; enddo
-    do J=jsdB,jedB ; do i=Isd,Ied ; vhr(i,J,k) = 0.0 ; enddo ; enddo
-    do j=jsd,jed ; do i=Isd,Ied ; hprev(i,j,k) = 0.0 ; enddo ; enddo
+  do concurrent (k=1:nz)
+    do concurrent (j=jsd:jed, I=IsdB:IedB)
+      uhr(I,j,k) = 0.0
+    enddo
+    do concurrent (J=jsdB:jedB, i=Isd:Ied)
+      vhr(i,J,k) = 0.0
+    enddo
+    do concurrent (j=jsd:jed, i=Isd:Ied)
+      hprev(i,j,k) = 0.0
+    enddo
     domore_k(k)=1
     !  Put the remaining (total) thickness fluxes into uhr and vhr.
-    do j=js,je ; do I=is-1,ie ; uhr(I,j,k) = uhtr(I,j,k) ; enddo ; enddo
-    do J=js-1,je ; do i=is,ie ; vhr(i,J,k) = vhtr(i,J,k) ; enddo ; enddo
+    do concurrent (j=js:je, I=is-1:ie)
+      uhr(I,j,k) = uhtr(I,j,k)
+    enddo
+    do concurrent (J=js-1:je, i=is:ie)
+      vhr(i,J,k) = vhtr(i,J,k)
+    enddo
     if (.not. present(vol_prev)) then
     !   This loop reconstructs the thickness field the last time that the
     ! tracers were updated, probably just after the diabatic forcing.  A useful
     ! diagnostic could be to compare this reconstruction with that older value.
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         hprev(i,j,k) = max(0.0, G%areaT(i,j)*h_end(i,j,k) + &
              ((uhr(I,j,k) - uhr(I-1,j,k)) + (vhr(i,J,k) - vhr(i,J-1,k))))
     ! In the case that the layer is now dramatically thinner than it was previously,
@@ -195,75 +247,158 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     ! non-conservation of tracers
         hprev(i,j,k) = hprev(i,j,k) + &
                        max(0.0, 1.0e-13*hprev(i,j,k) - G%areaT(i,j)*h_end(i,j,k))
-      enddo ; enddo
+      enddo
     else
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         hprev(i,j,k) = vol_prev(i,j,k)
-      enddo ; enddo
+      enddo
     endif
   enddo
 
-
-  !$OMP do
-  do j=jsd,jed ; do I=isd,ied-1
+  do concurrent (j=jsd:jed, I=isd:ied-1)
     uh_neglect(I,j) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i+1,j))
-  enddo ; enddo
-  !$OMP do
-  do J=jsd,jed-1 ; do i=isd,ied
-    vh_neglect(i,J) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i,j+1))
-  enddo ; enddo
-
-  ! initialize diagnostic fluxes and tendencies
-  !$OMP do
-  do m=1,ntr
-    if (associated(Reg%Tr(m)%ad_x)) Reg%Tr(m)%ad_x(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad_y)) Reg%Tr(m)%ad_y(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%advection_xy)) Reg%Tr(m)%advection_xy(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad2d_x)) Reg%Tr(m)%ad2d_x(:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad2d_y)) Reg%Tr(m)%ad2d_y(:,:) = 0.0
   enddo
-  !$OMP end parallel
+  do concurrent (J=jsd:jed-1, i=isd:ied)
+    vh_neglect(i,J) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i,j+1))
+  enddo
+
+  ! update GPU copy of Tr(:)%t
+  ! only update t because other members are zeroed
+  !$ do m=1,ntr
+    !$omp target enter data map(to: Reg%Tr(m)%t)
+  !$ enddo
+
+  ! initialize diagnostic fluxes and tendencies and determine which tracers to advect
+  if (flux_type_ctrl == 0) then ! Flux is residual
+    !$ do m=1,ntr
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_x) &
+      !$omp   if (associated(Reg%Tr(m)%ad_x))
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_y) &
+      !$omp   if (associated(Reg%Tr(m)%ad_y))
+      !$omp target enter data map(alloc: Reg%Tr(m)%advection_xy) &
+      !$omp   if (associated(Reg%Tr(m)%advection_xy))
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad2d_x) &
+      !$omp   if (associated(Reg%Tr(m)%ad2d_x))
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad2d_y) &
+      !$omp   if (associated(Reg%Tr(m)%ad2d_y))
+    !$ enddo
+    do concurrent (m=1:ntr)
+      ! Advect all the tracers regardless of diagnostic output
+      advect_this_tracer(m) = .true.
+
+      if (associated(Reg%Tr(m)%ad_x)) then
+        do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB)
+          Reg%Tr(m)%ad_x(I,j,k) = 0.0
+        enddo
+      endif
+      if (associated(Reg%Tr(m)%ad_y)) then
+        do concurrent (k=1:nz, J=JsdB:jedB, i=isd:ied)
+          Reg%Tr(m)%ad_y(i,J,k) = 0.0
+        enddo
+      endif
+      if (associated(Reg%Tr(m)%advection_xy)) then
+        do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+          Reg%Tr(m)%advection_xy(i,j,k) = 0.0
+        enddo
+      endif
+      if (associated(Reg%Tr(m)%ad2d_x)) then
+        do concurrent (j=jsd:jed, I=IsdB:IedB)
+          Reg%Tr(m)%ad2d_x(I,j) = 0.0
+        enddo
+      endif
+      if (associated(Reg%Tr(m)%ad2d_y)) then
+        do concurrent (J=JsdB:JedB, i=isd:ied)
+          Reg%Tr(m)%ad2d_y(i,J) = 0.0
+        enddo
+      endif
+    enddo
+  elseif (flux_type_ctrl == 1) then ! Flux is resolved
+    !$ do m=1,ntr
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_x_resolved) &
+      !$omp   if (associated(Reg%Tr(m)%ad_x_resolved))
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_y_resolved) &
+      !$omp   if (associated(Reg%Tr(m)%ad_y_resolved))
+    !$ enddo
+    do concurrent (m=1:ntr)
+      if (associated(Reg%Tr(m)%ad_x_resolved)) then
+        do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB)
+          Reg%Tr(m)%ad_x_resolved(I,j,k) = 0.0
+        enddo
+        advect_this_tracer(m) = .true.
+      endif
+      if (associated(Reg%Tr(m)%ad_y_resolved)) then
+        do concurrent (k=1:nz, J=JsdB:jedB, i=isd:ied)
+          Reg%Tr(m)%ad_y_resolved(i,J,k) = 0.0
+        enddo
+        advect_this_tracer(m) = .true.
+      endif
+    enddo
+  elseif (flux_type_ctrl == 2) then ! Flux is parameterized
+    !$ do m=1,ntr
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_x_param) &
+      !$omp   if (associated(Reg%Tr(m)%ad_x_param))
+      !$omp target enter data map(alloc: Reg%Tr(m)%ad_y_param) &
+      !$omp   if (associated(Reg%Tr(m)%ad_y_param))
+    !$ enddo
+    do concurrent (m=1:ntr)
+      if (associated(Reg%Tr(m)%ad_x_param)) then
+        do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB)
+          Reg%Tr(m)%ad_x_param(I,j,k) = 0.0
+        enddo
+        advect_this_tracer(m) = .true. ! advect this tracer
+      endif
+      if (associated(Reg%Tr(m)%ad_y_param)) then
+        do concurrent (k=1:nz, J=JsdB:jedB, i=isd:ied)
+          Reg%Tr(m)%ad_y_param(i,J,k) = 0.0
+        enddo
+        advect_this_tracer(m) = .true. ! advect this tracer
+      endif
+    enddo
+  else
+    call MOM_error(FATAL, &
+          "Inconsistent flux type in advect_tracer. Must be of 0 (residual), 1 (resolved), or 2 (parameterized)")
+  endif
+
+  !$ if (associated(OBC)) then ; if (OBC%OBC_pe) then
+    !$omp target update from(advect_this_tracer)
+  !$ endif ; endif
 
   isv = is ; iev = ie ; jsv = js ; jev = je
+  nsten_halo = min(is - isd, ied - ie, js - jsd, jed - je) / stencil
 
   do itt=1,max_iter
 
     if (isv > is-stencil) then
-      call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass)
+      call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass, omp_offload=.true.)
 
-      if (itt == 1) then
-        ! Store the tracer concentrations before any advection for use in diagnostics.
-        do m=1,ntr ; if (associated(Reg%Tr(m)%t_pre_adv)) then
-          Reg%Tr(m)%t_pre_adv(:,:,:) = Reg%Tr(m)%t(:,:,:)
-        endif ; enddo
-      endif
-
-      nsten_halo = min(is-isd,ied-ie,js-jsd,jed-je)/stencil
-      isv = is-nsten_halo*stencil ; jsv = js-nsten_halo*stencil
-      iev = ie+nsten_halo*stencil ; jev = je+nsten_halo*stencil
+      isv = is - nsten_halo * stencil ; jsv = js - nsten_halo * stencil
+      iev = ie + nsten_halo * stencil ; jev = je + nsten_halo * stencil
       ! Reevaluate domore_u & domore_v unless the valid range is the same size as
       ! before.  Also, do this if there is Strang splitting.
       if ((nsten_halo > 1) .or. (itt==1)) then
-        !$OMP parallel do default(shared)
-        do k=1,nz ; if (domore_k(k) > 0) then
-          do j=jsv,jev ; if (.not.domore_u(j,k)) then
+        do concurrent (k=1:nz, domore_k(k) > 0)
+          do concurrent (j=jsv:jev, .not.domore_u(j,k))
             do i=isv+stencil-1,iev-stencil ; if (uhr(I,j,k) /= 0.0) then
               domore_u(j,k) = .true. ; exit
             endif ; enddo ! i-loop
-          endif ; enddo
-          do J=jsv+stencil-1,jev-stencil ; if (.not.domore_v(J,k)) then
+          enddo
+          do concurrent (J=jsv+stencil-1:jev-stencil, .not.domore_v(J,k))
             do i=isv+stencil,iev-stencil ; if (vhr(i,J,k) /= 0.0) then
               domore_v(J,k) = .true. ; exit
             endif ; enddo ! i-loop
-          endif ; enddo
+          enddo
 
           !   At this point, domore_k is global.  Change it so that it indicates
           ! whether any work is needed on a layer on this processor.
-          domore_k(k) = 0
-          do j=jsv,jev ; if (domore_u(j,k)) domore_k(k) = 1 ; enddo
-          do J=jsv+stencil-1,jev-stencil ; if (domore_v(J,k)) domore_k(k) = 1 ; enddo
-
-        endif ; enddo ! k-loop
+          domore_k_tmp = 0
+          do concurrent (j=jsv:jev, domore_u(j,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+            domore_k_tmp = 1
+          enddo
+          do concurrent (J=jsv+stencil-1:jev-stencil, domore_v(J,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+            domore_k_tmp = 1
+          enddo
+          domore_k(k) = domore_k_tmp
+        enddo ! k-loop
       endif
     endif
 
@@ -277,56 +412,77 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     !  for all the transport to happen.  The sum over domore_k keeps the processors
     !  synchronized.  This may not be very efficient, but it should be reliable.
 
-    !$OMP parallel default(shared)
-
     if (x_first) then
 
-      !$OMP do ordered
-      do k=1,nz ; if (domore_k(k) > 0) then
-        ! First, advect zonally.
-        call advect_x(Reg%Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
-                      isv, iev, jsv-stencil, jev+stencil, k, G, GV, US, &
-                      local_advect_scheme)
-      endif ; enddo
+      do ksb=1,nz,nkk
+        keb = min(ksb + nkk - 1, nz)
+        if (any(domore_k(ksb:keb) > 0)) then
+          ! First, advect zonally.
+          call advect_x(Reg%Tr, hprev, uhr, uh_neglect, OBC, domore_u, domore_k, ntr, Idt, &
+                        isv, iev, jsv-stencil, jev+stencil, ksb, keb, nkk, G, GV, US, &
+                        flux_type_ctrl, advect_this_tracer, local_advect_scheme)
+        endif
+      enddo
 
-      !$OMP do ordered
-      do k=1,nz ; if (domore_k(k) > 0) then
-        !  Next, advect meridionally.
-        call advect_y(Reg%Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
-                      isv, iev, jsv, jev, k, G, GV, US, local_advect_scheme)
+      do ksb=1,nz,nkk
+        keb = min(ksb + nkk - 1, nz)
+        kke = keb - ksb + 1
+        if (any(domore_k(ksb:keb) > 0)) then
+          !  Next, advect meridionally.
+          call advect_y(Reg%Tr, hprev, vhr, vh_neglect, OBC, domore_v, domore_k, ntr, Idt, &
+                        isv, iev, jsv, jev, ksb, keb, nkk, G, GV, US, flux_type_ctrl, &
+                        advect_this_tracer, local_advect_scheme)
 
-        ! Update domore_k(k) for the next iteration
-        domore_k(k) = 0
-        do j=jsv-stencil,jev+stencil ; if (domore_u(j,k)) domore_k(k) = 1 ; enddo
-        do J=jsv-1,jev ; if (domore_v(J,k)) domore_k(k) = 1 ; enddo
-
-      endif ; enddo
-
+          ! Update domore_k for the next iteration
+          do concurrent (kk=1:kke, domore_k(ksb + kk - 1) > 0) DO_LOCALITY(local(domore_k_tmp, k))
+            k = ksb + kk - 1
+            domore_k_tmp = 0
+            do concurrent (j=jsv-stencil:jev+stencil, domore_u(j,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+              domore_k_tmp = 1
+            enddo
+            do concurrent (J=jsv-1:jev, domore_v(J,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+              domore_k_tmp = 1
+            enddo
+            domore_k(k) = domore_k_tmp
+          enddo
+        endif
+      enddo
     else
+      do ksb=1,nz,nkk
+        keb = min(ksb + nkk - 1, nz)
+        if (any(domore_k(ksb:keb) > 0)) then
+          ! First, advect meridionally.
+          call advect_y(Reg%Tr, hprev, vhr, vh_neglect, OBC, domore_v, domore_k, ntr, Idt, &
+                        isv-stencil, iev+stencil, jsv, jev, ksb, keb, nkk, G, GV, US, &
+                        flux_type_ctrl, advect_this_tracer, local_advect_scheme)
+        endif
+      enddo
 
-      !$OMP do ordered
-      do k=1,nz ; if (domore_k(k) > 0) then
-        ! First, advect meridionally.
-        call advect_y(Reg%Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
-                      isv-stencil, iev+stencil, jsv, jev, k, G, GV, US, &
-                      local_advect_scheme)
-      endif ; enddo
+      do ksb=1,nz,nkk
+        keb = min(ksb + nkk - 1, nz)
+        kke = keb - ksb + 1
+        if (any(domore_k(ksb:keb) > 0)) then
+          ! Next, advect zonally.
+          call advect_x(Reg%Tr, hprev, uhr, uh_neglect, OBC, domore_u, domore_k, ntr, Idt, &
+                        isv, iev, jsv, jev, ksb, keb, nkk, G, GV, US, flux_type_ctrl, &
+                        advect_this_tracer, local_advect_scheme)
 
-      !$OMP do ordered
-      do k=1,nz ; if (domore_k(k) > 0) then
-        ! Next, advect zonally.
-        call advect_x(Reg%Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
-                      isv, iev, jsv, jev, k, G, GV, US, local_advect_scheme)
-
-        ! Update domore_k(k) for the next iteration
-        domore_k(k) = 0
-        do j=jsv,jev ; if (domore_u(j,k)) domore_k(k) = 1 ; enddo
-        do J=jsv-1,jev ; if (domore_v(J,k)) domore_k(k) = 1 ; enddo
-      endif ; enddo
+          ! Update domore_k for the next iteration
+          do concurrent (kk=1:kke, domore_k(ksb + kk - 1) > 0) DO_LOCALITY(local(domore_k_tmp, k))
+            k = ksb + kk - 1
+            domore_k_tmp = 0
+            do concurrent (j=jsv:jev, domore_u(j,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+              domore_k_tmp = 1
+            enddo
+            do concurrent (J=jsv-1:jev, domore_v(J,k)) DO_LOCALITY(reduce(max:domore_k_tmp))
+              domore_k_tmp = 1
+            enddo
+            domore_k(k) = domore_k_tmp
+          enddo
+        endif
+      enddo
 
     endif ! x_first
-
-    !$OMP end parallel
 
     ! If the advection just isn't finishing after max_iter, move on.
     if (itt >= max_iter) then
@@ -348,11 +504,61 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   enddo ! Iterations loop
 
-  if (present(uhr_out)) uhr_out(:,:,:) = uhr(:,:,:)
-  if (present(vhr_out)) vhr_out(:,:,:) = vhr(:,:,:)
-  if (present(vol_prev) .and. present(update_vol_prev)) then
-    if (update_vol_prev) vol_prev(:,:,:) = hprev(:,:,:)
+  ! TODO: flux_type_ctrl == 1 or 2 may not need to download t?
+  !$ do m=1,ntr
+    !$omp target exit data map(from: Reg%Tr(m)%t)
+  !$ enddo
+
+  if (flux_type_ctrl == 0) then
+    !$ do m=1,ntr
+      !$omp target exit data map(from: Reg%Tr(m)%ad_x) &
+      !$omp   if (associated(Reg%Tr(m)%ad_x))
+      !$omp target exit data map(from: Reg%Tr(m)%ad_y) &
+      !$omp   if (associated(Reg%Tr(m)%ad_y))
+      !$omp target exit data map(from: Reg%Tr(m)%advection_xy) &
+      !$omp   if (associated(Reg%Tr(m)%advection_xy))
+      !$omp target exit data map(from: Reg%Tr(m)%ad2d_x) &
+      !$omp   if (associated(Reg%Tr(m)%ad2d_x))
+      !$omp target exit data map(from: Reg%Tr(m)%ad2d_y) &
+      !$omp   if (associated(Reg%Tr(m)%ad2d_y))
+    !$ enddo
+  elseif (flux_type_ctrl == 1) then
+    !$ do m=1,ntr
+      !$omp target exit data map(from: Reg%Tr(m)%ad_x_resolved) &
+      !$omp   if (associated(Reg%Tr(m)%ad_x_resolved))
+      !$omp target exit data map(from: Reg%Tr(m)%ad_y_resolved) &
+      !$omp   if (associated(Reg%Tr(m)%ad_y_resolved))
+    !$ enddo
+  elseif (flux_type_ctrl == 2) then
+    !$ do m=1,ntr
+      !$omp target exit data map(from: Reg%Tr(m)%ad_x_param) &
+      !$omp    if (associated(Reg%Tr(m)%ad_x_param))
+      !$omp target exit data map(from: Reg%Tr(m)%ad_y_param) &
+      !$omp    if (associated(Reg%Tr(m)%ad_y_param))
+    !$ enddo
   endif
+
+  if (present(uhr_out)) then
+    do concurrent (k=1:nz, j=jsd:jed, i=isdB:iedB)
+      uhr_out(i,j,k) = uhr(i,j,k)
+    enddo
+  endif
+  if (present(vhr_out)) then
+    do concurrent (k=1:nz, j=jsdB:jedB, i=isd:ied)
+      vhr_out(i,j,k) = vhr(i,j,k)
+    enddo
+  endif
+  if (present(vol_prev) .and. present(update_vol_prev)) then
+    if (update_vol_prev) then
+      do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+        vol_prev(i,j,k) = hprev(i,j,k)
+      enddo
+    endif
+  endif
+
+  !$omp target exit data map(release: hprev, uhr, vhr, uh_neglect, &
+  !$omp   vh_neglect, domore_u, domore_v, local_advect_scheme, OBC, Reg, &
+  !$omp   Reg%Tr(:), advect_this_tracer)
 
   call cpu_clock_end(id_clock_advect)
 
@@ -360,9 +566,10 @@ end subroutine advect_tracer
 
 
 !> This subroutine does 1-d flux-form advection in the zonal direction using
-!! a monotonic piecewise linear scheme.
-subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
-                    is, ie, js, je, k, G, GV, US, advect_schemes)
+!! a monotonic piecewise linear scheme.  The layers ksb to keb are processed in one call.
+subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, domore_k, ntr, Idt, &
+                    is, ie, js, je, ksb, keb, nkk, G, GV, US, flux_type, advect_this_tracer,  &
+                    advect_schemes)
   type(ocean_grid_type),                     intent(inout) :: G    !< The ocean's grid structure
   type(verticalGrid_type),                   intent(in)    :: GV   !< The ocean's vertical grid structure
   integer,                                   intent(in)    :: ntr  !< The number of tracers
@@ -376,19 +583,29 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   type(ocean_OBC_type),                      pointer       :: OBC !< specifies whether, where, and what OBCs are used
   logical, dimension(SZJ_(G),SZK_(GV)),      intent(inout) :: domore_u !< If true, there is more advection to be
                                                                   !! done in this u-row
+  integer, dimension(SZK_(GV)),              intent(in)    :: domore_k !< If positive, there is more advection to be
+                                                                  !! done in this layer [nondim]
   real,                                      intent(in)    :: Idt !< The inverse of dt [T-1 ~> s-1]
   integer,                                   intent(in)    :: is  !< The starting tracer i-index to work on
   integer,                                   intent(in)    :: ie  !< The ending tracer i-index to work on
   integer,                                   intent(in)    :: js  !< The starting tracer j-index to work on
   integer,                                   intent(in)    :: je  !< The ending tracer j-index to work on
-  integer,                                   intent(in)    :: k   !< The k-level to work on
+  integer,                                   intent(in)    :: ksb     !< The first k-level of the block to work on
+  integer,                                   intent(in)    :: keb     !< The last k-level of the block to work on
+  integer,                                   intent(in)    :: nkk     !< The k block size that sizes the work arrays
+                                                                  !! [nondim]
   type(unit_scale_type),                     intent(in)    :: US  !< A dimensional unit scaling type
+  integer,                                   intent(in)    :: flux_type !< Indicates whether uhtr, vhtr are the flux
+                                                                        !! due to the residual (= 0), resolved (= 1),
+                                                                        !! or parameterized (= 2) flow
+  logical, dimension(ntr),                   intent(in)    :: advect_this_tracer !< If true, advect this tracer
   integer, dimension(ntr),                   intent(in)    :: advect_schemes !< list of advection schemes to use
 
   real, dimension(SZI_(G),ntr) :: &
     slope_x             ! The concentration slope per grid point [conc].
-  real, dimension(SZIB_(G),SZJ_(G),ntr) :: &
-    flux_x              ! The tracer flux across a boundary [H L2 conc ~> m3 conc or kg conc].
+  real, dimension(SZIB_(G),SZJ_(G),ntr,nkk) :: &
+    flux_x              ! The tracer flux across a boundary in each layer of the k block
+                        ! [H L2 conc ~> m3 conc or kg conc].
   real, dimension(SZI_(G),ntr) :: &
     T_tmp               ! The copy of the tracer concentration at constant i,k [conc].
 
@@ -416,15 +633,14 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   real :: dA            ! Difference between the reconstruction tracer edge values [conc]
   real :: mA            ! Average of the reconstruction tracer edge values [conc]
   real :: a6            ! Curvature of the reconstruction tracer values [conc]
-  logical :: do_i(SZI_(G),SZJ_(G))     ! If true, work on given points.
-  logical :: usePLMslope
-  integer :: i, j, m, n, i_up, stencil, ntr_id
+  logical :: do_i(SZI_(G))     ! If true, work on given points in each row.
+  logical :: usePLMslope, domore_u_jk
+  integer :: i, j, k, kk, kke, m, n, i_up, stencil, ntr_id
   type(OBC_segment_type), pointer :: segment=>NULL()
-  logical, dimension(SZJ_(G),SZK_(GV)) :: domore_u_initial
+  logical :: domore_u_initial(SZJ_(G),nkk)     ! If true, there was more advection to be done in this u-row of a
+                                               ! layer of the k block when this subroutine was called.
 
-  ! keep a local copy of the initial values of domore_u, which is to be used when computing ad2d_x
-  ! diagnostic at the end of this subroutine.
-  domore_u_initial = domore_u
+  kke = keb - ksb + 1
 
   usePLMslope = .false.
   ! stencil for calculating slope values
@@ -439,323 +655,355 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   tiny_h = tiny(min_h)
   h_neglect = GV%H_subroundoff
 
-  do I=is-1,ie ; CFL(I) = 0.0 ; enddo
+  ! do I=is-1,ie ; CFL(I) = 0.0 ; enddo
 
-  do j=js,je ; if (domore_u(j,k)) then
-    domore_u(j,k) = .false.
+  !$omp target enter data &
+  !$omp   map(alloc: slope_x, T_tmp, uhh, CFL, hlst, Ihnew, do_i, flux_x, domore_u_initial)
 
-    ! Calculate the i-direction profiles (slopes) of each tracer that is being advected.
-    if (usePLMslope) then
-      do m=1,ntr ; do i=is-stencil,ie+stencil
-       !if (ABS(Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k)) < &
-       !    ABS(Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k))) then
-       !  maxslope = 4.0*(Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k))
-       !else
-       !  maxslope = 4.0*(Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k))
-       !endif
-       !if ((Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k)) * (Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k)) < 0.0) then
-       !  slope_x(i,m) = 0.0
-       !elseif (ABS(Tr(m)%t(i+1,j,k)-Tr(m)%t(i-1,j,k))<ABS(maxslope)) then
-       !  slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * &
-       !                 0.5*(Tr(m)%t(i+1,j,k)-Tr(m)%t(i-1,j,k))
-       !else
-       !  slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * 0.5*maxslope
-       !endif
-        Tp = Tr(m)%t(i+1,j,k) ; Tc = Tr(m)%t(i,j,k) ; Tm = Tr(m)%t(i-1,j,k)
-        dMx = max( Tp, Tc, Tm ) - Tc
-        dMn= Tc - min( Tp, Tc, Tm )
-        slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * &
-            sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
-      enddo ; enddo
-    endif ! usePLMslope
+  ! Keep a local copy of the initial values of domore_u in the layers that are being worked on.  It selects
+  ! the rows to work on and is used when computing the ad2d_x diagnostic at the end of this subroutine.
+  do concurrent (kk=1:kke, j=js:je) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    domore_u_initial(j,kk) = (domore_k(k) > 0) .and. domore_u(j,k)
+  enddo
 
-    ! make a copy of the tracers in case values need to be overridden for OBCs
-    do m = 1,ntr
-      do i=G%isd,G%ied
+  !$omp target teams loop collapse(2) private(slope_x, T_tmp, uhh, CFL, hlst, Ihnew, Tp, dMx, dMn, m, i, n, &
+  !$omp                           ntr_id, hup, hlos, i_up, Tc, Tm, aL, aR, dA, mA, a6, domore_u_jk, k, do_i)
+  do kk=1,kke ; do j=js,je
+    k = ksb + kk - 1
+    if (domore_u_initial(j,kk)) then
+      domore_u_jk = .false.
+
+      ! Calculate the i-direction profiles (slopes) of each tracer that is being advected.
+      if (usePLMslope) then
+        do concurrent (m=1:ntr, i=is-stencil:ie+stencil, advect_this_tracer(m))
+          !if (ABS(Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k)) < &
+          !    ABS(Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k))) then
+          !  maxslope = 4.0*(Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k))
+          !else
+          !  maxslope = 4.0*(Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k))
+          !endif
+          !if ((Tr(m)%t(i+1,j,k)-Tr(m)%t(i,j,k)) * (Tr(m)%t(i,j,k)-Tr(m)%t(i-1,j,k)) < 0.0) then
+          !  slope_x(i,m) = 0.0
+          !elseif (ABS(Tr(m)%t(i+1,j,k)-Tr(m)%t(i-1,j,k))<ABS(maxslope)) then
+          !  slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * &
+          !                 0.5*(Tr(m)%t(i+1,j,k)-Tr(m)%t(i-1,j,k))
+          !else
+          !  slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * 0.5*maxslope
+          !endif
+          Tp = Tr(m)%t(i+1,j,k) ; Tc = Tr(m)%t(i,j,k) ; Tm = Tr(m)%t(i-1,j,k)
+          dMx = max(Tp, Tc, Tm) - Tc
+          dMn= Tc - min(Tp, Tc, Tm)
+          slope_x(i,m) = G%mask2dCu(I,j) * G%mask2dCu(I-1,j) * &
+              sign(min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm)
+        enddo
+      endif ! usePLMslope
+
+      ! make a copy of the tracers in case values need to be overridden for OBCs
+      do concurrent (m=1:ntr, i=G%isd:G%ied, advect_this_tracer(m))
         T_tmp(i,m) = Tr(m)%t(i,j,k)
       enddo
-    enddo
-    ! loop through open boundaries and recalculate flux terms
-    if (associated(OBC)) then ; if (OBC%OBC_pe) then
-      do n=1,OBC%number_of_segments
-        segment=>OBC%segment(n)
-        if (.not. associated(segment%tr_Reg)) cycle
-        if (segment%is_E_or_W) then
-          if (j>=segment%HI%jsd .and. j<=segment%HI%jed) then
-            I = segment%HI%IsdB
-            do m = 1,segment%tr_Reg%ntseg ! replace tracers with OBC values
-              ntr_id = segment%tr_reg%Tr(m)%ntr_index
-              if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                if (segment%direction == OBC_DIRECTION_W) then
-                  T_tmp(i,ntr_id) = segment%tr_Reg%Tr(m)%tres(i,j,k)
-                else
-                  T_tmp(i+1,ntr_id) = segment%tr_Reg%Tr(m)%tres(i,j,k)
-                endif
-              else
-                if (segment%direction == OBC_DIRECTION_W) then
-                  T_tmp(i,ntr_id) = segment%tr_Reg%Tr(m)%OBC_inflow_conc
-                else
-                  T_tmp(i+1,ntr_id) = segment%tr_Reg%Tr(m)%OBC_inflow_conc
-                endif
-              endif
-            enddo
-            do m = 1,ntr ! Apply update tracer values for slope calculation
-              do i=segment%HI%IsdB-1,segment%HI%IsdB+1
-                Tp = T_tmp(i+1,m) ; Tc = T_tmp(i,m) ; Tm = T_tmp(i-1,m)
-                dMx = max( Tp, Tc, Tm ) - Tc
-                dMn= Tc - min( Tp, Tc, Tm )
-                slope_x(i,m) = G%mask2dCu(I,j)*G%mask2dCu(I-1,j) * &
-                     sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
-              enddo
-            enddo
 
+      ! Loop through open boundaries and recalculate flux terms
+      if (associated(OBC)) then ; if (OBC%OBC_pe) then
+        do n=1,OBC%number_of_segments
+          ! segment=>OBC%segment(n)
+          if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
+          if (OBC%segment(n)%is_E_or_W) then
+            if (j >= OBC%segment(n)%HI%jsd .and. j <= OBC%segment(n)%HI%jed) then
+              ! Replace tracers with OBC values
+              I = OBC%segment(n)%HI%IsdB
+              do concurrent (m=1:OBC%segment(n)%tr_Reg%ntseg)
+                ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                if (advect_this_tracer(ntr_id)) then
+                  if (OBC%segment(n)%direction == OBC_DIRECTION_W) then
+                    T_tmp(i,ntr_id) = OBC%segment(n)%tr_Reg%Tr(m)%tres(i,j,k)
+                  else
+                    T_tmp(i+1,ntr_id) = OBC%segment(n)%tr_Reg%Tr(m)%tres(i,j,k)
+                  endif
+                endif
+              enddo
+              ! Apply update tracer values for slope calculation
+              do concurrent (m=1:ntr, i=OBC%segment(n)%HI%IsdB-1:OBC%segment(n)%HI%IsdB+1, &
+                  advect_this_tracer(m))
+                Tp = T_tmp(i+1,m) ; Tc = T_tmp(i,m) ; Tm = T_tmp(i-1,m)
+                dMx = max(Tp, Tc, Tm) - Tc
+                dMn = Tc - min(Tp, Tc, Tm)
+                slope_x(i,m) = G%mask2dCu(I,j) * G%mask2dCu(I-1,j) &
+                    * sign(min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm)
+              enddo
+            endif
           endif
+        enddo
+      endif ; endif
+
+      ! Calculate the i-direction fluxes of each tracer, using as much
+      ! the minimum of the remaining mass flux (uhr) and the half the mass
+      ! in the cell plus whatever part of its half of the mass flux that
+      ! the flux through the other side does not require.
+      do concurrent (I=is-1:ie) DO_LOCALITY(reduce(.or.:domore_u_jk))
+        if ((uhr(I,j,k) == 0.0) .or. &
+            ((uhr(I,j,k) < 0.0) .and. (hprev(i+1,j,k) <= tiny_h)) .or. &
+            ((uhr(I,j,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
+          uhh(I) = 0.0
+          CFL(I) = 0.0
+        elseif (uhr(I,j,k) < 0.0) then
+          hup = hprev(i+1,j,k) - G%areaT(i+1,j)*min_h
+          hlos = MAX(0.0, uhr(I+1,j,k))
+          if ((((hup - hlos) + uhr(I,j,k)) < 0.0) .and. &
+              ((0.5*hup + uhr(I,j,k)) < 0.0)) then
+            uhh(I) = MIN(-0.5*hup, -hup+hlos, 0.0)
+            domore_u_jk = .true.
+          else
+            uhh(I) = uhr(I,j,k)
+          endif
+          CFL(I) = - uhh(I) / (hprev(i+1,j,k))  ! CFL is positive
+        else
+          hup = hprev(i,j,k) - G%areaT(i,j)*min_h
+          hlos = MAX(0.0, -uhr(I-1,j,k))
+          if ((((hup - hlos) - uhr(I,j,k)) < 0.0) .and. &
+              ((0.5*hup - uhr(I,j,k)) < 0.0)) then
+            uhh(I) = MAX(0.5*hup, hup-hlos, 0.0)
+            domore_u_jk = .true.
+          else
+            uhh(I) = uhr(I,j,k)
+          endif
+          CFL(I) = uhh(I) / (hprev(i,j,k))  ! CFL is positive
         endif
       enddo
-    endif ; endif
 
+      domore_u(j,k) = domore_u_jk
 
-    ! Calculate the i-direction fluxes of each tracer, using as much
-    ! the minimum of the remaining mass flux (uhr) and the half the mass
-    ! in the cell plus whatever part of its half of the mass flux that
-    ! the flux through the other side does not require.
-    do I=is-1,ie
-      if ((uhr(I,j,k) == 0.0) .or. &
-          ((uhr(I,j,k) < 0.0) .and. (hprev(i+1,j,k) <= tiny_h)) .or. &
-          ((uhr(I,j,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
-        uhh(I) = 0.0
-        CFL(I) = 0.0
-      elseif (uhr(I,j,k) < 0.0) then
-        hup = hprev(i+1,j,k) - G%areaT(i+1,j)*min_h
-        hlos = MAX(0.0, uhr(I+1,j,k))
-        if ((((hup - hlos) + uhr(I,j,k)) < 0.0) .and. &
-            ((0.5*hup + uhr(I,j,k)) < 0.0)) then
-          uhh(I) = MIN(-0.5*hup, -hup+hlos, 0.0)
-          domore_u(j,k) = .true.
-        else
-          uhh(I) = uhr(I,j,k)
+      do concurrent (m=1:ntr, advect_this_tracer(m))
+        if (advect_schemes(m) == ADVECT_PPM .or. advect_schemes(m) == ADVECT_PPMH3) then
+          do concurrent (I=is-1:ie)
+            ! Centre cell depends on upstream direction
+            if (uhh(I) >= 0.0) then
+              i_up = i
+            else
+              i_up = i+1
+            endif
+
+            ! Implementation of PPM-H3
+            Tp = T_tmp(i_up+1,m) ; Tc = T_tmp(i_up,m) ; Tm = T_tmp(i_up-1,m)
+
+            if (advect_schemes(m) == ADVECT_PPMH3) then
+              aL = ( 5.*Tc + ( 2.*Tm - Tp ) )/6. ! H3 estimate
+              aL = max( min(Tc,Tm), aL) ; aL = min( max(Tc,Tm), aL) ! Bound
+              aR = ( 5.*Tc + ( 2.*Tp - Tm ) )/6. ! H3 estimate
+              aR = max( min(Tc,Tp), aR) ; aR = min( max(Tc,Tp), aR) ! Bound
+            else
+              aL = 0.5 * ((Tm + Tc) + (slope_x(i_up-1,m) - slope_x(i_up,m)) / 3.)
+              aR = 0.5 * ((Tc + Tp) + (slope_x(i_up,m) - slope_x(i_up+1,m)) / 3.)
+            endif
+
+            dA = aR - aL ; mA = 0.5*( aR + aL )
+            if (G%mask2dCu(I_up,j)*G%mask2dCu(I_up-1,j)*(Tp-Tc)*(Tc-Tm) <= 0.) then
+              aL = Tc ; aR = Tc ! PCM for local extrema and boundary cells
+            elseif ( dA*(Tc-mA) > (dA*dA)/6. ) then
+              aL = (3.*Tc) - 2.*aR
+            elseif ( dA*(Tc-mA) < - (dA*dA)/6. ) then
+              aR = (3.*Tc) - 2.*aL
+            endif
+
+            a6 = 6.*Tc - 3. * (aR + aL) ! Curvature
+
+            if (uhh(I) >= 0.0) then
+              flux_x(I,j,m,kk) = uhh(I)*( aR - 0.5 * CFL(I) * ( &
+                   ( aR - aL ) - a6 * ( 1. - 2./3. * CFL(I) ) ) )
+            else
+              flux_x(I,j,m,kk) = uhh(I)*( aL + 0.5 * CFL(I) * ( &
+                   ( aR - aL ) + a6 * ( 1. - 2./3. * CFL(I) ) ) )
+            endif
+          enddo
+        else ! PLM
+          do concurrent (I=is-1:ie)
+            if (uhh(I) >= 0.0) then
+              ! Indirect implementation of PLM
+             !aL = Tr(m)%t(i,j,k) - 0.5 * slope_x(i,m)
+             !aR = Tr(m)%t(i,j,k) + 0.5 * slope_x(i,m)
+             !flux_x(I,j,m) = uhh(I)*( aR - 0.5 * (aR-aL) * CFL(I) )
+              ! Alternative implementation of PLM
+              Tc = T_tmp(i,m)
+              flux_x(I,j,m,kk) = uhh(I)*( Tc + 0.5 * slope_x(i,m) * ( 1. - CFL(I) ) )
+            else
+              ! Indirect implementation of PLM
+             !aL = Tr(m)%t(i+1,j,k) - 0.5 * slope_x(i+1,m)
+             !aR = Tr(m)%t(i+1,j,k) + 0.5 * slope_x(i+1,m)
+             !flux_x(I,j,m) = uhh(I)*( aL + 0.5 * (aR-aL) * CFL(I) )
+              ! Alternative implementation of PLM
+              Tc = T_tmp(i+1,m)
+              flux_x(I,j,m,kk) = uhh(I)*( Tc - 0.5 * slope_x(i+1,m) * ( 1. - CFL(I) ) )
+            endif
+          enddo
         endif
-        CFL(I) = - uhh(I) / (hprev(i+1,j,k))  ! CFL is positive
-      else
-        hup = hprev(i,j,k) - G%areaT(i,j)*min_h
-        hlos = MAX(0.0, -uhr(I-1,j,k))
-        if ((((hup - hlos) - uhr(I,j,k)) < 0.0) .and. &
-            ((0.5*hup - uhr(I,j,k)) < 0.0)) then
-          uhh(I) = MAX(0.5*hup, hup-hlos, 0.0)
-          domore_u(j,k) = .true.
-        else
-          uhh(I) = uhr(I,j,k)
+      enddo
+
+      if (associated(OBC)) then ; if (OBC%OBC_pe) then
+        if (OBC%specified_u_BCs_exist_globally .or. OBC%open_u_BCs_exist_globally) then
+          do n=1,OBC%number_of_segments
+            ! segment=>OBC%segment(n)
+            if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
+            if (OBC%segment(n)%is_E_or_W) then
+              if (j>=OBC%segment(n)%HI%jsd .and. j<=OBC%segment(n)%HI%jed) then
+                I = OBC%segment(n)%HI%IsdB
+                ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
+                ! Now changing to simply fixed inflows.
+                if ((uhr(I,j,k) > 0.0) .and. (OBC%segment(n)%direction == OBC_DIRECTION_W) .or. &
+                    (uhr(I,j,k) < 0.0) .and. (OBC%segment(n)%direction == OBC_DIRECTION_E)) then
+                  uhh(I) = uhr(I,j,k)
+                  ! should the reservoir evolve for this case Kate ?? - Nope
+                  do concurrent (m=1:OBC%segment(n)%tr_Reg%ntseg)
+                    ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                    if (advect_this_tracer(ntr_id)) then
+                      flux_x(I,j,ntr_id,kk) = uhh(I) &
+                          * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)
+                    endif
+                  enddo
+                endif
+              endif
+            endif
+          enddo
         endif
-        CFL(I) = uhh(I) / (hprev(i,j,k))  ! CFL is positive
-      endif
-    enddo
 
-    do m=1,ntr
+        if (OBC%open_u_BCs_exist_globally) then
+          do n=1,OBC%number_of_segments
+            ! segment=>OBC%segment(n)
+            I = OBC%segment(n)%HI%IsdB
+            if (OBC%segment(n)%is_E_or_W .and. (j >= OBC%segment(n)%HI%jsd .and. j<= OBC%segment(n)%HI%jed)) then
+              if (OBC%segment(n)%specified) cycle
+              if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
 
-      if ((advect_schemes(m) == ADVECT_PPM) .or. (advect_schemes(m) == ADVECT_PPMH3)) then
-        do I=is-1,ie
-          ! centre cell depending on upstream direction
-          if (uhh(I) >= 0.0) then
-            i_up = i
-          else
-            i_up = i+1
-          endif
-
-          ! Implementation of PPM-H3
-          Tp = T_tmp(i_up+1,m) ; Tc = T_tmp(i_up,m) ; Tm = T_tmp(i_up-1,m)
-
-          if (advect_schemes(m) == ADVECT_PPMH3) then
-            aL = ( 5.*Tc + ( 2.*Tm - Tp ) )/6. ! H3 estimate
-            aL = max( min(Tc,Tm), aL) ; aL = min( max(Tc,Tm), aL) ! Bound
-            aR = ( 5.*Tc + ( 2.*Tp - Tm ) )/6. ! H3 estimate
-            aR = max( min(Tc,Tp), aR) ; aR = min( max(Tc,Tp), aR) ! Bound
-          else
-            aL = 0.5 * ((Tm + Tc) + (slope_x(i_up-1,m) - slope_x(i_up,m)) / 3.)
-            aR = 0.5 * ((Tc + Tp) + (slope_x(i_up,m) - slope_x(i_up+1,m)) / 3.)
-          endif
-
-          dA = aR - aL ; mA = 0.5*( aR + aL )
-          if (G%mask2dCu(I_up,j)*G%mask2dCu(I_up-1,j)*(Tp-Tc)*(Tc-Tm) <= 0.) then
-            aL = Tc ; aR = Tc ! PCM for local extrema and boundary cells
-          elseif ( dA*(Tc-mA) > (dA*dA)/6. ) then
-            aL = (3.*Tc) - 2.*aR
-          elseif ( dA*(Tc-mA) < - (dA*dA)/6. ) then
-            aR = (3.*Tc) - 2.*aL
-          endif
-
-          a6 = 6.*Tc - 3. * (aR + aL) ! Curvature
-
-          if (uhh(I) >= 0.0) then
-            flux_x(I,j,m) = uhh(I)*( aR - 0.5 * CFL(I) * ( &
-                 ( aR - aL ) - a6 * ( 1. - 2./3. * CFL(I) ) ) )
-          else
-            flux_x(I,j,m) = uhh(I)*( aL + 0.5 * CFL(I) * ( &
-                 ( aR - aL ) + a6 * ( 1. - 2./3. * CFL(I) ) ) )
-          endif
-        enddo
-      else ! PLM
-        do I=is-1,ie
-          if (uhh(I) >= 0.0) then
-            ! Indirect implementation of PLM
-           !aL = Tr(m)%t(i,j,k) - 0.5 * slope_x(i,m)
-           !aR = Tr(m)%t(i,j,k) + 0.5 * slope_x(i,m)
-           !flux_x(I,j,m) = uhh(I)*( aR - 0.5 * (aR-aL) * CFL(I) )
-            ! Alternative implementation of PLM
-            Tc = T_tmp(i,m)
-            flux_x(I,j,m) = uhh(I)*( Tc + 0.5 * slope_x(i,m) * ( 1. - CFL(I) ) )
-          else
-            ! Indirect implementation of PLM
-           !aL = Tr(m)%t(i+1,j,k) - 0.5 * slope_x(i+1,m)
-           !aR = Tr(m)%t(i+1,j,k) + 0.5 * slope_x(i+1,m)
-           !flux_x(I,j,m) = uhh(I)*( aL + 0.5 * (aR-aL) * CFL(I) )
-            ! Alternative implementation of PLM
-            Tc = T_tmp(i+1,m)
-            flux_x(I,j,m) = uhh(I)*( Tc - 0.5 * slope_x(i+1,m) * ( 1. - CFL(I) ) )
-          endif
-        enddo
-      endif ! usePPM
-    enddo
-
-    if (associated(OBC)) then ; if (OBC%OBC_pe) then
-      if (OBC%specified_u_BCs_exist_globally .or. OBC%open_u_BCs_exist_globally) then
-        do n=1,OBC%number_of_segments
-          segment=>OBC%segment(n)
-          if (.not. associated(segment%tr_Reg)) cycle
-          if (segment%is_E_or_W) then
-            if (j>=segment%HI%jsd .and. j<=segment%HI%jed) then
-              I = segment%HI%IsdB
               ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
-              ! Now changing to simply fixed inflows.
-              if ((uhr(I,j,k) > 0.0) .and. (segment%direction == OBC_DIRECTION_W) .or. &
-                  (uhr(I,j,k) < 0.0) .and. (segment%direction == OBC_DIRECTION_E)) then
+              if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
+                  (uhr(I,j,k) < 0.0) .and. (G%mask2dT(i+1,j) < 0.5)) then
                 uhh(I) = uhr(I,j,k)
-              ! should the reservoir evolve for this case Kate ?? - Nope
-                do m=1,segment%tr_Reg%ntseg
-                  ntr_id = segment%tr_reg%Tr(m)%ntr_index
-                  if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                    flux_x(I,j,ntr_id) = uhh(I)*segment%tr_Reg%Tr(m)%tres(I,j,k)
-                  else ; flux_x(I,j,ntr_id) = uhh(I)*segment%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
+                do concurrent (m=1:OBC%segment(n)%tr_Reg%ntseg)
+                  ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                  if (advect_this_tracer(ntr_id)) then
+                    flux_x(I,j,ntr_id,kk) = uhh(I) &
+                        * OBC%segment(n)%tr_Reg%Tr(m)%tres(I,j,k)
+                  endif
                 enddo
               endif
             endif
-          endif
-        enddo
-      endif
-
-      if (OBC%open_u_BCs_exist_globally) then
-        do n=1,OBC%number_of_segments
-          segment=>OBC%segment(n)
-          I = segment%HI%IsdB
-          if (segment%is_E_or_W .and. (j >= segment%HI%jsd .and. j<= segment%HI%jed)) then
-            if (segment%specified) cycle
-            if (.not. associated(segment%tr_Reg)) cycle
-
-            ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
-            if ((uhr(I,j,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
-                (uhr(I,j,k) < 0.0) .and. (G%mask2dT(i+1,j) < 0.5)) then
-              uhh(I) = uhr(I,j,k)
-              do m=1,segment%tr_Reg%ntseg
-                ntr_id = segment%tr_reg%Tr(m)%ntr_index
-                if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                  flux_x(I,j,ntr_id) = uhh(I)*segment%tr_Reg%Tr(m)%tres(I,j,k)
-                else; flux_x(I,j,ntr_id) = uhh(I)*segment%tr_Reg%Tr(m)%OBC_inflow_conc; endif
-              enddo
-            endif
-          endif
-        enddo
-      endif
-    endif ; endif
-
-    ! Calculate new tracer concentration in each cell after accounting
-    ! for the i-direction fluxes.
-    do I=is-1,ie
-      uhr(I,j,k) = uhr(I,j,k) - uhh(I)
-      if (abs(uhr(I,j,k)) < uh_neglect(I,j)) uhr(I,j,k) = 0.0
-    enddo
-    do i=is,ie
-      if ((uhh(I) /= 0.0) .or. (uhh(I-1) /= 0.0)) then
-        do_i(i,j) = .true.
-        hlst(i) = hprev(i,j,k)
-        hprev(i,j,k) = hprev(i,j,k) - (uhh(I) - uhh(I-1))
-        if (hprev(i,j,k) <= 0.0) then ; do_i(i,j) = .false.
-        elseif (hprev(i,j,k) < h_neglect*G%areaT(i,j)) then
-          hlst(i) = hlst(i) + (h_neglect*G%areaT(i,j) - hprev(i,j,k))
-          Ihnew(i) = 1.0 / (h_neglect*G%areaT(i,j))
-        else ;  Ihnew(i) = 1.0 / hprev(i,j,k) ; endif
-      else
-        do_i(i,j) = .false.
-      endif
-    enddo
-
-    ! Update do_i so that nothing changes outside of the OBC (problem for interior OBCs only)
-    if (associated(OBC)) then
-      if ((.not.OBC%exterior_OBC_bug) .and. (OBC%OBC_pe)) then
-        if (OBC%specified_u_BCs_exist_globally .or. OBC%open_u_BCs_exist_globally) then
-          do i=is,ie-1
-            if (OBC%segnum_u(I,j) > 0) do_i(i+1,j) = .false.  ! OBC_DIRECTION_E
-            if (OBC%segnum_u(I,j) < 0) do_i(i,j) = .false.    ! OBC_DIRECTION_W
           enddo
         endif
-      endif
-    endif
+      endif ; endif
 
-    ! update tracer concentration from i-flux and save some diagnostics
-    do m=1,ntr
-
-      ! update tracer
-      do i=is,ie
-        if (do_i(i,j)) then
-          if (Ihnew(i) > 0.0) then
-            Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) - &
-                              (flux_x(I,j,m) - flux_x(I-1,j,m))) * Ihnew(i)
-          endif
+      ! Calculate new tracer concentration in each cell after accounting
+      ! for the i-direction fluxes.
+      do concurrent (I=is-1:ie)
+        uhr(I,j,k) = uhr(I,j,k) - uhh(I)
+        if (abs(uhr(I,j,k)) < uh_neglect(I,j)) uhr(I,j,k) = 0.0
+      enddo
+      do concurrent (i=is:ie)
+        if ((uhh(I) /= 0.0) .or. (uhh(I-1) /= 0.0)) then
+          do_i(i) = .true.
+          hlst(i) = hprev(i,j,k)
+          hprev(i,j,k) = hprev(i,j,k) - (uhh(I) - uhh(I-1))
+          if (hprev(i,j,k) <= 0.0) then ; do_i(i) = .false.
+          elseif (hprev(i,j,k) < h_neglect*G%areaT(i,j)) then
+            hlst(i) = hlst(i) + (h_neglect*G%areaT(i,j) - hprev(i,j,k))
+            Ihnew(i) = 1.0 / (h_neglect*G%areaT(i,j))
+          else ;  Ihnew(i) = 1.0 / hprev(i,j,k) ; endif
+        else
+          do_i(i) = .false.
         endif
       enddo
 
-      ! diagnostics
-      if (associated(Tr(m)%ad_x)) then ; do I=is-1,ie ; if (do_i(i,j) .or. do_i(i+1,j)) then
-        Tr(m)%ad_x(I,j,k) = Tr(m)%ad_x(I,j,k) + flux_x(I,j,m)*Idt
-      endif ; enddo ; endif
-
-      ! diagnose convergence of flux_x (do not use the Ihnew(i) part of the logic).
-      ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
-      if (associated(Tr(m)%advection_xy)) then
-        do i=is,ie ; if (do_i(i,j)) then
-          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
-                                          (flux_x(I,j,m) - flux_x(I-1,j,m)) * &
-                                          Idt * G%IareaT(i,j)
-        endif ; enddo
+      ! Update do_i so that nothing changes outside of the OBC (problem for interior OBCs only)
+      if (associated(OBC)) then
+        if (.not.OBC%exterior_OBC_bug .and. OBC%OBC_pe &
+            .and. (OBC%specified_u_BCs_exist_globally .or. OBC%open_u_BCs_exist_globally)) then
+          ! OBC_DIRECTION_E / OBC_DIRECTION_W on the west / east edge
+          do concurrent (i=is:ie, OBC%segnum_u(I-1,j) > 0 .or. OBC%segnum_u(I,j) < 0)
+            do_i(i) = .false.
+          enddo
+        endif
       endif
 
-    enddo
+      ! update tracer concentration from i-flux and save some diagnostics
+      do concurrent (m=1:ntr, advect_this_tracer(m))
+        ! Update tracer
+        if (flux_type == 0) then ! Only update tracer if using residual flux
+          do concurrent (i=is:ie)
+            if (do_i(i)) then
+              if (Ihnew(i) > 0.0) then
+                Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) &
+                    - (flux_x(I,j,m,kk) - flux_x(I-1,j,m,kk))) * Ihnew(i)
+              endif
+            endif
+          enddo
+        endif
 
-  endif ; enddo ! End of j-loop.
+        ! Diagnostics
+        if (flux_type == 0) then
+          if (associated(Tr(m)%ad_x)) then
+            do concurrent (I=is-1:ie)
+              Tr(m)%ad_x(I,j,k) = Tr(m)%ad_x(I,j,k) + flux_x(I,j,m,kk) * Idt
+            enddo
+          endif
+
+          ! diagnose convergence of flux_x (do not use the Ihnew(i) part of the logic).
+          ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
+          if (associated(Tr(m)%advection_xy)) then
+            do concurrent (i=is:ie, do_i(i))
+              Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) &
+                  - (flux_x(I,j,m,kk) - flux_x(I-1,j,m,kk)) * Idt * G%IareaT(i,j)
+            enddo
+          endif
+        elseif (flux_type == 1) then
+          if (associated(Tr(m)%ad_x_resolved)) then
+            do concurrent (I=is-1:ie)
+              Tr(m)%ad_x_resolved(I,j,k) = Tr(m)%ad_x_resolved(I,j,k) &
+                  + flux_x(I,j,m,kk) * Idt
+            enddo
+          endif
+        elseif (flux_type == 2) then
+          if (associated(Tr(m)%ad_x_param)) then
+            do concurrent (I=is-1:ie)
+              Tr(m)%ad_x_param(I,j,k) = Tr(m)%ad_x_param(I,j,k) + flux_x(I,j,m,kk)*Idt
+            enddo
+          endif
+        endif
+      enddo
+    endif
+  enddo ; enddo ! End of the k- and j-loops.
 
   ! Do user controlled underflow of the tracer concentrations.
-  do m=1,ntr ; if (Tr(m)%conc_underflow > 0.0) then
-    do j=js,je ; do i=is,ie
-      if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
-    enddo ; enddo
-  endif ; enddo
+  if (flux_type == 0) then
+    ! Only update tracer if using residual flux
+    do concurrent (m=1:ntr, kk=1:kke, &
+                   (domore_k(ksb + kk - 1) > 0) .and. (Tr(m)%conc_underflow > 0.0)) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      do concurrent (j=js:je, i=is:ie)
+        if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
+      enddo
+    enddo
+  endif
 
-  ! compute ad2d_x diagnostic outside above j-loop so as to make the summation ordered when OMP is active.
+  if (flux_type == 0) then
+    do m=1,ntr ; if (associated(Tr(m)%ad2d_x)) then
+      ! The layers of the block are added in order, as if they were handled one at a time.
+      do concurrent (j=js:je, I=is-1:ie) DO_LOCALITY(local(kk))
+        do kk=1,kke
+          if (domore_u_initial(j,kk)) &
+            Tr(m)%ad2d_x(I,j) = Tr(m)%ad2d_x(I,j) + flux_x(I,j,m,kk) * Idt
+        enddo
+      enddo
+    endif ; enddo ! End of m-loop.
+  endif
 
-  !$OMP ordered
-  do m=1,ntr ; if (associated(Tr(m)%ad2d_x)) then
-    do j=js,je ; if (domore_u_initial(j,k)) then
-      do I=is-1,ie ; if (do_i(i,j) .or. do_i(i+1,j)) then
-        Tr(m)%ad2d_x(I,j) = Tr(m)%ad2d_x(I,j) + flux_x(I,j,m)*Idt
-      endif ; enddo
-    endif ; enddo
-  endif ; enddo ! End of m-loop.
-  !$OMP end ordered
-
+  !$omp target exit data &
+  !$omp   map(release: slope_x, T_tmp, uhh, CFL, hlst, Ihnew, do_i, flux_x, domore_u_initial)
 end subroutine advect_x
 
 !> This subroutine does 1-d flux-form advection using a monotonic piecewise
-!! linear scheme.
-subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
-                    is, ie, js, je, k, G, GV, US, advect_schemes)
+!! linear scheme.  The layers ksb to keb are processed in one call.
+subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, domore_k, ntr, Idt, &
+                    is, ie, js, je, ksb, keb, nkk, G, GV, US, flux_type, advect_this_tracer, &
+                    advect_schemes)
   type(ocean_grid_type),                     intent(inout) :: G    !< The ocean's grid structure
   type(verticalGrid_type),                   intent(in)    :: GV   !< The ocean's vertical grid structure
   integer,                                   intent(in)    :: ntr !< The number of tracers
@@ -769,23 +1017,33 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   type(ocean_OBC_type),                      pointer       :: OBC !< specifies whether, where, and what OBCs are used
   logical, dimension(SZJB_(G),SZK_(GV)),     intent(inout) :: domore_v !< If true, there is more advection to be
                                                                   !! done in this v-row
+  integer, dimension(SZK_(GV)),              intent(in)    :: domore_k !< If positive, there is more advection to be
+                                                                  !! done in this layer [nondim]
   real,                                      intent(in)    :: Idt !< The inverse of dt [T-1 ~> s-1]
   integer,                                   intent(in)    :: is  !< The starting tracer i-index to work on
   integer,                                   intent(in)    :: ie  !< The ending tracer i-index to work on
   integer,                                   intent(in)    :: js  !< The starting tracer j-index to work on
   integer,                                   intent(in)    :: je  !< The ending tracer j-index to work on
-  integer,                                   intent(in)    :: k   !< The k-level to work on
+  integer,                                   intent(in)    :: ksb     !< The first k-level of the block to work on
+  integer,                                   intent(in)    :: keb     !< The last k-level of the block to work on
+  integer,                                   intent(in)    :: nkk     !< The k block size that sizes the work arrays
+                                                                  !! [nondim]
   type(unit_scale_type),                     intent(in)    :: US  !< A dimensional unit scaling type
+  integer,                                   intent(in)    :: flux_type !< Indicates whether uhtr, vhtr are the flux
+                                                                  !! due to the residual (= 0), resolved (= 1),
+                                                                  !! or parameterized (= 2) flow
+  logical, dimension(ntr),                   intent(in)    :: advect_this_tracer !< If true, advect this tracer
   integer, dimension(ntr),                   intent(in)    :: advect_schemes !< list of advection schemes to use
 
-  real, dimension(SZI_(G),ntr,SZJ_(G)) :: &
-    slope_y                     ! The concentration slope per grid point [conc].
-  real, dimension(SZI_(G),ntr,SZJB_(G)) :: &
-    flux_y                      ! The tracer flux across a boundary [H L2 conc ~> m3 conc or kg conc].
-  real, dimension(SZI_(G),ntr,SZJB_(G)) :: &
-    T_tmp               ! The copy of the tracer concentration at constant i,k [conc].
-  real :: vhh(SZI_(G),SZJB_(G)) ! The meridional flux that occurs during the
-                                ! current iteration [H L2 ~> m3 or kg].
+  real, dimension(SZI_(G),ntr,SZJ_(G),nkk) :: &
+    slope_y                     ! The concentration slope per grid point in each layer of the k block [conc].
+  real, dimension(SZI_(G),ntr,SZJB_(G),nkk) :: &
+    flux_y                      ! The tracer flux across a boundary in each layer of the k block
+                                ! [H L2 conc ~> m3 conc or kg conc].
+  real, dimension(SZI_(G),ntr,SZJB_(G),nkk) :: &
+    T_tmp               ! The copy of the tracer concentration at constant i,k in each layer of the k block [conc].
+  real :: vhh(SZI_(G),SZJB_(G),nkk)     ! The meridional flux that occurs during the current iteration
+                                ! in each layer of the k block [H L2 ~> m3 or kg].
   real :: hup, hlos             ! hup is the upwind volume, hlos is the
                                 ! part of that volume that might be lost
                                 ! due to advection out the other side of
@@ -808,12 +1066,15 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   real :: dA            ! Difference between the reconstruction tracer edge values [conc]
   real :: mA            ! Average of the reconstruction tracer edge values [conc]
   real :: a6            ! Curvature of the reconstruction tracer values [conc]
-  logical :: do_j_tr(SZJ_(G))   ! If true, calculate the tracer profiles.
-  logical :: do_i(SZI_(G), SZJ_(G))     ! If true, work on given points.
+  logical :: do_j_tr(SZJ_(G),nkk)     ! If true, calculate the tracer profiles in each layer of the k block.
+  logical :: do_i(SZI_(G))     ! If true, work on given points in each row.
   logical :: usePLMslope
-  integer :: i, j, j2, m, n, j_up, stencil, ntr_id
+  integer :: i, j, j2, k, kk, kke, m, n, j_up, stencil, ntr_id
   type(OBC_segment_type), pointer :: segment=>NULL()
-  logical :: domore_v_initial(SZJB_(G)) ! Initial state of domore_v
+  logical :: domore_v_initial(SZJB_(G),nkk)     ! Initial state of domore_v in each layer of the k block.
+  logical :: domore_v_jk ! A flag that indicates whether more advection is needed in this v-row.
+
+  kke = keb - ksb + 1
 
   usePLMslope = .false.
   ! stencil for calculating slope values
@@ -828,6 +1089,8 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   tiny_h = tiny(min_h)
   h_neglect = GV%H_subroundoff
 
+  !$omp target enter data map(alloc: vhh, T_tmp, slope_y, flux_y, domore_v_initial, do_j_tr, do_i)
+
   ! We conditionally perform work on tracer points: calculating the PLM slope,
   ! and updating tracer concentration within a cell
   ! this depends on whether there is a flux which would affect this tracer point,
@@ -838,326 +1101,370 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   ! Note: this does lead to unnecessary work in updating tracer concentrations,
   ! since that doesn't need a wider stencil with the PPM advection scheme, but
   ! this would require an additional loop, etc.
-  do_j_tr(:) = .false.
-  do J=js-1,je
-    if (domore_v(J,k)) then ; do j2=1-stencil,stencil ; do_j_tr(j+j2) = .true. ; enddo ; endif
+  do concurrent (kk=1:kke, j=SZJ_(G)) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    do_j_tr(j,kk) = .false.
   enddo
-  domore_v_initial(:) = domore_v(:,k)
+  do concurrent (kk=1:kke, J=js-1:je, (domore_k(ksb + kk - 1) > 0) .and. domore_v(J,ksb + kk - 1)) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    do concurrent (j2=1-stencil:stencil)
+      do_j_tr(j+j2,kk) = .true.
+    enddo
+  enddo
+  ! This excludes the layers that need no more work, so it selects the rows that are worked on.
+  do concurrent (kk=1:kke, j=SZJB_(G)) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    domore_v_initial(j,kk) = (domore_k(k) > 0) .and. domore_v(j,k)
+  enddo
 
   ! Calculate the j-direction profiles (slopes) of each tracer that
   ! is being advected.
   if (usePLMslope) then
-    do j=js-stencil,je+stencil ; if (do_j_tr(j)) then ; do m=1,ntr ; do i=is,ie
-      !if (ABS(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k)) < &
-      !    ABS(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k))) then
-      !  maxslope = 4.0*(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k))
-      !else
-      !  maxslope = 4.0*(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k))
-      !endif
-      !if ((Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k))*(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k)) < 0.0) then
-      !  slope_y(i,m,j) = 0.0
-      !elseif (ABS(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j-1,k))<ABS(maxslope)) then
-      !  slope_y(i,m,j) = G%mask2dCv(i,J) * G%mask2dCv(i,J-1) * &
-      !                 0.5*(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j-1,k))
-      !else
-      !  slope_y(i,m,j) = G%mask2dCv(i,J) * G%mask2dCv(i,J-1) * 0.5*maxslope
-      !endif
-      Tp = Tr(m)%t(i,j+1,k) ; Tc = Tr(m)%t(i,j,k) ; Tm = Tr(m)%t(i,j-1,k)
-      dMx = max( Tp, Tc, Tm ) - Tc
-      dMn = Tc - min( Tp, Tc, Tm )
-      slope_y(i,m,j) = G%mask2dCv(i,J)*G%mask2dCv(i,J-1) * &
-           sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
-    enddo ; enddo ; endif ; enddo ! End of i-, m-, & j- loops.
+    do concurrent (kk=1:kke, j=js-stencil:je+stencil, do_j_tr(j,kk))
+      do concurrent (m=1:ntr, i=is:ie, advect_this_tracer(m)) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        !if (ABS(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k)) < &
+        !    ABS(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k))) then
+        !  maxslope = 4.0*(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k))
+        !else
+        !  maxslope = 4.0*(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k))
+        !endif
+        !if ((Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j,k))*(Tr(m)%t(i,j,k)-Tr(m)%t(i,j-1,k)) < 0.0) then
+        !  slope_y(i,m,j) = 0.0
+        !elseif (ABS(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j-1,k))<ABS(maxslope)) then
+        !  slope_y(i,m,j) = G%mask2dCv(i,J) * G%mask2dCv(i,J-1) * &
+        !                 0.5*(Tr(m)%t(i,j+1,k)-Tr(m)%t(i,j-1,k))
+        !else
+        !  slope_y(i,m,j) = G%mask2dCv(i,J) * G%mask2dCv(i,J-1) * 0.5*maxslope
+        !endif
+        Tp = Tr(m)%t(i,j+1,k) ; Tc = Tr(m)%t(i,j,k) ; Tm = Tr(m)%t(i,j-1,k)
+        dMx = max(Tp, Tc, Tm) - Tc
+        dMn = Tc - min(Tp, Tc, Tm)
+        slope_y(i,m,j,kk) = G%mask2dCv(i,J) * G%mask2dCv(i,J-1) &
+            * sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
+      enddo
+    enddo ! End of i-, m-, j-, & k- loops.
   endif ! usePLMslope
-
 
   ! make a copy of the tracers in case values need to be overridden for OBCs
 
-  do j=G%jsd,G%jed ; do m=1,ntr ; do i=G%isd,G%ied
-    T_tmp(i,m,j) = Tr(m)%t(i,j,k)
-  enddo ; enddo ; enddo
+  do concurrent (kk=1:kke, j=G%jsd:G%jed, m=1:ntr, i=G%isd:G%ied, &
+                 (domore_k(ksb + kk - 1) > 0) .and. advect_this_tracer(m)) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    T_tmp(i,m,j,kk) = Tr(m)%t(i,j,k)
+  enddo
 
   ! loop through open boundaries and recalculate flux terms
   if (associated(OBC)) then ; if (OBC%OBC_pe) then
-    do n=1,OBC%number_of_segments
-      segment=>OBC%segment(n)
-      if (.not. associated(segment%tr_Reg)) cycle
-      do i=is,ie
-        if (segment%is_N_or_S) then
-          if (i>=segment%HI%isd .and. i<=segment%HI%ied) then
-            J = segment%HI%JsdB
-            do m = 1,segment%tr_Reg%ntseg ! replace tracers with OBC values
-              ntr_id = segment%tr_reg%Tr(m)%ntr_index
-              if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                if (segment%direction == OBC_DIRECTION_S) then
-                  T_tmp(i,ntr_id,j) = segment%tr_Reg%Tr(m)%tres(i,j,k)
-                else
-                  T_tmp(i,ntr_id,j+1) = segment%tr_Reg%Tr(m)%tres(i,j,k)
-                endif
-              else
-                if (segment%direction == OBC_DIRECTION_S) then
-                  T_tmp(i,ntr_id,j) = segment%tr_Reg%Tr(m)%OBC_inflow_conc
-                else
-                  T_tmp(i,ntr_id,j+1) = segment%tr_Reg%Tr(m)%OBC_inflow_conc
-                endif
-              endif
-            enddo
-            do m = 1,ntr ! Apply update tracer values for slope calculation
-              do j=segment%HI%JsdB-1,segment%HI%JsdB+1
-                Tp = T_tmp(i,m,j+1) ; Tc = T_tmp(i,m,j) ; Tm = T_tmp(i,m,j-1)
-                dMx = max( Tp, Tc, Tm ) - Tc
-                dMn= Tc - min( Tp, Tc, Tm )
-                slope_y(i,m,j) = G%mask2dCv(i,J)*G%mask2dCv(i,J-1) * &
-                     sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
+    do kk=1,kke ; if (domore_k(ksb + kk - 1) > 0) then
+      k = ksb + kk - 1
+      do n=1,OBC%number_of_segments
+        ! segment=>OBC%segment(n)
+        if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
+        do i=is,ie
+          if (OBC%segment(n)%is_N_or_S) then
+            if (i>=OBC%segment(n)%HI%isd .and. i<=OBC%segment(n)%HI%ied) then
+              J = OBC%segment(n)%HI%JsdB
+              do m = 1,OBC%segment(n)%tr_Reg%ntseg ! replace tracers with OBC values
+                ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                if (advect_this_tracer(ntr_id)) then
+                  if (OBC%segment(n)%direction == OBC_DIRECTION_S) then
+                    T_tmp(i,ntr_id,j,kk) = OBC%segment(n)%tr_Reg%Tr(m)%tres(i,j,k)
+                  else
+                    T_tmp(i,ntr_id,j+1,kk) = OBC%segment(n)%tr_Reg%Tr(m)%tres(i,j,k)
+                  endif
+                endif ! advect_this_tracer
               enddo
-            enddo
-          endif
-        endif ! is_N_S
-      enddo ! i-loop
-    enddo ! segment loop
+              do m = 1,ntr ! Apply update tracer values for slope calculation
+                if (advect_this_tracer(m)) then
+                  do j=OBC%segment(n)%HI%JsdB-1,OBC%segment(n)%HI%JsdB+1
+                    Tp = T_tmp(i,m,j+1,kk) ; Tc = T_tmp(i,m,j,kk) ; Tm = T_tmp(i,m,j-1,kk)
+                    dMx = max( Tp, Tc, Tm ) - Tc
+                    dMn= Tc - min( Tp, Tc, Tm )
+                    slope_y(i,m,j,kk) = G%mask2dCv(i,J)*G%mask2dCv(i,J-1) * &
+                         sign( min(0.5*abs(Tp-Tm), 2.0*dMx, 2.0*dMn), Tp-Tm )
+                  enddo
+                endif ! advect_this_tracer
+              enddo
+            endif
+          endif ! is_N_S
+        enddo ! i-loop
+      enddo ! segment loop
+    endif ; enddo
   endif ; endif
 
   ! Calculate the j-direction fluxes of each tracer, using as much
   ! the minimum of the remaining mass flux (vhr) and the half the mass
   ! in the cell plus whatever part of its half of the mass flux that
   ! the flux through the other side does not require.
-  do J=js-1,je ; if (domore_v(J,k)) then
-    domore_v(J,k) = .false.
+  !$omp target teams loop collapse(2) &
+  !$omp   private(CFL, Ihnew, hup, hlos, j_up, Tp, Tc, Tm, i, m, aL, aR, dA, mA, a6, n, ntr_id, &
+  !$omp     domore_v_jk, k)
+  do kk=1,kke ; do J=js-1,je
+    k = ksb + kk - 1
+    if (domore_v_initial(J,kk)) then
+      domore_v_jk = .false.
 
-    do i=is,ie
-      if ((vhr(i,J,k) == 0.0) .or. &
-          ((vhr(i,J,k) < 0.0) .and. (hprev(i,j+1,k) <= tiny_h)) .or. &
-          ((vhr(i,J,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
-        vhh(i,J) = 0.0
-        CFL(i) = 0.0
-      elseif (vhr(i,J,k) < 0.0) then
-        hup = hprev(i,j+1,k) - G%areaT(i,j+1)*min_h
-        hlos = MAX(0.0, vhr(i,J+1,k))
-        if ((((hup - hlos) + vhr(i,J,k)) < 0.0) .and. &
-            ((0.5*hup + vhr(i,J,k)) < 0.0)) then
-          vhh(i,J) = MIN(-0.5*hup, -hup+hlos, 0.0)
-          domore_v(J,k) = .true.
+      do concurrent (i=is:ie) DO_LOCALITY(reduce(.or.:domore_v_jk))
+        if ((vhr(i,J,k) == 0.0) .or. &
+            ((vhr(i,J,k) < 0.0) .and. (hprev(i,j+1,k) <= tiny_h)) .or. &
+            ((vhr(i,J,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
+          vhh(i,J,kk) = 0.0
+          CFL(i) = 0.0
+        elseif (vhr(i,J,k) < 0.0) then
+          hup = hprev(i,j+1,k) - G%areaT(i,j+1)*min_h
+          hlos = MAX(0.0, vhr(i,J+1,k))
+          if ((((hup - hlos) + vhr(i,J,k)) < 0.0) .and. &
+              ((0.5*hup + vhr(i,J,k)) < 0.0)) then
+            vhh(i,J,kk) = MIN(-0.5*hup, -hup+hlos, 0.0)
+            domore_v_jk = .true.
+          else
+            vhh(i,J,kk) = vhr(i,J,k)
+          endif
+          CFL(i) = - vhh(i,J,kk) / hprev(i,j+1,k)  ! CFL is positive
         else
-          vhh(i,J) = vhr(i,J,k)
+          hup = hprev(i,j,k) - G%areaT(i,j)*min_h
+          hlos = MAX(0.0, -vhr(i,J-1,k))
+          if ((((hup - hlos) - vhr(i,J,k)) < 0.0) .and. &
+              ((0.5*hup - vhr(i,J,k)) < 0.0)) then
+            vhh(i,J,kk) = MAX(0.5*hup, hup-hlos, 0.0)
+            domore_v_jk = .true.
+          else
+            vhh(i,J,kk) = vhr(i,J,k)
+          endif
+          CFL(i) = vhh(i,J,kk) / hprev(i,j,k)  ! CFL is positive
         endif
-        CFL(i) = - vhh(i,J) / hprev(i,j+1,k)  ! CFL is positive
-      else
-        hup = hprev(i,j,k) - G%areaT(i,j)*min_h
-        hlos = MAX(0.0, -vhr(i,J-1,k))
-        if ((((hup - hlos) - vhr(i,J,k)) < 0.0) .and. &
-            ((0.5*hup - vhr(i,J,k)) < 0.0)) then
-          vhh(i,J) = MAX(0.5*hup, hup-hlos, 0.0)
-          domore_v(J,k) = .true.
-        else
-          vhh(i,J) = vhr(i,J,k)
+      enddo
+
+      domore_v(j,k) = domore_v_jk
+
+      do concurrent (m=1:ntr, advect_this_tracer(m))
+        if (advect_schemes(m) == ADVECT_PPM .or. advect_schemes(m) == ADVECT_PPMH3) then
+          do concurrent (i=is:ie)
+            ! centre cell depending on upstream direction
+            if (vhh(i,J,kk) >= 0.0) then
+              j_up = j
+            else
+              j_up = j + 1
+            endif
+
+            ! Implementation of PPM-H3
+            Tp = T_tmp(i,m,j_up+1,kk) ; Tc = T_tmp(i,m,j_up,kk) ; Tm = T_tmp(i,m,j_up-1,kk)
+
+            if (advect_schemes(m) == ADVECT_PPMH3) then
+              aL = ( 5.*Tc + ( 2.*Tm - Tp ) )/6. ! H3 estimate
+              aL = max( min(Tc,Tm), aL) ; aL = min( max(Tc,Tm), aL) ! Bound
+              aR = ( 5.*Tc + ( 2.*Tp - Tm ) )/6. ! H3 estimate
+              aR = max( min(Tc,Tp), aR) ; aR = min( max(Tc,Tp), aR) ! Bound
+            else
+              aL = 0.5 * ((Tm + Tc) + (slope_y(i,m,j_up-1,kk) - slope_y(i,m,j_up,kk)) / 3.)
+              aR = 0.5 * ((Tc + Tp) + (slope_y(i,m,j_up,kk) - slope_y(i,m,j_up+1,kk)) / 3.)
+            endif
+
+            dA = aR - aL ; mA = 0.5*( aR + aL )
+            if (G%mask2dCv(i,J_up)*G%mask2dCv(i,J_up-1)*(Tp-Tc)*(Tc-Tm) <= 0.) then
+              aL = Tc ; aR = Tc ! PCM for local extrema and boundary cells
+            elseif ( dA*(Tc-mA) > (dA*dA)/6. ) then
+              aL = (3.*Tc) - 2.*aR
+            elseif ( dA*(Tc-mA) < - (dA*dA)/6. ) then
+              aR = (3.*Tc) - 2.*aL
+            endif
+
+            a6 = 6.*Tc - 3. * (aR + aL) ! Curvature
+
+            if (vhh(i,J,kk) >= 0.0) then
+              flux_y(i,m,J,kk) = vhh(i,J,kk)*( aR - 0.5 * CFL(i) * ( &
+                   ( aR - aL ) - a6 * ( 1. - 2./3. * CFL(I) ) ) )
+            else
+              flux_y(i,m,J,kk) = vhh(i,J,kk)*( aL + 0.5 * CFL(i) * ( &
+                   ( aR - aL ) + a6 * ( 1. - 2./3. * CFL(I) ) ) )
+            endif
+          enddo
+        else ! PLM
+          do concurrent (i=is:ie)
+            if (vhh(i,J,kk) >= 0.0) then
+              ! Indirect implementation of PLM
+              !aL = Tr(m)%t(i,j,k) - 0.5 * slope_y(i,m,j)
+              !aR = Tr(m)%t(i,j,k) + 0.5 * slope_y(i,m,j)
+              !flux_y(i,m,J) = vhh(i,J)*( aR - 0.5 * (aR-aL) * CFL(i) )
+              ! Alternative implementation of PLM
+              Tc = T_tmp(i,m,j,kk)
+              flux_y(i,m,J,kk) = vhh(i,J,kk)*( Tc + 0.5 * slope_y(i,m,j,kk) * ( 1. - CFL(i) ) )
+            else
+              ! Indirect implementation of PLM
+              !aL = Tr(m)%t(i,j+1,k) - 0.5 * slope_y(i,m,j+1)
+              !aR = Tr(m)%t(i,j+1,k) + 0.5 * slope_y(i,m,j+1)
+              !flux_y(i,m,J) = vhh(i,J)*( aL + 0.5 * (aR-aL) * CFL(i) )
+              ! Alternative implementation of PLM
+              Tc = T_tmp(i,m,j+1,kk)
+              flux_y(i,m,J,kk) = vhh(i,J,kk)*( Tc - 0.5 * slope_y(i,m,j+1,kk) * ( 1. - CFL(i) ) )
+            endif
+          enddo
+        endif ! usePPM
+      enddo
+
+      if (associated(OBC)) then ; if (OBC%OBC_pe) then
+        if (OBC%specified_v_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally) then
+          do n=1,OBC%number_of_segments
+            if (.not. OBC%segment(n)%specified) cycle
+            if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
+            if (OBC%segment(n)%is_N_or_S) then
+              if (J >= OBC%segment(n)%HI%JsdB .and. J<= OBC%segment(n)%HI%JedB) then
+                do i=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
+                  ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
+                  ! Now changing to simply fixed inflows.
+                  if ((vhr(i,J,k) > 0.0) .and. (OBC%segment(n)%direction == OBC_DIRECTION_S) .or. &
+                      (vhr(i,J,k) < 0.0) .and. (OBC%segment(n)%direction == OBC_DIRECTION_N)) then
+                    vhh(i,J,kk) = vhr(i,J,k)
+                    do m=1,OBC%segment(n)%tr_Reg%ntseg
+                      ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                      if (advect_this_tracer(ntr_id)) then
+                        flux_y(i,ntr_id,J,kk) = vhh(i,J,kk)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
+                      endif
+                    enddo
+                  endif
+                enddo
+              endif
+            endif
+          enddo
         endif
-        CFL(i) = vhh(i,J) / hprev(i,j,k)  ! CFL is positive
-      endif
-    enddo
 
-    do m=1,ntr
-
-      if ((advect_schemes(m) == ADVECT_PPM) .or. (advect_schemes(m) == ADVECT_PPMH3)) then
-        do i=is,ie
-          ! centre cell depending on upstream direction
-          if (vhh(i,J) >= 0.0) then
-            j_up = j
-          else
-            j_up = j + 1
-          endif
-
-          ! Implementation of PPM-H3
-          Tp = T_tmp(i,m,j_up+1) ; Tc = T_tmp(i,m,j_up) ; Tm = T_tmp(i,m,j_up-1)
-
-          if (advect_schemes(m) == ADVECT_PPMH3) then
-            aL = ( 5.*Tc + ( 2.*Tm - Tp ) )/6. ! H3 estimate
-            aL = max( min(Tc,Tm), aL) ; aL = min( max(Tc,Tm), aL) ! Bound
-            aR = ( 5.*Tc + ( 2.*Tp - Tm ) )/6. ! H3 estimate
-            aR = max( min(Tc,Tp), aR) ; aR = min( max(Tc,Tp), aR) ! Bound
-          else
-            aL = 0.5 * ((Tm + Tc) + (slope_y(i,m,j_up-1) - slope_y(i,m,j_up)) / 3.)
-            aR = 0.5 * ((Tc + Tp) + (slope_y(i,m,j_up) - slope_y(i,m,j_up+1)) / 3.)
-          endif
-
-          dA = aR - aL ; mA = 0.5*( aR + aL )
-          if (G%mask2dCv(i,J_up)*G%mask2dCv(i,J_up-1)*(Tp-Tc)*(Tc-Tm) <= 0.) then
-            aL = Tc ; aR = Tc ! PCM for local extrema and boundary cells
-          elseif ( dA*(Tc-mA) > (dA*dA)/6. ) then
-            aL = (3.*Tc) - 2.*aR
-          elseif ( dA*(Tc-mA) < - (dA*dA)/6. ) then
-            aR = (3.*Tc) - 2.*aL
-          endif
-
-          a6 = 6.*Tc - 3. * (aR + aL) ! Curvature
-
-          if (vhh(i,J) >= 0.0) then
-            flux_y(i,m,J) = vhh(i,J)*( aR - 0.5 * CFL(i) * ( &
-                 ( aR - aL ) - a6 * ( 1. - 2./3. * CFL(I) ) ) )
-          else
-            flux_y(i,m,J) = vhh(i,J)*( aL + 0.5 * CFL(i) * ( &
-                 ( aR - aL ) + a6 * ( 1. - 2./3. * CFL(I) ) ) )
-          endif
-        enddo
-      else ! PLM
-        do i=is,ie
-          if (vhh(i,J) >= 0.0) then
-            ! Indirect implementation of PLM
-            !aL = Tr(m)%t(i,j,k) - 0.5 * slope_y(i,m,j)
-            !aR = Tr(m)%t(i,j,k) + 0.5 * slope_y(i,m,j)
-            !flux_y(i,m,J) = vhh(i,J)*( aR - 0.5 * (aR-aL) * CFL(i) )
-            ! Alternative implementation of PLM
-            Tc = T_tmp(i,m,j)
-            flux_y(i,m,J) = vhh(i,J)*( Tc + 0.5 * slope_y(i,m,j) * ( 1. - CFL(i) ) )
-          else
-            ! Indirect implementation of PLM
-            !aL = Tr(m)%t(i,j+1,k) - 0.5 * slope_y(i,m,j+1)
-            !aR = Tr(m)%t(i,j+1,k) + 0.5 * slope_y(i,m,j+1)
-            !flux_y(i,m,J) = vhh(i,J)*( aL + 0.5 * (aR-aL) * CFL(i) )
-            ! Alternative implementation of PLM
-            Tc = T_tmp(i,m,j+1)
-            flux_y(i,m,J) = vhh(i,J)*( Tc - 0.5 * slope_y(i,m,j+1) * ( 1. - CFL(i) ) )
-          endif
-        enddo
-      endif ! usePPM
-    enddo
-
-    if (associated(OBC)) then ; if (OBC%OBC_pe) then
-      if (OBC%specified_v_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally) then
-        do n=1,OBC%number_of_segments
-          segment=>OBC%segment(n)
-          if (.not. segment%specified) cycle
-          if (.not. associated(segment%tr_Reg)) cycle
-          if (OBC%segment(n)%is_N_or_S) then
-            if (J >= segment%HI%JsdB .and. J<= segment%HI%JedB) then
-              do i=segment%HI%isd,segment%HI%ied
+        if (OBC%open_v_BCs_exist_globally) then
+          do n=1,OBC%number_of_segments
+            if (OBC%segment(n)%specified) cycle
+            if (.not. associated(OBC%segment(n)%tr_Reg)) cycle
+            if (OBC%segment(n)%is_N_or_S .and. (J >= OBC%segment(n)%HI%JsdB .and. J<= OBC%segment(n)%HI%JedB)) then
+              do i=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
                 ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
-                ! Now changing to simply fixed inflows.
-                if ((vhr(i,J,k) > 0.0) .and. (segment%direction == OBC_DIRECTION_S) .or. &
-                    (vhr(i,J,k) < 0.0) .and. (segment%direction == OBC_DIRECTION_N)) then
-                  vhh(i,J) = vhr(i,J,k)
-                  do m=1,segment%tr_Reg%ntseg
-                    ntr_id = segment%tr_reg%Tr(m)%ntr_index
-                    if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                      flux_y(i,ntr_id,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
-                    else
-                      flux_y(i,ntr_id,J) = vhh(i,J)*OBC%segment(n)%tr_Reg%Tr(m)%OBC_inflow_conc
+                if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
+                    (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
+                  vhh(i,J,kk) = vhr(i,J,k)
+                  do m=1,OBC%segment(n)%tr_Reg%ntseg
+                    ntr_id = OBC%segment(n)%tr_reg%Tr(m)%ntr_index
+                    if (advect_this_tracer(ntr_id)) then
+                      flux_y(i,ntr_id,J,kk) = vhh(i,J,kk) &
+                          * OBC%segment(n)%tr_Reg%Tr(m)%tres(i,J,k)
                     endif
                   enddo
                 endif
               enddo
             endif
-          endif
-        enddo
-      endif
+          enddo
+        endif
+      endif ; endif
 
-      if (OBC%open_v_BCs_exist_globally) then
-        do n=1,OBC%number_of_segments
-          segment=>OBC%segment(n)
-          if (segment%specified) cycle
-          if (.not. associated(segment%tr_Reg)) cycle
-          if (segment%is_N_or_S .and. (J >= segment%HI%JsdB .and. J<= segment%HI%JedB)) then
-            do i=segment%HI%isd,segment%HI%ied
-              ! Tracer fluxes are set to prescribed values only for inflows from masked areas.
-              if ((vhr(i,J,k) > 0.0) .and. (G%mask2dT(i,j) < 0.5) .or. &
-                  (vhr(i,J,k) < 0.0) .and. (G%mask2dT(i,j+1) < 0.5)) then
-                vhh(i,J) = vhr(i,J,k)
-                do m=1,segment%tr_Reg%ntseg
-                  ntr_id = segment%tr_reg%Tr(m)%ntr_index
-                  if (allocated(segment%tr_Reg%Tr(m)%tres)) then
-                    flux_y(i,ntr_id,J) = vhh(i,J)*segment%tr_Reg%Tr(m)%tres(i,J,k)
-                  else ; flux_y(i,ntr_id,J) = vhh(i,J)*segment%tr_Reg%Tr(m)%OBC_inflow_conc ; endif
-                enddo
-              endif
-            enddo
-          endif
-        enddo
-      endif
-    endif ; endif
+    else ! not domore_v.
+      do concurrent (i=is:ie)
+        vhh(i,J,kk) = 0.0
+      enddo
+      do concurrent (m=1:ntr, i=is:ie, advect_this_tracer(m))
+        flux_y(i,m,J,kk) = 0.0
+      enddo
+    endif
+  enddo ; enddo ! End of the k- and j-loops.
 
-  else ! not domore_v.
-    do i=is,ie ; vhh(i,J) = 0.0 ; enddo
-    do m=1,ntr ; do i=is,ie ; flux_y(i,m,J) = 0.0 ; enddo ; enddo
-  endif ; enddo ! End of j-loop
-
-  do J=js-1,je ; do i=is,ie
-    vhr(i,J,k) = vhr(i,J,k) - vhh(i,J)
+  do concurrent (kk=1:kke, J=js-1:je, i=is:ie, domore_k(ksb + kk - 1) > 0) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    vhr(i,J,k) = vhr(i,J,k) - vhh(i,J,kk)
     if (abs(vhr(i,J,k)) < vh_neglect(i,J)) vhr(i,J,k) = 0.0
-  enddo ; enddo
+  enddo
 
   ! Calculate new tracer concentration in each cell after accounting
   ! for the j-direction fluxes.
-  do j=js,je ; if (do_j_tr(j)) then
-    do i=is,ie
-      if ((vhh(i,J) /= 0.0) .or. (vhh(i,J-1) /= 0.0)) then
-        do_i(i,j) = .true.
-        hlst(i) = hprev(i,j,k)
-        hprev(i,j,k) = max(hprev(i,j,k) - (vhh(i,J) - vhh(i,J-1)), 0.0)
-        if (hprev(i,j,k) <= 0.0) then ; do_i(i,j) = .false.
-        elseif (hprev(i,j,k) < h_neglect*G%areaT(i,j)) then
-          hlst(i) = hlst(i) + (h_neglect*G%areaT(i,j) - hprev(i,j,k))
-          Ihnew(i) = 1.0 / (h_neglect*G%areaT(i,j))
-        else ;  Ihnew(i) = 1.0 / hprev(i,j,k) ; endif
-      else ; do_i(i,j) = .false. ; endif
-    enddo
+  !$omp target teams loop collapse(2) private(hlst, Ihnew, i, m, k, do_i)
+  do kk=1,kke ; do j=js,je
+    k = ksb + kk - 1
+    if (do_j_tr(j,kk)) then
+      do concurrent (i=is:ie)
+        if ((vhh(i,J,kk) /= 0.0) .or. (vhh(i,J-1,kk) /= 0.0)) then
+          do_i(i) = .true.
+          hlst(i) = hprev(i,j,k)
+          hprev(i,j,k) = max(hprev(i,j,k) - (vhh(i,J,kk) - vhh(i,J-1,kk)), 0.0)
+          if (hprev(i,j,k) <= 0.0) then ; do_i(i) = .false.
+          elseif (hprev(i,j,k) < h_neglect*G%areaT(i,j)) then
+            hlst(i) = hlst(i) + (h_neglect*G%areaT(i,j) - hprev(i,j,k))
+            Ihnew(i) = 1.0 / (h_neglect*G%areaT(i,j))
+          else ;  Ihnew(i) = 1.0 / hprev(i,j,k) ; endif
+        else ; do_i(i) = .false. ; endif
+      enddo
 
-    ! Update do_i so that nothing changes outside of the OBC (problem for interior OBCs only)
-    if (associated(OBC)) then
-      if ((OBC%exterior_OBC_bug .eqv. .false.) .and. (OBC%OBC_pe)) then
-        if (OBC%specified_v_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally) then
-          do i=is,ie
-            if (OBC%segnum_v(i,J-1) > 0) do_i(i,j) = .false.  ! OBC_DIRECTION_N
-            if (OBC%segnum_v(i,J) < 0) do_i(i,j) = .false.  ! OBC_DIRECTION_S
+      ! Update do_i so that nothing changes outside of the OBC (problem for interior OBCs only)
+      if (associated(OBC)) then
+        if (.not.OBC%exterior_OBC_bug .and. OBC%OBC_pe &
+            .and. (OBC%specified_v_BCs_exist_globally .or. OBC%open_v_BCs_exist_globally)) then
+          ! OBC_DIRECTION_N / OBC_DIRECTION_S on the south / north edge
+          do concurrent (i=is:ie, OBC%segnum_v(i,J-1) > 0 .or. OBC%segnum_v(i,J) < 0)
+            do_i(i) = .false.
           enddo
         endif
       endif
+
+      ! update tracer and save some diagnostics
+      do concurrent (m=1:ntr, advect_this_tracer(m))
+        if (flux_type == 0) then
+          do concurrent (i=is:ie, do_i(i))
+            Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) &
+                              - (flux_y(i,m,J,kk) - flux_y(i,m,J-1,kk))) * Ihnew(i)
+          enddo
+
+          ! diagnose convergence of flux_y and add to convergence of flux_x.
+          ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
+          if (associated(Tr(m)%advection_xy)) then
+            do concurrent (i=is:ie, do_i(i))
+              Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) &
+                  - (flux_y(i,m,J,kk) - flux_y(i,m,J-1,kk))* Idt * G%IareaT(i,j)
+            enddo
+          endif
+        endif
+      enddo
     endif
-
-    ! update tracer and save some diagnostics
-    do m=1,ntr
-      do i=is,ie ; if (do_i(i,j)) then
-        Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) - &
-                          (flux_y(i,m,J) - flux_y(i,m,J-1))) * Ihnew(i)
-      endif ; enddo
-
-      ! diagnose convergence of flux_y and add to convergence of flux_x.
-      ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
-      if (associated(Tr(m)%advection_xy)) then
-        do i=is,ie ; if (do_i(i,j)) then
-          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
-                                          (flux_y(i,m,J) - flux_y(i,m,J-1))* Idt * &
-                                          G%IareaT(i,j)
-        endif ; enddo
-      endif
-
-    enddo
-  endif ; enddo ! End of j-loop.
+  enddo ; enddo ! End of the k- and j-loops.
 
   ! Do user controlled underflow of the tracer concentrations.
-  do m=1,ntr ; if (Tr(m)%conc_underflow > 0.0) then
-    do j=js,je ; do i=is,ie
-      if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
-    enddo ; enddo
-  endif ; enddo
+  if (flux_type == 0) then ! Only update tracer if using residual flux
+    do concurrent (kk=1:kke, m=1:ntr, &
+                   (domore_k(ksb + kk - 1) > 0) .and. (Tr(m)%conc_underflow > 0.0)) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      do concurrent (j=js:je, i=is:ie, abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow)
+        Tr(m)%t(i,j,k) = 0.0
+      enddo
+    enddo
+  endif
 
-  ! compute ad_y and ad2d_y diagnostic outside above j-loop so as to make the summation ordered when OMP is active.
-  !$OMP ordered
-  do m=1,ntr ; if (associated(Tr(m)%ad_y)) then
-    do J=js-1,je ; if (domore_v_initial(J)) then
-      do i=is,ie ; if (do_i(i,j) .or. do_i(i,j+1)) then
-        Tr(m)%ad_y(i,J,k) = Tr(m)%ad_y(i,J,k) + flux_y(i,m,J)*Idt
-      endif ; enddo
+  if (flux_type == 0) then
+    do m=1,ntr ; if (associated(Tr(m)%ad_y)) then
+      do concurrent (kk=1:kke, J=js-1:je, i=is:ie, domore_v_initial(J,kk)) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        Tr(m)%ad_y(i,J,k) = Tr(m)%ad_y(i,J,k) + flux_y(i,m,J,kk)*Idt
+      enddo
     endif ; enddo
-  endif ; enddo ! End of m-loop.
 
-  do m=1,ntr ; if (associated(Tr(m)%ad2d_y)) then
-    do J=js-1,je ; if (domore_v_initial(J)) then
-      do i=is,ie ; if (do_i(i,j) .or. do_i(i,j+1)) then
-        Tr(m)%ad2d_y(i,J) = Tr(m)%ad2d_y(i,J) + flux_y(i,m,J)*Idt
-      endif ; enddo
+    do m=1,ntr ; if (associated(Tr(m)%ad2d_y)) then
+      ! The layers of the block are added in order, as if they were handled one at a time.
+      do concurrent (J=js-1:je, i=is:ie) DO_LOCALITY(local(kk))
+        do kk=1,kke
+          if (domore_v_initial(J,kk)) &
+            Tr(m)%ad2d_y(i,J) = Tr(m)%ad2d_y(i,J) + flux_y(i,m,J,kk)*Idt
+        enddo
+      enddo
     endif ; enddo
-  endif ; enddo ! End of m-loop.
-  !$OMP end ordered
+  elseif (flux_type == 1) then
+    do m=1,ntr ; if (associated(Tr(m)%ad_y_resolved)) then
+      do concurrent (kk=1:kke, J=js-1:je, i=is:ie, domore_v_initial(J,kk)) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        Tr(m)%ad_y_resolved(i,J,k) = Tr(m)%ad_y_resolved(i,J,k) + flux_y(i,m,J,kk)*Idt
+      enddo
+    endif ; enddo
+  elseif (flux_type == 2) then
+    do m=1,ntr ; if (associated(Tr(m)%ad_y_param)) then
+      do concurrent (kk=1:kke, J=js-1:je, i=is:ie, domore_v_initial(J,kk)) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        Tr(m)%ad_y_param(i,J,k) = Tr(m)%ad_y_param(i,J,k) + flux_y(i,m,J,kk)*Idt
+      enddo
+    endif ; enddo
+  endif
 
+  !$omp target exit data map(release: vhh, T_tmp, slope_y, flux_y, domore_v_initial, do_j_tr, do_i)
 end subroutine advect_y
 
 !> Initialize lateral tracer advection module
@@ -1173,6 +1480,11 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_tracer_advect" ! This module's name.
   character(len=256) :: mesg    ! Message for error messages.
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_nkblock = 0 ! The default k block size, where 0 is the full column [nondim].
+#else
+  integer, parameter :: default_nkblock = 1 ! The default k block size [nondim].
+#endif
 
   if (associated(CS)) then
     call MOM_error(WARNING, "tracer_advect_init called with associated control structure.")
@@ -1187,6 +1499,12 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
   call get_param(param_file, mdl, "DT", CS%dt, fail_if_missing=.true., &
           desc="The (baroclinic) dynamics time step.", units="s", scale=US%s_to_T)
   call get_param(param_file, mdl, "DEBUG", CS%debug, default=.false.)
+  call get_param(param_file, mdl, "TRACER_ADVECT_NKBLOCK", CS%nkblock, &
+          desc="The k-direction block size used in tracer advection calculations. "//&
+          "The default 0 setting dynamically uses the full vertical column.", &
+          default=default_nkblock, layoutParam=.true.)
+  if (CS%nkblock < 0) call MOM_error(FATAL, "MOM_tracer_advect, tracer_advect_init: "//&
+          "TRACER_ADVECT_NKBLOCK must be nonnegative; use 0 to select the full vertical column.")
   call get_param(param_file, mdl, "TRACER_ADVECTION_SCHEME", mesg, &
           desc="The horizontal transport scheme for tracers:\n"//&
           trim(TracerAdvectionSchemeDoc), default='PLM')
@@ -1204,6 +1522,8 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
         default=.false.)
   endif
 
+  !$omp target enter data map(to: CS)
+
   id_clock_advect = cpu_clock_id('(Ocean advect tracer)', grain=CLOCK_MODULE)
   id_clock_pass = cpu_clock_id('(Ocean tracer halo updates)', grain=CLOCK_ROUTINE)
   id_clock_sync = cpu_clock_id('(Ocean tracer global synch)', grain=CLOCK_ROUTINE)
@@ -1214,6 +1534,7 @@ end subroutine tracer_advect_init
 subroutine tracer_advect_end(CS)
   type(tracer_advect_CS), pointer :: CS  !< module control structure
 
+  !$omp target exit data map(delete: CS)
   if (associated(CS)) deallocate(CS)
 
 end subroutine tracer_advect_end

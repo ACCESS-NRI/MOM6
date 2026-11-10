@@ -2194,7 +2194,7 @@ end subroutine chksum_v_3d
 
 !> chksum1d does a checksum of a 1-dimensional array.
 subroutine chksum1d(array, mesg, start_i, end_i, compare_PEs, logunit)
-  real, dimension(:), intent(in) :: array   !< The array to be summed (index starts at 1) [abitrary].
+  real, dimension(:), intent(in) :: array   !< The array to be summed (index starts at 1) in arbitrary units [A].
   character(len=*),   intent(in) :: mesg    !< An identifying message.
   integer, optional,  intent(in) :: start_i !< The starting index for the sum (default 1)
   integer, optional,  intent(in) :: end_i   !< The ending index for the sum (default all)
@@ -2203,8 +2203,8 @@ subroutine chksum1d(array, mesg, start_i, end_i, compare_PEs, logunit)
   integer, optional,  intent(in) :: logunit !< IO unit for checksum logging
 
   integer :: is, ie, i, bc, sum1, sum_bc, ioUnit
-  real :: sum  ! The global sum of the array [arbitrary]
-  real, allocatable :: sum_here(:) ! The sum on each PE [arbitrary]
+  real :: sum  ! The global sum of the array [A]
+  real, allocatable :: sum_here(:) ! The sum on each PE [A]
   logical :: compare
   integer :: pe_num   ! pe number of the data
   integer :: nPEs     ! Total number of processsors
@@ -2255,12 +2255,12 @@ end subroutine chksum1d
 !> chksum2d does a checksum of all data in a 2-d array.
 subroutine chksum2d(array, mesg, logunit)
 
-  real, dimension(:,:), intent(in) :: array !< The array to be checksummed [arbitrary]
+  real, dimension(:,:), intent(in) :: array !< The array to be checksummed in arbitrary units [A]
   character(len=*),     intent(in) :: mesg  !< An identifying message
   integer,    optional, intent(in) :: logunit !< IO unit for checksum logging
 
   integer :: xs, xe, ys, ye, i, j, sum1, bc, iounit
-  real :: sum  ! The global sum of the array [arbitrary]
+  real :: sum  ! The global sum of the array [A]
 
   iounit = error_unit ; if (present(logunit)) iounit = logunit
 
@@ -2286,12 +2286,12 @@ end subroutine chksum2d
 !> chksum3d does a checksum of all data in a 2-d array.
 subroutine chksum3d(array, mesg, logunit)
 
-  real, dimension(:,:,:), intent(in) :: array !< The array to be checksummed [arbitrary]
+  real, dimension(:,:,:), intent(in) :: array !< The array to be checksummed in arbitrary units [A]
   character(len=*),       intent(in) :: mesg  !< An identifying message
   integer,      optional, intent(in) :: logunit !< IO unit for checksum logging
 
   integer :: xs, xe, ys, ye, zs, ze, i, j, k, bc, sum1, iounit
-  real :: sum  ! The global sum of the array [arbitrary]
+  real :: sum  ! The global sum of the array [A]
 
   iounit = error_unit ; if (present(logunit)) iounit = logunit
 
@@ -2317,7 +2317,7 @@ end subroutine chksum3d
 
 !> This function returns .true. if x is a NaN, and .false. otherwise.
 function is_NaN_0d(x)
-  real, intent(in) :: x !< The value to be checked for NaNs [arbitrary]
+  real, intent(in) :: x !< The value to be checked for NaNs in arbitrary units [A]
   logical :: is_NaN_0d
 
  !is_NaN_0d = (((x < 0.0) .and. (x >= 0.0)) .or. &
@@ -2333,7 +2333,7 @@ end function is_NaN_0d
 
 !> Returns .true. if any element of x is a NaN, and .false. otherwise.
 function is_NaN_1d(x, skip_mpp)
-  real, dimension(:), intent(in) :: x !< The array to be checked for NaNs [arbitrary]
+  real, dimension(:), intent(in) :: x !< The array to be checked for NaNs in arbitrary units [A]
   logical,  optional, intent(in) :: skip_mpp  !< If true, only check this array only
                                               !! on the local PE (default false).
   logical :: is_NaN_1d
@@ -2356,7 +2356,7 @@ end function is_NaN_1d
 
 !> Returns .true. if any element of x is a NaN, and .false. otherwise.
 function is_NaN_2d(x)
-  real, dimension(:,:), intent(in) :: x !< The array to be checked for NaNs [arbitrary]
+  real, dimension(:,:), intent(in) :: x !< The array to be checked for NaNs in arbitrary units [A]
   logical :: is_NaN_2d
 
   integer :: i, j, n
@@ -2373,7 +2373,7 @@ end function is_NaN_2d
 
 !> Returns .true. if any element of x is a NaN, and .false. otherwise.
 function is_NaN_3d(x)
-  real, dimension(:,:,:), intent(in) :: x !< The array to be checked for NaNs [arbitrary]
+  real, dimension(:,:,:), intent(in) :: x !< The array to be checked for NaNs in arbitrary units [A]
   logical :: is_NaN_3d
 
   integer :: i, j, k, n
@@ -2396,7 +2396,7 @@ end function is_NaN_3d
 !> Compute the field checksum of a scalar that may need to be unscaled.
 !! This uses the field_chksum function that is used to verify file contents, which may differ
 !! from the bitcount function used for other checksums in this module.
-function field_checksum_real_0d(field, pelist, mask_val, turns, unscale, zero_zeros) &
+function field_checksum_real_0d(field, pelist, mask_val, turns, unscale) &
     result(chksum)
   real,              intent(in) :: field      !< Input scalar to be checksummed in arbitrary,
                                               !! possibly rescaled units [A ~> a]
@@ -2405,30 +2405,22 @@ function field_checksum_real_0d(field, pelist, mask_val, turns, unscale, zero_ze
   integer, optional, intent(in) :: turns      !< Number of quarter turns
   real,    optional, intent(in) :: unscale    !< A factor to convert this array back to
                                               !! unscaled units for checksums [a A-1 ~> 1]
-  logical, optional, intent(in) :: zero_zeros !< If present and true, convert negative zeros
-                                              !! into ordinary signless zeros.
   integer(kind=int64) :: chksum               !< checksum of scalar
 
   real :: scale_fac  ! A local copy of unscale if it is present [a A-1 ~> 1] or 1 otherwise
-  real :: scaled_val ! The value of field converted back to unscaled units [a]
-  logical :: unsign_zeros ! If true, convert negative zeros into ordinary signless zeros
 
   if (present(turns)) call MOM_error(FATAL, "Rotation not supported for 0d fields.")
 
   scale_fac = 1.0 ; if (present(unscale)) scale_fac = unscale
-  unsign_zeros = .false. ; if (present(zero_zeros)) unsign_zeros = zero_zeros
 
-  scaled_val = scale_fac*field
-  if (unsign_zeros .and. (scaled_val == 0.0)) scaled_val = 0.0
-
-  chksum = field_chksum(scaled_val, pelist=pelist, mask_val=mask_val)
+  chksum = field_chksum(scale_fac*field, pelist=pelist, mask_val=mask_val)
 end function field_checksum_real_0d
 
 
 !> Compute the field checksum of an entire 1d array that may need to be unscaled.
 !! This uses the field_chksum function that is used to verify file contents, which may differ
 !! from the bitcount function used for other checksums in this module.
-function field_checksum_real_1d(field, pelist, mask_val, turns, unscale, zero_zeros) &
+function field_checksum_real_1d(field, pelist, mask_val, turns, unscale) &
     result(chksum)
   real, dimension(:), intent(in) :: field     !< Input array to be checksummed in arbitrary,
                                               !! possibly rescaled units [A ~> a]
@@ -2437,37 +2429,22 @@ function field_checksum_real_1d(field, pelist, mask_val, turns, unscale, zero_ze
   integer,  optional, intent(in) :: turns     !< Number of quarter turns
   real,     optional, intent(in) :: unscale   !< A factor to convert this array back to
                                               !! unscaled units for checksums [a A-1 ~> 1]
-  logical,  optional, intent(in) :: zero_zeros !< If present and true, convert negative zeros
-                                              !! into ordinary signless zeros.
   integer(kind=int64) :: chksum               !< checksum of array
 
-  real, allocatable :: field_zz(:) ! A copy of field in unscaled units with any negative zeros
-                                   ! converted into ordinary signless zeros [a]
   real :: scale_fac  ! A local copy of unscale if it is present [a A-1 ~> 1] or 1 otherwise
-  logical :: unsign_zeros ! If true, convert negative zeros into ordinary signless zeros
-  integer :: i
 
   if (present(turns)) call MOM_error(FATAL, "Rotation not supported for 1d fields.")
 
   scale_fac = 1.0 ; if (present(unscale)) scale_fac = unscale
-  unsign_zeros = .false. ; if (present(zero_zeros)) unsign_zeros = zero_zeros
 
-  if (unsign_zeros) then
-    allocate(field_zz(size(field)))
-    field_zz(:) = scale_fac*field(:)
-    do i=1,size(field_zz) ; if (field_zz(i) == 0.0) field_zz(i) = 0.0 ; enddo
-    chksum = field_chksum(field_zz, pelist=pelist, mask_val=mask_val)
-    deallocate(field_zz)
-  else
-    chksum = field_chksum(scale_fac*field(:), pelist=pelist, mask_val=mask_val)
-  endif
+  chksum = field_chksum(scale_fac*field(:), pelist=pelist, mask_val=mask_val)
 end function field_checksum_real_1d
 
 
 !> Compute the field checksum of an entire 2d array that may need to be rotated or unscaled.
 !! This uses the field_chksum function that is used to verify file contents, which may differ
 !! from the bitcount function used for other checksums in this module.
-function field_checksum_real_2d(field, pelist, mask_val, turns, unscale, zero_zeros) &
+function field_checksum_real_2d(field, pelist, mask_val, turns, unscale) &
     result(chksum)
   real, dimension(:,:),     intent(in) :: field     !< Unrotated input field to be checksummed in
                                                     !! arbitrary, possibly rescaled units [A ~> a]
@@ -2476,25 +2453,20 @@ function field_checksum_real_2d(field, pelist, mask_val, turns, unscale, zero_ze
   integer,        optional, intent(in) :: turns     !< Number of quarter turns
   real,           optional, intent(in) :: unscale   !< A factor to convert this array back to
                                                     !! unscaled units for checksums [a A-1 ~> 1]
-  logical,        optional, intent(in) :: zero_zeros !< If present and true, convert negative zeros
-                                                    !! into ordinary signless zeros.
   integer(kind=int64) :: chksum                     !< checksum of array
 
   ! Local variables
-  real, allocatable :: field_rot(:,:)  ! A rotated version of field, with the same units [arbitrary]
+  real, allocatable :: field_rot(:,:)  ! A rotated version of field, with the same units [A ~> a]
   integer :: qturns ! The number of quarter turns through which to rotate field
   logical :: do_unscale ! If true, unscale the variable before it is checksummed
-  logical :: unsign_zeros ! If true, convert negative zeros into ordinary signless zeros
-  integer :: i, j
 
   qturns = 0
   if (present(turns)) &
     qturns = modulo(turns, 4)
 
   do_unscale = .false. ; if (present(unscale)) do_unscale = (unscale /= 1.0)
-  unsign_zeros = .false. ; if (present(zero_zeros)) unsign_zeros = zero_zeros
 
-  if ((qturns == 0) .and. (.not.unsign_zeros)) then
+  if (qturns == 0) then
     if (do_unscale) then
       chksum = field_chksum(unscale*field(:,:), pelist=pelist, mask_val=mask_val)
     else
@@ -2504,11 +2476,6 @@ function field_checksum_real_2d(field, pelist, mask_val, turns, unscale, zero_ze
     call allocate_rotated_array(field, [1,1], qturns, field_rot)
     call rotate_array(field, qturns, field_rot)
     if (do_unscale) field_rot(:,:) = unscale*field_rot(:,:)
-    if (unsign_zeros) then
-      do j=1,size(field_rot,2) ; do i=1,size(field_rot,1)
-        if (field_rot(i,j) == 0.0) field_rot(i,j) = 0.0
-      enddo ; enddo
-    endif
     chksum = field_chksum(field_rot, pelist=pelist, mask_val=mask_val)
     deallocate(field_rot)
   endif
@@ -2517,7 +2484,7 @@ end function field_checksum_real_2d
 !> Compute the field checksum of an entire 3d array that may need to be rotated or unscaled.
 !! This uses the field_chksum function that is used to verify file contents, which may differ
 !! from the bitcount function used for other checksums in this module.
-function field_checksum_real_3d(field, pelist, mask_val, turns, unscale, zero_zeros) &
+function field_checksum_real_3d(field, pelist, mask_val, turns, unscale) &
     result(chksum)
   real, dimension(:,:,:),   intent(in) :: field     !< Unrotated input field to be checksummed in
                                                     !! arbitrary, possibly rescaled units [A ~> a]
@@ -2526,25 +2493,20 @@ function field_checksum_real_3d(field, pelist, mask_val, turns, unscale, zero_ze
   integer,        optional, intent(in) :: turns     !< Number of quarter turns
   real,           optional, intent(in) :: unscale   !< A factor to convert this array back to
                                                     !! unscaled units for checksums [a A-1 ~> 1]
-  logical,        optional, intent(in) :: zero_zeros !< If present and true, convert negative zeros
-                                                    !! into ordinary signless zeros.
   integer(kind=int64) :: chksum                     !< checksum of array
 
   ! Local variables
-  real, allocatable :: field_rot(:,:,:)  ! A rotated version of field, with the same units [arbitrary]
+  real, allocatable :: field_rot(:,:,:)  ! A rotated version of field, with the same units [A ~> a]
   integer :: qturns ! The number of quarter turns through which to rotate field
   logical :: do_unscale ! If true, unscale the variable before it is checksummed
-  logical :: unsign_zeros ! If true, convert negative zeros into ordinary signless zeros
-  integer :: i, j, k
 
   qturns = 0
   if (present(turns)) &
     qturns = modulo(turns, 4)
 
   do_unscale = .false. ; if (present(unscale)) do_unscale = (unscale /= 1.0)
-  unsign_zeros = .false. ; if (present(zero_zeros)) unsign_zeros = zero_zeros
 
-  if ((qturns == 0) .and. (.not.unsign_zeros)) then
+  if (qturns == 0) then
     if (do_unscale) then
       chksum = field_chksum(unscale*field(:,:,:), pelist=pelist, mask_val=mask_val)
     else
@@ -2554,11 +2516,6 @@ function field_checksum_real_3d(field, pelist, mask_val, turns, unscale, zero_ze
     call allocate_rotated_array(field, [1,1,1], qturns, field_rot)
     call rotate_array(field, qturns, field_rot)
     if (do_unscale) field_rot(:,:,:) = unscale*field_rot(:,:,:)
-    if (unsign_zeros) then
-      do k=1,size(field_rot,3) ; do j=1,size(field_rot,2) ; do i=1,size(field_rot,1)
-        if (field_rot(i,j,k) == 0.0) field_rot(i,j,k) = 0.0
-      enddo ; enddo ; enddo
-    endif
     chksum = field_chksum(field_rot, pelist=pelist, mask_val=mask_val)
     deallocate(field_rot)
   endif
@@ -2567,7 +2524,7 @@ end function field_checksum_real_3d
 !> Compute the field checksum of an entire 4d array that may need to be rotated or unscaled.
 !! This uses the field_chksum function that is used to verify file contents, which may differ
 !! from the bitcount function used for other checksums in this module.
-function field_checksum_real_4d(field, pelist, mask_val, turns, unscale, zero_zeros) &
+function field_checksum_real_4d(field, pelist, mask_val, turns, unscale) &
     result(chksum)
   real, dimension(:,:,:,:), intent(in) :: field     !< Unrotated input field to be checksummed in
                                                     !! arbitrary, possibly rescaled units [A ~> a]
@@ -2576,25 +2533,20 @@ function field_checksum_real_4d(field, pelist, mask_val, turns, unscale, zero_ze
   integer,        optional, intent(in) :: turns     !< Number of quarter turns
   real,           optional, intent(in) :: unscale   !< A factor to convert this array back to
                                                     !! unscaled units for checksums [a A-1 ~> 1]
-  logical,        optional, intent(in) :: zero_zeros !< If present and true, convert negative zeros
-                                                    !! into ordinary signless zeros.
   integer(kind=int64) :: chksum                     !< checksum of array
 
   ! Local variables
-  real, allocatable :: field_rot(:,:,:,:)  ! A rotated version of field, with the same units [arbitrary]
+  real, allocatable :: field_rot(:,:,:,:)  ! A rotated version of field, with the same units [A ~> a]
   integer :: qturns ! The number of quarter turns through which to rotate field
   logical :: do_unscale ! If true, unscale the variable before it is checksummed
-  logical :: unsign_zeros ! If true, convert negative zeros into ordinary signless zeros
-  integer :: i, j, k, n
 
   qturns = 0
   if (present(turns)) &
     qturns = modulo(turns, 4)
 
   do_unscale = .false. ; if (present(unscale)) do_unscale = (unscale /= 1.0)
-  unsign_zeros = .false. ; if (present(zero_zeros)) unsign_zeros = zero_zeros
 
-  if ((qturns == 0) .and. (.not.unsign_zeros)) then
+  if (qturns == 0) then
     if (do_unscale) then
       chksum = field_chksum(unscale*field(:,:,:,:), pelist=pelist, mask_val=mask_val)
     else
@@ -2604,13 +2556,6 @@ function field_checksum_real_4d(field, pelist, mask_val, turns, unscale, zero_ze
     call allocate_rotated_array(field, [1,1,1,1], qturns, field_rot)
     call rotate_array(field, qturns, field_rot)
     if (do_unscale) field_rot(:,:,:,:) = unscale*field_rot(:,:,:,:)
-    if (unsign_zeros) then
-      do n=1,size(field_rot,4) ; do k=1,size(field_rot,3)
-        do j=1,size(field_rot,2) ; do i=1,size(field_rot,1)
-          if (field_rot(i,j,k,n) == 0.0) field_rot(i,j,k,n) = 0.0
-        enddo ; enddo
-      enddo ; enddo
-    endif
     chksum = field_chksum(field_rot, pelist=pelist, mask_val=mask_val)
     deallocate(field_rot)
   endif
@@ -2698,9 +2643,9 @@ end subroutine chk_sum_msg2
 subroutine chk_sum_msg3(fmsg, aMean, aMin, aMax, mesg, iounit)
   character(len=*), intent(in) :: fmsg !< A checksum code-location specific preamble
   character(len=*), intent(in) :: mesg !< An identifying message supplied by top-level caller
-  real,             intent(in) :: aMean !< The mean value of the array [arbitrary]
-  real,             intent(in) :: aMin !< The minimum value of the array [arbitrary]
-  real,             intent(in) :: aMax !< The maximum value of the array [arbitrary]
+  real,             intent(in) :: aMean !< The mean value of the array in arbitrary units [A]
+  real,             intent(in) :: aMin !< The minimum value of the array [A]
+  real,             intent(in) :: aMax !< The maximum value of the array [A]
   integer,          intent(in) :: iounit !< Checksum logger IO unit
 
   ! NOTE: We add zero to aMin and aMax to remove any negative zeros.
@@ -2733,7 +2678,7 @@ end subroutine chksum_error
 !> Does a bitcount of a number by first casting to an integer and then using BTEST
 !! to check bit by bit
 integer function bitcount(x)
-  real, intent(in) :: x !< Number to be bitcount [arbitrary]
+  real, intent(in) :: x !< Number to be bitcount in arbitrary units [A]
 
   integer, parameter :: xk = kind(x)  !< Kind type of x
 

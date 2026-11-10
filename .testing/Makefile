@@ -75,14 +75,19 @@ MAKEFLAGS += --no-builtin-variables
 .SUFFIXES:
 
 # Determine the MOM6 autoconf srcdir
-AC_SRCDIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))../ac
+CODEBASE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
+AC_SRCDIR := $(CODEBASE)/ac
 
 # User-defined configuration
 -include config.mk
 
 # Set the FMS library
-FMS_COMMIT ?= 2025.02.01
-FMS_URL ?= https://github.com/NOAA-GFDL/FMS.git
+#FMS_COMMIT ?= 2025.02.01
+#FMS_URL ?= https://github.com/NOAA-GFDL/FMS.git
+
+# Temporarily point to the GPU-friendly versions
+FMS_COMMIT ?= 06169594154e4ad6bd808d8d3d519fe05d47fbc3
+FMS_URL ?= https://github.com/edoyango/FMS.git
 export FMS_COMMIT
 export FMS_URL
 
@@ -112,6 +117,7 @@ FCFLAGS_FMS ?= $(FCFLAGS)
 # - These flags can be configured outside of the Makefile, either with
 #   config.mk or as environment variables.
 
+LDFLAGS_OPT ?=
 LDFLAGS_COVERAGE ?= --coverage
 LDFLAGS_USER ?=
 
@@ -147,6 +153,10 @@ WORKSPACE ?= .
 BUILD ?= $(WORKSPACE)/build
 DEPS ?= $(BUILD)/deps
 WORK ?= $(WORKSPACE)/work
+
+# External tools
+MAKEDEP ?= $(abspath $(AC_SRCDIR)/makedep)
+PKG ?= $(abspath $(CODEBASE)/pkg)
 
 # Experiment configuration
 EXECS ?= symmetric/MOM6 asymmetric/MOM6 openmp/MOM6
@@ -243,6 +253,7 @@ COV_FCFLAGS := FCFLAGS="$(FCFLAGS_COVERAGE) $(FCFLAGS_DEPS)"
 
 # Linker flags
 MOM_LDFLAGS := LDFLAGS="$(LDFLAGS_DEPS) $(LDFLAGS_USER)"
+OPT_LDFLAGS := LDFLAGS="$(LDFLAGS_OPT) $(LDFLAGS_DEPS) $(LDFLAGS_USER)"
 COV_LDFLAGS := LDFLAGS="$(LDFLAGS_COVERAGE) $(LDFLAGS_DEPS) $(LDFLAGS_USER)"
 
 # Environment variable configuration
@@ -253,15 +264,16 @@ $(BUILD)/asymmetric/Makefile: MOM_ENV += $(ASYMMETRIC_FCFLAGS) $(MOM_LDFLAGS) \
 $(BUILD)/repro/Makefile: MOM_ENV += $(REPRO_FCFLAGS) $(MOM_LDFLAGS)
 $(BUILD)/openmp/Makefile: MOM_ENV += $(OPENMP_FCFLAGS) $(MOM_LDFLAGS)
 $(BUILD)/target/Makefile: MOM_ENV += $(TARGET_FCFLAGS) $(MOM_LDFLAGS)
-$(BUILD)/opt/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(MOM_LDFLAGS)
+$(BUILD)/opt/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(OPT_LDFLAGS)
 $(BUILD)/opt_target/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(MOM_LDFLAGS)
 $(BUILD)/coupled/Makefile: MOM_ENV += $(SYMMETRIC_FCFLAGS) $(MOM_LDFLAGS)
 $(BUILD)/nuopc/Makefile: MOM_ENV += $(SYMMETRIC_FCFLAGS) $(MOM_LDFLAGS)
 $(BUILD)/cov/Makefile: MOM_ENV += $(COV_FCFLAGS) $(COV_LDFLAGS)
 $(BUILD)/unit/Makefile: MOM_ENV += $(COV_FCFLAGS) $(COV_LDFLAGS)
-$(BUILD)/timing/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(MOM_LDFLAGS)
+$(BUILD)/timing/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(OPT_LDFLAGS)
 
 # Configure script flags
+MOM_ACFLAGS := --with-gsw --with-cvmix
 $(BUILD)/openmp/Makefile: MOM_ACFLAGS += --enable-openmp
 $(BUILD)/coupled/Makefile: MOM_ACFLAGS += --with-driver=FMS_cap
 $(BUILD)/nuopc/Makefile: MOM_ACFLAGS += --with-driver=nuopc_cap
@@ -270,15 +282,18 @@ $(BUILD)/timing/Makefile: MOM_ACFLAGS += --with-driver=timing_tests
 
 
 # Build executables
-.NOTPARALLEL:$(foreach e,$(UNIT_EXECS),$(BUILD)/unit/$(e))
-$(BUILD)/unit/test_%: $(BUILD)/unit/Makefile FORCE
+UNIT_TARGETS = $(addprefix $(BUILD)/unit/,$(UNIT_EXECS))
+TIMING_TARGETS = $(addprefix $(BUILD)/timing/,$(TIMING_EXECS))
+
+.NOTPARALLEL: $(UNIT_TARGETS)
+$(UNIT_TARGETS): $(BUILD)/unit/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
 
 $(BUILD)/unit/Makefile: \
   $(foreach e,$(UNIT_EXECS),../config_src/drivers/unit_tests/$(e).F90)
 
-.NOTPARALLEL:$(foreach e,$(TIMING_EXECS),$(BUILD)/timing/$(e))
-$(BUILD)/timing/time_%: $(BUILD)/timing/Makefile FORCE
+.NOTPARALLEL: $(TIMING_TARGETS)
+$(TIMING_TARGETS): $(BUILD)/timing/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
 
 $(BUILD)/timing/Makefile: \
@@ -303,33 +318,25 @@ $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 .PHONY: FORCE
 
 
-## Use autoconf to construct the Makefile for each target
-# TODO: This could all be moved to a top-level MOM6 Makefile
-.PRECIOUS: $(BUILD)/%/Makefile
-.PRECIOUS: $(BUILD)/%/Makefile.in
-.PRECIOUS: $(BUILD)/%/configure
-.PRECIOUS: $(BUILD)/%/config.status
-.PRECIOUS: $(BUILD)/%/configure.ac
-.PRECIOUS: $(BUILD)/%/m4/
+# Use autoconf to construct the Makefile for each target
 
-$(BUILD)/%/Makefile: $(BUILD)/%/Makefile.in $(BUILD)/%/config.status
+.PRECIOUS: $(BUILD)/%/Makefile
+.PRECIOUS: $(BUILD)/%/config.status
+
+$(BUILD)/%/Makefile: $(BUILD)/%/config.status
 	cd $(@D) && ./config.status
 
-$(BUILD)/%/config.status: $(BUILD)/%/configure $(DEPS)/lib/libFMS.a
-	cd $(@D) && $(MOM_ENV) ./configure -n --srcdir=$(AC_SRCDIR) $(MOM_ACFLAGS) \
+# NOTE: This assumes % is a single directory
+$(BUILD)/%/config.status: \
+  $(DEPS)/lib/libFMS.a \
+  $(DEPS)/lib/libgsw.a \
+  $(DEPS)/lib/libcvmix.a \
+  ../configure | $(BUILD)/%/
+	cd $(@D) && $(MOM_ENV) ../../../configure -n $(MOM_ACFLAGS) \
 	 || (cat config.log && false)
 
-$(BUILD)/%/Makefile.in: ../ac/Makefile.in | $(BUILD)/%/
-	cp ../ac/Makefile.in $(@D)
-
-$(BUILD)/%/configure: $(BUILD)/%/configure.ac $(BUILD)/%/m4/
-	autoreconf -if $(@D)
-
-$(BUILD)/%/configure.ac: ../ac/configure.ac | $(BUILD)/%/
-	cp ../ac/configure.ac $(@D)
-
-$(BUILD)/%/m4/: ../ac/m4/ | $(BUILD)/%/
-	cp -r ../ac/m4 $(@D)
+../configure: FORCE
+	$(MAKE) -C ../ configure
 
 ALL_EXECS = symmetric asymmetric repro openmp opt opt_target coupled nuopc \
   cov unit timing
@@ -344,25 +351,51 @@ $(TARGET_CODEBASE):
 endif
 
 
-## FMS
+## Dependencies
 
 # Set up the FMS build environment variables
-FMS_ENV = \
-  PATH="${PATH}:$(realpath ../ac)" \
+DEPS_ENV = \
   FCFLAGS="$(FCFLAGS_FMS)" \
+  MAKEDEP=$(MAKEDEP) \
   REPORT_ERROR_LOGS="$(REPORT_ERROR_LOGS)"
 
-$(DEPS)/lib/libFMS.a: $(DEPS)/Makefile $(DEPS)/Makefile.fms.in $(DEPS)/configure.fms.ac $(DEPS)/m4
-	$(FMS_ENV) $(MAKE) -C $(DEPS) lib/libFMS.a
+# FMS
 
-$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
-	cp ../ac/deps/Makefile $(DEPS)/Makefile
+$(DEPS)/lib/libFMS.a: $(DEPS)/Makefile $(DEPS)/Makefile.fms.in $(DEPS)/configure.fms.ac $(DEPS)/m4
+	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libFMS.a
 
 $(DEPS)/Makefile.fms.in: ../ac/deps/Makefile.fms.in | $(DEPS)
 	cp ../ac/deps/Makefile.fms.in $(DEPS)/Makefile.fms.in
 
 $(DEPS)/configure.fms.ac: ../ac/deps/configure.fms.ac | $(DEPS)
 	cp ../ac/deps/configure.fms.ac $(DEPS)/configure.fms.ac
+
+# GSW
+
+$(DEPS)/lib/libgsw.a: $(DEPS)/Makefile $(DEPS)/Makefile.gsw.in $(DEPS)/configure.gsw.ac $(DEPS)/m4
+	$(DEPS_ENV) PKG=$(PKG) $(MAKE) -C $(DEPS) lib/libgsw.a
+
+$(DEPS)/Makefile.gsw.in: ../ac/deps/Makefile.gsw.in | $(DEPS)
+	cp ../ac/deps/Makefile.gsw.in $(DEPS)/Makefile.gsw.in
+
+$(DEPS)/configure.gsw.ac: ../ac/deps/configure.gsw.ac | $(DEPS)
+	cp ../ac/deps/configure.gsw.ac $(DEPS)/configure.gsw.ac
+
+# CVMix
+
+$(DEPS)/lib/libcvmix.a: $(DEPS)/Makefile $(DEPS)/Makefile.cvmix.in $(DEPS)/configure.cvmix.ac $(DEPS)/m4
+	$(DEPS_ENV) PKG=$(PKG) $(MAKE) -C $(DEPS) lib/libcvmix.a
+
+$(DEPS)/Makefile.cvmix.in: ../ac/deps/Makefile.cvmix.in | $(DEPS)
+	cp ../ac/deps/Makefile.cvmix.in $(DEPS)/Makefile.cvmix.in
+
+$(DEPS)/configure.cvmix.ac: ../ac/deps/configure.cvmix.ac | $(DEPS)
+	cp ../ac/deps/configure.cvmix.ac $(DEPS)/configure.cvmix.ac
+
+# Generic dependency content
+
+$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
+	cp ../ac/deps/Makefile $(DEPS)/Makefile
 
 $(DEPS)/m4: ../ac/deps/m4 | $(DEPS)
 	cp -r ../ac/deps/m4 $(DEPS)/
@@ -670,26 +703,30 @@ test.summary:
 #---
 # Unit test
 
-# NOTE: Using file parser gcov report as a proxy for test completion
 .PHONY: run.cov.unit
-run.cov.unit: $(foreach t,$(UNIT_EXECS),$(BUILD)/unit/$(t).F90.gcov)
+run.cov.unit: $(BUILD)/unit/gcov.unit.out
+
+$(BUILD)/unit/gcov.unit.out: $(foreach f, $(UNIT_EXECS), $(WORK)/unit/$(f).out)
+	cd $(BUILD)/unit && gcov -b *.gcda > gcov.unit.out
+	find $(BUILD)/unit -name "*.gcov" -exec sed -i -r 's/^( *[0-9]*)\*:/ \1:/g' {} \;
+	touch $@
 
 .PHONY: build.unit
 .NOTPARALLEL: build.unit
 build.unit: $(foreach f, $(UNIT_EXECS), $(BUILD)/unit/$(f))
 
 .PHONY: run.unit
-run.unit: $(foreach f, $(UNIT_EXECS), work/unit/$(f).out)
+run.unit: $(foreach f, $(UNIT_EXECS), $(WORK)/unit/$(f).out)
 
 .PHONY: build.timing
 .NOTPARALLEL: build.timing
 build.timing: $(foreach f, $(TIMING_EXECS), $(BUILD)/timing/$(f))
 
 .PHONY: run.timing
-run.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).out)
+run.timing: $(foreach f, $(TIMING_EXECS), $(WORK)/timing/$(f).out)
 
 .PHONY: show.timing
-show.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).show)
+show.timing: $(foreach f, $(TIMING_EXECS), $(WORK)/timing/$(f).show)
 
 $(WORK)/timing/%.show:
 	./tools/disp_timing.py $(@:.show=.out)
@@ -712,11 +749,11 @@ build.timing_target: \
 
 .PHONY: run.timing_target
 run.timing_target: \
-  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/work/timing/$(f).out)
+  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/$(WORK)/timing/$(f).out)
 
 .PHONY: compare.timing
 compare.timing: \
-  $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), work/timing/$(f).compare)
+  $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), $(WORK)/timing/$(f).compare)
 $(WORK)/timing/%.compare: \
   $(TARGET_CODEBASE)
 	./tools/disp_timing.py -r $(TARGET_CODEBASE)/.testing/$(@:.compare=.out) $(@:.compare=.out)
@@ -725,38 +762,30 @@ $(TARGET_CODEBASE)/.testing/%: | $(TARGET_CODEBASE)
 
 
 # General rule to run a unit test executable
-# Pattern is to run $(BUILD)/unit/executable and direct output to executable.out
+# Isolate runtime files per executable, keeping logs in $(WORK)/unit.
 $(WORK)/unit/%.out: $(BUILD)/unit/%
-	@mkdir -p $(@D)
-	cd $(@D) ; $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> >(tee $*.err) > $*.out
+	@mkdir -p $(@D)/$*
+	cd $(@D)/$* && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> >(tee ../$*.err) > ../$*.out
 
 # The file parser uses a separate rule to support two-core tests.
 $(WORK)/unit/test_MOM_file_parser.out: $(BUILD)/unit/test_MOM_file_parser
-	if [ $(REPORT_COVERAGE) ]; then \
-	  find $(BUILD)/unit -name *.gcda -exec rm -f '{}' \; ; \
-	fi
-	mkdir -p $(@D)
-	cd $(@D) \
+	mkdir -p $(@D)/test_MOM_file_parser
+	cd $(@D)/test_MOM_file_parser \
 	  && rm -f input.nml logfile.0000*.out *_input MOM_parameter_doc.* \
-	  && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> test_MOM_file_parser.err > test_MOM_file_parser.out \
+	  && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> ../test_MOM_file_parser.err > ../test_MOM_file_parser.out \
 	  || !( \
-	    cat test_MOM_file_parser.out | tail -n 100 ; \
-	    cat test_MOM_file_parser.err | tail -n 100 ; \
+	    cat ../test_MOM_file_parser.out | tail -n 100 ; \
+	    cat ../test_MOM_file_parser.err | tail -n 100 ; \
 	  )
-	cd $(@D) \
-	  && $(TIME) $(MPIRUN) -n 2 $(abspath $<) 2> p2.test_MOM_file_parser.err > p2.test_MOM_file_parser.out \
+	cd $(@D)/test_MOM_file_parser \
+	  && $(TIME) $(MPIRUN) -n 2 $(abspath $<) 2> ../p2.test_MOM_file_parser.err > ../p2.test_MOM_file_parser.out \
 	  || !( \
-	    cat p2.test_MOM_file_parser.out | tail -n 100 ; \
-	    cat p2.test_MOM_file_parser.err | tail -n 100 ; \
+	    cat ../p2.test_MOM_file_parser.out | tail -n 100 ; \
+	    cat ../p2.test_MOM_file_parser.err | tail -n 100 ; \
 	  )
-
-$(BUILD)/unit/test_%.F90.gcov: $(WORK)/unit/test_%.out
-	cd $(@D) \
-	  && gcov -b *.gcda > gcov.unit.out
-	find $(@D) -name "*.gcov" -exec sed -i -r 's/^( *[0-9]*)\*:/ \1:/g' {} \;
 
 .PHONY: report.cov.unit
-report.cov.unit: $(foreach t,$(UNIT_EXECS),$(BUILD)/unit/$(t).F90.gcov) codecov
+report.cov.unit: run.cov.unit codecov
 	./codecov $(CODECOV_TOKEN_ARG) -R $(BUILD)/unit -f "*.gcov" -Z -n "Unit tests" \
 	    > $(BUILD)/unit/codecov.out \
 	    2> $(BUILD)/unit/codecov.err \

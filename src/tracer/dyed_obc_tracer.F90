@@ -94,7 +94,7 @@ function register_dyed_obc_tracer(HI, GV, param_file, CS, tr_Reg, restart_CS)
   call log_version(param_file, mdl, version, "")
   call get_param(param_file, mdl, "NUM_DYED_TRACERS", CS%ntr, &
                  "The number of dyed_obc tracers in this run. Each tracer "//&
-                 "should have a separate boundary segment."//&
+                 "should have a separate boundary segment.  "//&
                  "If not present, use NUM_DYE_TRACERS.", default=-1)
   if (CS%ntr == -1) then
     !for backward compatibility
@@ -260,17 +260,29 @@ subroutine dyed_obc_tracer_column_physics(h_old, h_new,  ea,  eb, fluxes, dt, G,
   if (CS%ntr < 1) return
 
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !$omp target update from(h_old)
     do m=1,CS%ntr
       do k=1,nz ;do j=js,je ; do i=is,ie
         h_work(i,j,k) = h_old(i,j,k)
       enddo ; enddo ; enddo
+      !$omp target enter data map(to: h_work, CS%tr(:,:,:,m))
+      !$omp target enter data map(to: fluxes)
+      !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+      !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
       if (nz > 1) call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+      !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+      !$omp target exit data map(release: fluxes)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
+      !$omp target exit data map(delete: h_work)
     enddo
   else
     do m=1,CS%ntr
+      !$omp target enter data map(to: CS%tr(:,:,:,m))
       if (nz > 1) call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
     enddo
   endif
 

@@ -20,21 +20,14 @@ use ESMF,                      only: ESMF_RC_VAL_OUTOFRANGE, ESMF_INDEX_DELOCAL,
 use ESMF,                      only: ESMF_TYPEKIND_R8, ESMF_FIELDSTATUS_COMPLETE
 use ESMF,                      only: ESMF_FieldStatus_Flag, ESMF_LOGMSG_ERROR, ESMF_FAILURE, ESMF_MAXSTR
 use ESMF,                      only: operator(/=), operator(==)
-use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type, get_ocean_mask
+use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type
 use MOM_surface_forcing_nuopc, only: ice_ocean_boundary_type
 use MOM_grid,                  only: ocean_grid_type
 use MOM_domains,               only: pass_var
 use mpp_domains_mod,           only: mpp_get_compute_domain
 
-use MOM_coupler_types,         only: set_coupler_type_data, coupler_type_initialized
-use MOM_coupler_types,         only: coupler_type_num_bcs, coupler_type_get_bc, coupler_type_get_field
-use MOM_coupler_types,         only: ind_pcair, ind_u10, ind_psurf, ind_runoff, ind_deposition
-use MOM_coupler_types,         only: ind_flux
-use MOM_cap_fms_coupler_bcs,   only: coupler_bcs_get_cmeps_name
-use MOM_error_handler,         only: MOM_error, FATAL
-
 ! By default make data private
-implicit none; private
+implicit none ; private
 
 ! Public member functions
 public :: mom_set_geomtype
@@ -84,9 +77,6 @@ end subroutine mom_set_geomtype
 !! (1) it imports surface fluxes using data from the mediator; and
 !! (2) it can apply restoring in SST and SSS.
 !! (3) it can convert imported stokes drift components to zero if they are missing.
-!! (4) when FMS coupler_bc_type structures are in use, it imports and sets the fields in
-!! ice_ocean_boundary that their fluxes are calculated from, and issues a fatal error for any
-!! whose input is provided neither by the coupler nor by the data_table
 subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary, &
                       set_missing_stks_to_zero, rc)
   type(ocean_public_type)       , intent(in)    :: ocean_public             !< Ocean surface state
@@ -108,15 +98,6 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
   real(ESMF_KIND_R8), allocatable :: stkx(:,:,:)
   real(ESMF_KIND_R8), allocatable :: stky(:,:,:)
   character(len=*)  , parameter   :: subname = '(mom_import)'
-  real(ESMF_KIND_R8), allocatable :: work(:,:)
-  character(len=256)              :: stdname
-  character(len=128)              :: bc_name    ! The name of an FMS coupler boundary condition
-  character(len=128)              :: flux_type  ! The type of flux that it describes
-  character(len=128)              :: field_name ! The name of its input field
-  integer                         :: field_index
-  logical                         :: found       ! True if the coupler provides the input field
-  logical                         :: overridden  ! True if an input field is set from the data_table
-  logical                         :: flux_overridden ! True if a flux is set from the data_table
 
   rc = ESMF_SUCCESS
 
@@ -268,7 +249,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrain', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrain, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen precipitation (hsnow)
@@ -277,7 +258,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hsnow', isc, iec, jsc, jec, &
          ice_ocean_boundary%hsnow, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from liquid runoff (hrofl)
@@ -286,7 +267,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofl', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofl, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen runoff (hrofi)
@@ -295,7 +276,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofi', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofi, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from liquid glc runoff (hrofl_glc)
@@ -304,7 +285,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofl_glc', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofl_glc, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen glc runoff (hrofi_glc)
@@ -313,7 +294,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofi_glc', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofi_glc, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
   !----
   ! enthalpy from evaporation (hevap)
   !----
@@ -321,7 +302,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hevap', isc, iec, jsc, jec, &
          ice_ocean_boundary%hevap, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from condensation (hcond)
@@ -410,7 +391,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
           areacor=med2mod_areacor, do_sum=.true., esmf_ind=esmf_ind, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
     enddo
-  end if
+  endif
 
   !----
   ! dust flux from sea ice
@@ -564,9 +545,9 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
         do i = isc, iec
           ig = i + ocean_grid%isc - isc
           !rotate
-          if(set_missing_stks_to_zero) then
+          if (set_missing_stks_to_zero) then
             do ib = 1, nsc
-              if((abs(stkx(i,j,ib)-9.99E20_ESMF_KIND_R8) <= 0.01_ESMF_KIND_R8)) then
+              if ((abs(stkx(i,j,ib)-9.99E20_ESMF_KIND_R8) <= 0.01_ESMF_KIND_R8)) then
                 ice_ocean_boundary%ustkb(i,j,ib) = 0.0
                 ice_ocean_boundary%vstkb(i,j,ib) = 0.0
               else
@@ -590,64 +571,6 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
         enddo
       enddo
       deallocate(stkx,stky)
-  endif
-
-  !---
-  ! Tracer flux fields for FMS coupler_bc_type structures
-  !---
-  !   The atmospheric tracer fields are only set up when they are in use.
-  if (coupler_type_initialized(ice_ocean_boundary%atm_fields)) then
-    ! Set fields in ice_ocean_boundary%atm_fields from coupler
-    allocate (work(isc:iec,jsc:jec), source=0.0_ESMF_KIND_R8)
-    do n = 1, coupler_type_num_bcs(ice_ocean_boundary%atm_fields)
-      call coupler_type_get_bc(ice_ocean_boundary%atm_fields, n, name=bc_name, flux_type=flux_type)
-
-      if (trim(flux_type) == 'air_sea_deposition') then
-        field_index = ind_deposition
-      elseif (trim(flux_type) == 'land_sea_runoff') then
-        field_index = ind_runoff
-      else
-        ! This is a gas flux, which is also calculated from the 10 m wind speed and the surface
-        ! pressure. Note, we set these fields even though the pcair field may not be set below.
-        ! This is to allow flux calculation with overridden pcair fields.
-        field_index = ind_pcair
-        call coupler_type_get_field(ice_ocean_boundary%atm_fields, n, ind_u10, override=overridden)
-        if (.not.overridden) &
-          call set_coupler_type_data(sqrt(ice_ocean_boundary%u10_sqr), n, ice_ocean_boundary%atm_fields, &
-                idim=(/isc,isc,iec,iec/), jdim=(/jsc,jsc,jec,jec/), field_index=ind_u10)
-        call coupler_type_get_field(ice_ocean_boundary%atm_fields, n, ind_psurf, override=overridden)
-        if (.not.overridden) &
-          call set_coupler_type_data(ice_ocean_boundary%p, n, ice_ocean_boundary%atm_fields, &
-                idim=(/isc,isc,iec,iec/), jdim=(/jsc,jsc,jec,jec/), field_index=ind_psurf)
-      endif
-
-      call coupler_type_get_field(ice_ocean_boundary%atm_fields, n, field_index, &
-                                  name=field_name, override=overridden)
-
-      found = .false.
-      stdname = coupler_bcs_get_cmeps_name(bc_name)
-      if ((len_trim(stdname) > 0) .and. (.not.overridden)) then
-        call state_getimport(importState, trim(stdname), isc, iec, jsc, jec, work, found=found, rc=rc)
-        if (ChkErr(rc,__LINE__,u_FILE_u)) return
-        if (found) &
-          call set_coupler_type_data(work, n, ice_ocean_boundary%atm_fields, &
-                idim=(/isc,isc,iec,iec/), jdim=(/jsc,jsc,jec,jec/), field_index=field_index)
-      endif
-
-      ! Every flux that will actually be calculated needs its input field from somewhere, or it
-      ! would be calculated from zeros.
-      if (found) cycle
-      if (overridden) cycle
-      call coupler_type_get_field(ice_ocean_boundary%fluxes, n, ind_flux, override=flux_overridden)
-      if (flux_overridden) cycle
-      call MOM_error(FATAL, "mom_import: The input field "//trim(field_name)//" of the FMS "//&
-          "coupler boundary condition "//trim(bc_name)//&
-          " is neither provided by the coupler nor overridden from the data_table, so its flux "//&
-          "would be calculated from zeros.  Add the CMEPS standard_name that provides it to "//&
-          "coupler_bcs_get_cmeps_name, check that the mediator is connecting that field, or "//&
-          "override either the field or the flux from the data_table.")
-    enddo ! n-loop over boundary conditions
-    deallocate(work)
   endif
 
 end subroutine mom_import
@@ -675,7 +598,7 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
   integer                         :: dt_int
   real                            :: inv_dt_int  !< The inverse of coupling time interval in s-1.
   type(ESMF_StateItem_Flag)       :: itemFlag
-  integer           , allocatable :: omask(:,:)
+  real(ESMF_KIND_R8), allocatable :: omask(:,:)
   real(ESMF_KIND_R8), allocatable :: melt_potential(:,:)
   real(ESMF_KIND_R8), allocatable :: ocz(:,:), ocm(:,:)
   real(ESMF_KIND_R8), allocatable :: ocz_rot(:,:), ocm_rot(:,:)
@@ -710,9 +633,15 @@ subroutine mom_export(ocean_public, ocean_grid, ocean_state, exportState, clock,
   ! -------
 
   allocate(omask(isc:iec, jsc:jec))
-  call get_ocean_mask(ocean_state, omask)
+  do j = jsc, jec
+    jg = j + ocean_grid%jsc - jsc
+    do i = isc, iec
+      ig = i + ocean_grid%isc - isc
+      omask(i,j) = nint(ocean_grid%mask2dT(ig,jg))
+    enddo
+  enddo
 
-  call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, real(omask, ESMF_KIND_R8), ocean_grid, rc=rc)
+  call State_SetExport(exportState, 'So_omask', isc, iec, jsc, jec, omask, ocean_grid, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   deallocate(omask)
@@ -963,8 +892,7 @@ subroutine State_GetFldPtr_2d(State, fldname, fldptr, rc)
 end subroutine State_GetFldPtr_2d
 
 !> Map 2d import state field to output array
-subroutine State_GetImport_2d(state, fldname, isc, iec, jsc, jec, output, do_sum, areacor, esmf_ind, &
-                              found, rc)
+subroutine State_GetImport_2d(state, fldname, isc, iec, jsc, jec, output, do_sum, areacor, esmf_ind, rc)
   type(ESMF_State)    , intent(in)    :: state   !< ESMF state
   character(len=*)    , intent(in)    :: fldname !< Field name
   integer             , intent(in)    :: isc     !< The start i-index of cell centers within
@@ -980,8 +908,6 @@ subroutine State_GetImport_2d(state, fldname, isc, iec, jsc, jec, output, do_sum
   real (ESMF_KIND_R8), optional,  intent(in) :: areacor(:) !< flux area correction factors
                                                            !! applicable to meshes
   integer,             optional, intent(in) :: esmf_ind
-  logical,             optional, intent(out) :: found !< True if the field is in the import state.
-                                                 !! If it is not, output is left unchanged.
   integer             , intent(out)   :: rc      !< Return code
 
   ! local variables
@@ -1002,7 +928,6 @@ subroutine State_GetImport_2d(state, fldname, isc, iec, jsc, jec, output, do_sum
   endif
 
   call ESMF_StateGet(State, trim(fldname), itemFlag, rc=rc)
-  if (present(found)) found = (itemFlag /= ESMF_STATEITEM_NOTFOUND)
   if (itemFlag /= ESMF_STATEITEM_NOTFOUND) then
 
     if (geomtype == ESMF_GEOMTYPE_MESH) then

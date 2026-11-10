@@ -36,7 +36,7 @@ use MOM_io,                  only : read_netCDF_data, EAST_FACE, NORTH_FACE, num
 use MOM_restart,             only : register_restart_field, restart_init, MOM_restart_CS
 use MOM_restart,             only : restart_init_end, save_restart, restore_state
 use MOM_time_manager,        only : time_type, operator(+), operator(/), operator(*)
-use MOM_time_manager,        only : set_time, get_time, get_date, time_type_to_real
+use MOM_time_manager,        only : set_time, get_time, get_date, time_to_real
 use MOM_tracer_flow_control, only : call_tracer_set_forcing, tracer_flow_control_CS
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : surface
@@ -118,7 +118,7 @@ type, public :: surface_forcing_CS ; private
                              !! rotationally invariant and more likely to be the same between compilers.
   logical :: ustar_gustless_bug   !< If true, include a bug in the time-averaging of the
                                   !! gustless wind friction velocity.
-  logical :: use_marbl_tracers              !< If true, allocate memory for forcing needed by MARBL
+  logical :: use_MARBL_tracers              !< If true, allocate memory for forcing needed by MARBL
   ! if WIND_CONFIG=='scurves' then use the following to define a piecewise scurve profile
   real :: scurves_ydata(20) = 90. !< Latitudes of scurve nodes [degreesN]
   real :: scurves_taux(20) = 0.   !< Zonal wind stress values at scurve nodes [R L Z T-2 ~> Pa]
@@ -283,13 +283,13 @@ subroutine set_forcing(sfc_state, forces, fluxes, day_start, day_interval, G, US
   call callTree_enter("set_forcing, MOM_surface_forcing.F90")
 
   day_center = day_start + day_interval/2
-  dt = US%s_to_T * time_type_to_real(day_interval)
+  dt = time_to_real(day_interval, scale=US%s_to_T)
 
   if (CS%first_call_set_forcing) then
     ! Allocate memory for the mechanical and thermodynamic forcing fields.
     call allocate_mech_forcing(G, forces, stress=.true., ustar=.not.CS%nonBous, press=.true., tau_mag=CS%nonBous)
 
-    call allocate_forcing_type(G, fluxes, ustar=.not.CS%nonBous, marbl=CS%use_marbl_tracers, tau_mag=CS%nonBous, &
+    call allocate_forcing_type(G, fluxes, ustar=.not.CS%nonBous, marbl=CS%use_MARBL_tracers, tau_mag=CS%nonBous, &
                                fix_accum_bug=.not.CS%ustar_gustless_bug)
     if (trim(CS%buoy_config) /= "NONE") then
       if ( CS%use_temperature ) then
@@ -386,7 +386,7 @@ subroutine set_forcing(sfc_state, forces, fluxes, day_start, day_interval, G, US
     endif
   endif
 
-  if (CS%use_marbl_tracers) then
+  if (CS%use_MARBL_tracers) then
     call MARBL_forcing_from_data_override(fluxes, day_center, G, US, CS)
   endif
 
@@ -1791,9 +1791,9 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, tracer_flow_C
 
       ! These variable names are hard-coded, per the archaic OMIP conventions.
       CS%latentheat_file = CS%evaporation_file ; CS%latent_var = "evap"
-      CS%LW_var = "lwdn_sfc"; CS%SW_var = "swdn_sfc"; CS%sens_var = "shflx"
-      CS%evap_var = "evap"; CS%rain_var = "precip"; CS%snow_var = "snow"
-      CS%lrunoff_var = "disch_w"; CS%frunoff_var = "disch_s"
+      CS%LW_var = "lwdn_sfc" ; CS%SW_var = "swdn_sfc" ; CS%sens_var = "shflx"
+      CS%evap_var = "evap" ; CS%rain_var = "precip" ; CS%snow_var = "snow"
+      CS%lrunoff_var = "disch_w" ; CS%frunoff_var = "disch_s"
 
     else
       call get_param(param_file, mdl, "LONGWAVE_FILE", CS%longwave_file, &
@@ -2046,7 +2046,7 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, tracer_flow_C
   call get_param(param_file, mdl, "RHO_0", CS%Rho0, &
                  "The mean ocean density used with BOUSSINESQ true to "//&
                  "calculate accelerations and the mass for conservation "//&
-                 "properties, or with BOUSSINSEQ false to convert some "//&
+                 "properties, or with BOUSSINESQ false to convert some "//&
                  "parameters from vertical units of m to kg m-2.", &
                  units="kg m-3", default=1035.0, scale=US%kg_m3_to_R) ! (, do_not_log=CS%nonBous)
   call get_param(param_file, mdl, "RESTOREBUOY", CS%restorebuoy, &
@@ -2150,7 +2150,7 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, tracer_flow_C
     call read_netCDF_data(filename, 'gustiness', CS%gust, G%Domain, &
                           rescale=US%Pa_to_RLZ_T2*US%L_to_Z) ! units in file should be [Pa]
   endif
-  call get_param(param_file, mdl, "USE_MARBL_TRACERS", CS%use_marbl_tracers, &
+  call get_param(param_file, mdl, "USE_MARBL_TRACERS", CS%use_MARBL_tracers, &
                   default=.false., do_not_log=.true.)
 
 !  All parameter settings are now known.
@@ -2183,7 +2183,7 @@ subroutine surface_forcing_init(Time, G, US, param_file, diag, CS, tracer_flow_C
   endif
 
   ! Set up MARBL forcing control structure
-  call MARBL_forcing_init(G, US, param_file, diag, Time, CS%inputdir, CS%use_marbl_tracers, &
+  call MARBL_forcing_init(G, US, param_file, diag, Time, CS%inputdir, CS%use_MARBL_tracers, &
       CS%marbl_forcing_CSp)
 
   call register_forcing_type_diags(Time, diag, US, CS%use_temperature, CS%handles)

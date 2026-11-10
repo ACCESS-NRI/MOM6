@@ -19,6 +19,7 @@ use MOM_open_boundary, only : ocean_OBC_type
 use MOM_restart,       only : MOM_restart_CS
 use MOM_sponge,        only : sponge_CS
 use MOM_ALE_sponge,    only : ALE_sponge_CS
+use MOM_tracer_diabatic, only : tracer_diabatic_CS, tracer_diabatic_init, tracer_diabatic_end
 use MOM_tracer_registry, only : tracer_registry_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : surface, thermo_var_ptrs
@@ -48,9 +49,6 @@ use MARBL_tracers, only : MARBL_tracers_stock, MARBL_tracers_end, MARBL_tracers_
 use regional_dyes, only : register_dye_tracer, initialize_dye_tracer
 use regional_dyes, only : dye_tracer_column_physics, dye_tracer_surface_state
 use regional_dyes, only : dye_stock, regional_dyes_end, dye_tracer_CS
-use file_dye_tracer, only : register_file_dye_tracer, initialize_file_dye_tracer
-use file_dye_tracer, only : file_dye_tracer_column_physics, file_dye_tracer_surface_state
-use file_dye_tracer, only : file_dye_stock, file_dyes_end, file_dye_tracer_CS
 use MOM_OCMIP2_CFC, only : register_OCMIP2_CFC, initialize_OCMIP2_CFC, flux_init_OCMIP2_CFC
 use MOM_OCMIP2_CFC, only : OCMIP2_CFC_column_physics, OCMIP2_CFC_surface_state
 use MOM_OCMIP2_CFC, only : OCMIP2_CFC_stock, OCMIP2_CFC_end, OCMIP2_CFC_CS
@@ -86,7 +84,7 @@ implicit none ; private
 public call_tracer_register, tracer_flow_control_init, call_tracer_set_forcing
 public call_tracer_column_fns, call_tracer_surface_state, call_tracer_stocks
 public call_tracer_flux_init, get_chl_from_model, tracer_flow_control_end
-public call_tracer_register_obc_segments
+public call_tracer_register_obc_segments, extract_tracer_flow_member
 
 !> The control structure for orchestrating the calling of tracer packages
 type, public :: tracer_flow_control_CS ; private
@@ -97,7 +95,6 @@ type, public :: tracer_flow_control_CS ; private
   logical :: use_ideal_age = .false.               !< If true, use the ideal age tracer package
   logical :: use_MARBL_tracers = .false.           !< If true, use the MARBL tracer package
   logical :: use_regional_dyes = .false.           !< If true, use the regional dyes tracer package
-  logical :: use_file_dyes = .false.               !< If true, use the file dyes tracer package
   logical :: use_oil = .false.                     !< If true, use the oil tracer package
   logical :: use_advection_test_tracer = .false.   !< If true, use the advection_test_tracer package
   logical :: use_OCMIP2_CFC = .false.              !< If true, use the OCMIP2_CFC tracer package
@@ -116,7 +113,6 @@ type, public :: tracer_flow_control_CS ; private
   type(ideal_age_tracer_CS), pointer :: ideal_age_tracer_CSp => NULL()
   type(MARBL_tracers_CS), pointer :: MARBL_tracers_CSp => NULL()
   type(dye_tracer_CS), pointer :: dye_tracer_CSp => NULL()
-  type(file_dye_tracer_CS), pointer :: file_dye_tracer_CSp => NULL()
   type(oil_tracer_CS), pointer :: oil_tracer_CSp => NULL()
   type(advection_test_tracer_CS), pointer :: advection_test_tracer_CSp => NULL()
   type(OCMIP2_CFC_CS), pointer :: OCMIP2_CFC_CSp => NULL()
@@ -127,6 +123,8 @@ type, public :: tracer_flow_control_CS ; private
   type(dyed_obc_tracer_CS), pointer :: dyed_obc_tracer_CSp => NULL()
   type(nw2_tracers_CS), pointer :: nw2_tracers_CSp => NULL()
   !>@}
+  type(tracer_diabatic_CS), pointer :: tracer_diabatic_CSp => NULL() !< The control structure with the block
+                                               !! sizes used by the tracer vertical diffusion
 end type tracer_flow_control_CS
 
 contains
@@ -208,14 +206,11 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
   call get_param(param_file, mdl, "USE_IDEAL_AGE_TRACER", CS%use_ideal_age, &
                  "If true, use the ideal_age_example tracer package.", &
                  default=.false.)
-  call get_param(param_file, mdl, "USE_MARBL_TRACERS", CS%use_marbl_tracers, &
+  call get_param(param_file, mdl, "USE_MARBL_TRACERS", CS%use_MARBL_tracers, &
                  "If true, use the MARBL tracer package.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_REGIONAL_DYES", CS%use_regional_dyes, &
                  "If true, use the regional_dyes tracer package.", &
-                 default=.false.)
-  call get_param(param_file, mdl, "USE_FILE_DYES", CS%use_file_dyes, &
-                 "If true, use the file dyes tracer package.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_OIL_TRACER", CS%use_oil, &
                  "If true, use the oil_tracer tracer package.", &
@@ -230,7 +225,8 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
                  "If true, use the MOM_CFC_cap tracer package.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_generic_tracer", CS%use_MOM_generic_tracer, &
-                 "If true, use the MOM_generic_tracer packages.", &
+                 "If true and _USE_GENERIC_TRACER is defined as a "//&
+                 "preprocessor macro, use the MOM_generic_tracer packages.", &
                  default=.false.)
   call get_param(param_file, mdl, "USE_PSEUDO_SALT_TRACER", CS%use_pseudo_salt_tracer, &
                  "If true, use the pseudo salt tracer, typically run as a diagnostic.", &
@@ -269,9 +265,6 @@ subroutine call_tracer_register(G, GV, US, param_file, CS, tr_Reg, restart_CS)
   if (CS%use_regional_dyes) CS%use_regional_dyes = &
     register_dye_tracer(G%HI, GV, US, param_file, CS%dye_tracer_CSp, &
                         tr_Reg, restart_CS)
-  if (CS%use_file_dyes) CS%use_file_dyes = &
-    register_file_dye_tracer(G%HI, GV, US, param_file, CS%file_dye_tracer_CSp, &
-                             tr_Reg, restart_CS)
   if (CS%use_oil) CS%use_oil = &
     register_oil_tracer(G%HI, GV, US, param_file,  CS%oil_tracer_CSp, &
                         tr_Reg, restart_CS)
@@ -337,6 +330,8 @@ subroutine tracer_flow_control_init(restart, day, G, GV, US, h, param_file, diag
   if (.not. associated(CS)) call MOM_error(FATAL, "tracer_flow_control_init: "// &
          "Module must be initialized via call_tracer_register before it is used.")
 
+  call tracer_diabatic_init(param_file, CS%tracer_diabatic_CSp)
+
 !  Add other user-provided calls here.
   if (CS%use_USER_tracer_example) &
     call USER_initialize_tracer(restart, day, G, GV, US, h, diag, OBC, CS%USER_tracer_example_CSp, &
@@ -357,10 +352,7 @@ subroutine tracer_flow_control_init(restart, day, G, GV, US, h, param_file, diag
     call initialize_MARBL_tracers(restart, day, G, GV, US, h, param_file, diag, OBC, CS%MARBL_tracers_CSp, &
                                 sponge_CSp)
   if (CS%use_regional_dyes) &
-    call initialize_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%dye_tracer_CSp, sponge_CSp, tv)
-  if (CS%use_file_dyes) &
-    call initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS%file_dye_tracer_CSp, &
-                                    sponge_CSp)
+    call initialize_dye_tracer(restart, day, G, GV, US, h, diag, OBC, CS%dye_tracer_CSp, sponge_CSp, tv)
   if (CS%use_oil) &
     call initialize_oil_tracer(restart, day, G, GV, US, h, diag, OBC, CS%oil_tracer_CSp, sponge_CSp)
   if (CS%use_advection_test_tracer) &
@@ -430,6 +422,21 @@ subroutine get_chl_from_model(Chl_array, G, GV, CS)
 
 end subroutine get_chl_from_model
 
+!> Returns pointers or values of members within the tracer_flow_control_CS type. For extensibility,
+!! each returned argument is an optional argument
+subroutine extract_tracer_flow_member(CS, use_MARBL_tracers, tracer_diabatic_CSp)
+  type(tracer_flow_control_CS), target, intent(in)  :: CS !< module control structure
+  ! All output arguments are optional
+  logical,                    optional, intent(out) :: use_MARBL_tracers  !< If true, MARBL tracers are active
+  type(tracer_diabatic_CS), optional, pointer       :: tracer_diabatic_CSp !< The control structure with the
+                                                                  !! block sizes used by tracer_vertdiff
+
+  ! Constants within tracer_flow_control_CS
+  if (present(use_MARBL_tracers)) use_MARBL_tracers = CS%use_MARBL_tracers
+  ! Pointers to control structures
+  if (present(tracer_diabatic_CSp)) tracer_diabatic_CSp => CS%tracer_diabatic_CSp
+end subroutine extract_tracer_flow_member
+
 !> This subroutine calls the individual tracer modules' subroutines to
 !! specify or read quantities related to their surface forcing.
 subroutine call_tracer_set_forcing(sfc_state, fluxes, day_start, day_interval, G, US, Rho0, CS)
@@ -449,7 +456,7 @@ subroutine call_tracer_set_forcing(sfc_state, fluxes, day_start, day_interval, G
   type(tracer_flow_control_CS), pointer       :: CS        !< The control structure returned by a
                                                            !! previous call to call_tracer_register.
 
-  if (.not. associated(CS)) call MOM_error(FATAL, "call_tracer_set_forcing"// &
+  if (.not. associated(CS)) call MOM_error(FATAL, "call_tracer_set_forcing: "// &
          "Module must be initialized via call_tracer_register before it is used.")
 !  if (CS%use_ideal_age) &
 !    call ideal_age_tracer_set_forcing(sfc_state, fluxes, day_start, day_interval, &
@@ -464,8 +471,12 @@ subroutine call_tracer_set_forcing(sfc_state, fluxes, day_start, day_interval, G
 end subroutine call_tracer_set_forcing
 
 !> This subroutine calls all registered tracer column physics subroutines.
+!! h_old, ea and eb must be on the device and current there, but may be stale on the host, so the
+!! packages that read them on the host copy them back first.  h_new, tv and the forcing must be
+!! current on the host.
 subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, US, tv, optics, CS, &
-                                  debug, KPP_CSp, nonLocalTrans, evap_CFL_limit, minimum_forcing_depth, h_BL)
+                                  debug, KPP_CSp, nonLocalTrans, evap_CFL_limit, minimum_forcing_depth, &
+                                  h_BL, prediabatic_T, prediabatic_S)
   type(ocean_grid_type),                 intent(in) :: G      !< The ocean's grid structure.
   type(verticalGrid_type),               intent(in) :: GV     !< The ocean's vertical grid structure.
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in) :: h_old !< Layer thickness before entrainment
@@ -501,6 +512,10 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
   real,                        optional, intent(in) :: minimum_forcing_depth !< The smallest depth over
                                                               !! which fluxes can be applied [H ~> m or kg m-2]
   real, dimension(:,:),        optional, pointer    :: h_BL   !< Thickness of active mixing layer [H ~> m or kg m-2]
+  real, dimension(:,:,:),      optional, intent(in) :: prediabatic_T   !< Temperature prior to calling
+                                                                       !! diabatic driver [C ~> degC]
+  real, dimension(:,:,:),      optional, intent(in) :: prediabatic_S   !< Salinity prior to calling
+                                                                       !! diabatic driver [S ~> ppt]
 
   ! Local variables
   real :: Hbl(SZI_(G),SZJ_(G))    !< Boundary layer thickness [H ~> m or kg m-2]
@@ -540,25 +555,25 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
       call ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                            G, GV, US, CS%ideal_age_tracer_CSp, &
                                            evap_CFL_limit=evap_CFL_limit, &
-                                           minimum_forcing_depth=minimum_forcing_depth, Hbl=Hbl)
+                                           minimum_forcing_depth=minimum_forcing_depth, Hbl=Hbl, &
+                                           tracer_diabatic_CSp=CS%tracer_diabatic_CSp)
     endif
-    if (CS%use_MARBL_tracers) &
-      call MARBL_tracers_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                        G, GV, US, CS%MARBL_tracers_CSp, tv, &
+    if (CS%use_MARBL_tracers) then
+      if ((.not. present(prediabatic_T)) .or. (.not. present(prediabatic_S))) &
+        call MOM_error(FATAL, 'Must pass prediabatic_T and prediabatic_S when using MARBL')
+      call MARBL_tracers_column_physics(h_old, ea, eb, fluxes, dt, &
+                                        G, GV, US, CS%MARBL_tracers_CSp, &
+                                        prediabatic_T, prediabatic_S, &
                                         KPP_CSp=KPP_CSp, &
                                         nonLocalTrans=nonLocalTrans, &
                                         evap_CFL_limit=evap_CFL_limit, &
                                         minimum_forcing_depth=minimum_forcing_depth)
+    endif
     if (CS%use_regional_dyes) &
       call dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, tv, CS%dye_tracer_CSp, &
                                      evap_CFL_limit=evap_CFL_limit, &
                                      minimum_forcing_depth=minimum_forcing_depth)
-    if (CS%use_file_dyes) &
-      call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                          G, GV, US, CS%file_dye_tracer_CSp, &
-                                          evap_CFL_limit=evap_CFL_limit, &
-                                          minimum_forcing_depth=minimum_forcing_depth)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv, &
@@ -635,19 +650,21 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
         call convert_MLD_to_ML_thickness(mld, h_new, Hbl, tv, G, GV)
       endif
       call ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                           G, GV, US, CS%ideal_age_tracer_CSp, Hbl=Hbl)
+                                           G, GV, US, CS%ideal_age_tracer_CSp, Hbl=Hbl, &
+                                           tracer_diabatic_CSp=CS%tracer_diabatic_CSp)
     endif
-    if (CS%use_MARBL_tracers) &
-      call MARBL_tracers_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                        G, GV, US, CS%MARBL_tracers_CSp, tv, &
+    if (CS%use_MARBL_tracers) then
+      if ((.not. present(prediabatic_T)) .or. (.not. present(prediabatic_S))) &
+        call MOM_error(FATAL, 'Must pass prediabatic_T and prediabatic_S when using MARBL')
+      call MARBL_tracers_column_physics(h_old, ea, eb, fluxes, dt, &
+                                        G, GV, US, CS%MARBL_tracers_CSp, &
+                                        prediabatic_T, prediabatic_S, &
                                         KPP_CSp=KPP_CSp, &
                                         nonLocalTrans=nonLocalTrans)
+    endif
     if (CS%use_regional_dyes) &
       call dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                            G, GV, US, tv, CS%dye_tracer_CSp)
-    if (CS%use_file_dyes) &
-      call file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                          G, GV, US, CS%file_dye_tracer_CSp)
     if (CS%use_oil) &
       call oil_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                      G, GV, US, CS%oil_tracer_CSp, tv)
@@ -777,11 +794,6 @@ subroutine call_tracer_stocks(h, stock_values, G, GV, US, CS, stock_names, stock
     call store_stocks("regional_dyes", ns, names, units, values_EFP, index, stock_val_EFP, &
                       set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
   endif
-  if (CS%use_file_dyes) then
-    ns = file_dye_stock(h, values_EFP, G, GV, CS%file_dye_tracer_CSp, names, units, stock_index)
-    call store_stocks("file_dyes", ns, names, units, values_EFP, index, stock_val_EFP, &
-                      set_pkg_name, max_ns, ns_tot, stock_names, stock_units)
-  endif
   if (CS%use_oil) then
     ns = oil_stock(h, values_EFP, G, GV, CS%oil_tracer_CSp, names, units, stock_index)
     call store_stocks("oil_tracer", ns, names, units, values_EFP, index, stock_val_EFP, &
@@ -879,12 +891,12 @@ subroutine store_stocks(pkg_name, ns, names, units, values, index, stock_values,
     write(ind_text,'(I0)') index
     if (ns > 1) then
       call MOM_error(FATAL,"Tracer package "//trim(pkg_name)//&
-          " is not permitted to return more than one value when queried"//&
-          " for specific stock index "//trim(ind_text)//".")
+          " is not permitted to return more than one value when queried "//&
+          "for specific stock index "//trim(ind_text)//".")
     elseif (ns+ns_tot > 1) then
       call MOM_error(FATAL,"Tracer packages "//trim(pkg_name)//" and "//&
-          trim(set_pkg_name)//" both attempted to set values for"//&
-          " specific stock index "//trim(ind_text)//".")
+          trim(set_pkg_name)//" both attempted to set values for "//&
+          "specific stock index "//trim(ind_text)//".")
     else
       set_pkg_name = pkg_name
     endif
@@ -935,8 +947,6 @@ subroutine call_tracer_surface_state(sfc_state, h, G, GV, US, CS)
     call MARBL_tracers_surface_state(sfc_state, G, US, CS%MARBL_tracers_CSp)
   if (CS%use_regional_dyes) &
     call dye_tracer_surface_state(sfc_state, h, G, GV, CS%dye_tracer_CSp)
-  if (CS%use_file_dyes) &
-    call file_dye_tracer_surface_state(sfc_state, h, G, GV, CS%file_dye_tracer_CSp)
   if (CS%use_oil) &
     call oil_tracer_surface_state(sfc_state, h, G, GV, CS%oil_tracer_CSp)
   if (CS%use_advection_test_tracer) &
@@ -960,7 +970,6 @@ subroutine tracer_flow_control_end(CS)
   if (CS%use_ideal_age) call ideal_age_example_end(CS%ideal_age_tracer_CSp)
   if (CS%use_MARBL_tracers) call MARBL_tracers_end(CS%MARBL_tracers_CSp)
   if (CS%use_regional_dyes) call regional_dyes_end(CS%dye_tracer_CSp)
-  if (CS%use_file_dyes) call file_dyes_end(CS%file_dye_tracer_CSp)
   if (CS%use_oil) call oil_tracer_end(CS%oil_tracer_CSp)
   if (CS%use_advection_test_tracer) call advection_test_tracer_end(CS%advection_test_tracer_CSp)
   if (CS%use_OCMIP2_CFC) call OCMIP2_CFC_end(CS%OCMIP2_CFC_CSp)
@@ -970,6 +979,7 @@ subroutine tracer_flow_control_end(CS)
   if (CS%use_boundary_impulse_tracer) call boundary_impulse_tracer_end(CS%boundary_impulse_tracer_CSp)
   if (CS%use_dyed_obc_tracer) call dyed_obc_tracer_end(CS%dyed_obc_tracer_CSp)
   if (CS%use_nw2_tracers) call nw2_tracers_end(CS%nw2_tracers_CSp)
+  call tracer_diabatic_end(CS%tracer_diabatic_CSp)
 
   if (associated(CS)) deallocate(CS)
 end subroutine tracer_flow_control_end

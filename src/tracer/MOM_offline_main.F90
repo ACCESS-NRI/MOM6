@@ -102,6 +102,7 @@ type, public :: offline_transport_CS ; private
   logical :: skip_diffusion    !< Skips horizontal diffusion of tracers
   logical :: read_sw           !< Read in averaged values for shortwave radiation
   logical :: read_mld          !< Check to see whether mixed layer depths should be read in
+  real    :: Hmix_fixed        !< A fixed mixed layer depth to use when read_mld is false [Z ~> m]
   logical :: diurnal_sw        !< Adds a synthetic diurnal cycle on shortwave radiation
   logical :: debug             !< If true, write verbose debugging messages
   logical :: redistribute_barotropic !< Redistributes column-summed residual transports throughout
@@ -129,10 +130,8 @@ type, public :: offline_transport_CS ; private
                         !! routine [H L2 ~> m3 or kg]
   !>@{ Diagnostic manager IDs for some fields that may be of interest when doing offline transport
   integer :: &
-    id_uhr = -1, &
-    id_vhr = -1, &
-    id_ear = -1, &
-    id_ebr = -1, &
+    id_uhr = -1, id_vhr = -1, &
+    ! Unused: id_ear = -1, id_ebr = -1, &
     id_hr = -1,  &
     id_hdiff = -1, &
     id_uhr_redist = -1, &
@@ -796,12 +795,26 @@ subroutine offline_fw_fluxes_into_ocean(G, GV, CS, fluxes, h, in_flux_optional)
     call hchksum(h, "h before fluxes into ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes into ocean", G, GV, h, CS%tracer_reg)
   endif
+  !   h and the freshwater fluxes may have been changed on the host since they were last on the
+  ! device, so they are updated explicitly in case they are already present there.
+  !$omp target enter data map(to: h, fluxes)
+  !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+  !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
+  !$omp target update to(h)
+  !$omp target update if(associated(fluxes%netMassIn)) to(fluxes%netMassIn)
+  !$omp target update if(associated(fluxes%netMassOut)) to(fluxes%netMassOut)
   do m = 1,CS%tracer_reg%ntr
     ! Layer thicknesses should only be updated after the last tracer is finished
     update_h = ( m == CS%tracer_reg%ntr )
+    !$omp target enter data map(to: CS%tracer_reg%tr(m)%t)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%tracer_reg%tr(m)%t, CS%dt_offline, fluxes, h, &
                                         CS%evap_CFL_limit, CS%minimum_forcing_depth, update_h_opt=update_h)
+    !$omp target exit data map(from: CS%tracer_reg%tr(m)%t)
   enddo
+  !$omp target update from(h)
+  !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+  !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+  !$omp target exit data map(release: h, fluxes)
   if (CS%debug) then
     call hchksum(h, "h after fluxes into ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("After fluxes into ocean", G, GV, h, CS%tracer_reg)
@@ -835,12 +848,26 @@ subroutine offline_fw_fluxes_out_ocean(G, GV, CS, fluxes, h, out_flux_optional)
     call hchksum(h, "h before fluxes out of ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes out of ocean", G, GV, h, CS%tracer_reg)
   endif
+  !   h and the freshwater fluxes may have been changed on the host since they were last on the
+  ! device, so they are updated explicitly in case they are already present there.
+  !$omp target enter data map(to: h, fluxes)
+  !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+  !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
+  !$omp target update to(h)
+  !$omp target update if(associated(fluxes%netMassIn)) to(fluxes%netMassIn)
+  !$omp target update if(associated(fluxes%netMassOut)) to(fluxes%netMassOut)
   do m = 1, CS%tracer_reg%ntr
     ! Layer thicknesses should only be updated after the last tracer is finished
     update_h = ( m == CS%tracer_reg%ntr )
+    !$omp target enter data map(to: CS%tracer_reg%tr(m)%t)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%tracer_reg%tr(m)%t, CS%dt_offline, fluxes, h, &
                                         CS%evap_CFL_limit, CS%minimum_forcing_depth, update_h_opt = update_h)
+    !$omp target exit data map(from: CS%tracer_reg%tr(m)%t)
   enddo
+  !$omp target update from(h)
+  !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+  !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+  !$omp target exit data map(release: h, fluxes)
   if (CS%debug) then
     call hchksum(h, "h after fluxes out of ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes out of ocean", G, GV, h, CS%tracer_reg)
@@ -1051,8 +1078,9 @@ subroutine update_offline_fields(CS, G, GV, US, h, fluxes, do_ale)
   ! Most fields will be read in from files
   call update_offline_from_files( G, GV, US, CS%nk_input, CS%mean_file, CS%sum_file, CS%snap_file, &
                                   CS%surf_file, CS%h_end, CS%uhtr, CS%vhtr, CS%tv%T, CS%tv%S, &
-                                  CS%mld, CS%Kd, fluxes, CS%ridx_sum, CS%ridx_snap, CS%read_mld, &
-                                  CS%read_sw, .not.CS%read_all_ts_uvh, do_ale)
+                                  CS%mld, CS%Kd, fluxes, CS%ridx_sum, CS%ridx_snap, &
+                                  CS%read_mld, CS%mld_var_name, CS%read_sw, &
+                                  .not.CS%read_all_ts_uvh, do_ale)
   ! If uh, vh, h_end, temp, salt were read in at the beginning, fields are copied from those arrays
   if (CS%read_all_ts_uvh) then
     call update_offline_from_arrays(G, GV, CS%nk_input, CS%ridx_sum, CS%mean_file, CS%sum_file, &
@@ -1177,10 +1205,10 @@ subroutine register_diags_offline_transport(Time, diag, CS, GV, US)
     'm', conversion=GV%H_to_m)
   CS%id_hr  = register_diag_field('ocean_model', 'hr', diag%axesTL, Time, &
     'Layer thickness at end of offline step', 'm', conversion=GV%H_to_m)
-  CS%id_ear  = register_diag_field('ocean_model', 'ear', diag%axesTL, Time, &
-    'Remaining thickness entrained from above', 'm')
-  CS%id_ebr  = register_diag_field('ocean_model', 'ebr', diag%axesTL, Time, &
-    'Remaining thickness entrained from below', 'm')
+  ! Unused:  CS%id_ear  = register_diag_field('ocean_model', 'ear', diag%axesTL, Time, &
+  !              'Remaining thickness entrained from above', 'm')
+  ! Unused:  CS%id_ebr  = register_diag_field('ocean_model', 'ebr', diag%axesTL, Time, &
+  !              'Remaining thickness entrained from below', 'm')
   CS%id_eta_pre_distribute = register_diag_field('ocean_model','eta_pre_distribute', &
     diag%axesT1, Time, 'Total water column height before residual transport redistribution', &
     'm', conversion=GV%H_to_m)
@@ -1413,6 +1441,15 @@ subroutine offline_transport_init(param_file, CS, diabatic_CSp, G, GV, US)
     "when in offline tracer mode", default=.false.)
   call get_param(param_file, mdl, "MLD_VAR_NAME", CS%mld_var_name, &
     "Name of the variable containing the depth of active mixing", default='ePBL_h_ML')
+  if (CS%read_mld) then
+    CS%Hmix_fixed = 0.0
+  else
+    call get_param(param_file, mdl, "HMIX_FIXED", CS%Hmix_fixed, &
+                 "The prescribed depth over which the near-surface viscosity and "//&
+                 "diffusivity are elevated when the bulk mixed layer is not used.", &
+                 units="m", scale=US%m_to_Z, fail_if_missing=.true.)
+  endif
+
   call get_param(param_file, mdl, "OFFLINE_ADD_DIURNAL_SW", CS%diurnal_sw, &
     "Adds a synthetic diurnal cycle in the same way that the ice "//&
     "model would have when time-averaged fields of shortwave "//&
@@ -1477,7 +1514,7 @@ subroutine offline_transport_init(param_file, CS, diabatic_CSp, G, GV, US)
   allocate(CS%ebtr(isd:ied,jsd:jed,nz), source=0.0)
   allocate(CS%h_end(isd:ied,jsd:jed,nz), source=0.0)
   allocate(CS%Kd(isd:ied,jsd:jed,nz+1), source=0.0)
-  if (CS%read_mld) allocate(CS%mld(G%isd:G%ied,G%jsd:G%jed), source=0.0)
+  allocate(CS%mld(G%isd:G%ied,G%jsd:G%jed), source=CS%Hmix_fixed)
 
   if (CS%read_all_ts_uvh) then
     call read_all_input(CS, G, GV, US)
@@ -1549,7 +1586,7 @@ subroutine offline_transport_end(CS)
   deallocate(CS%ebtr)
   deallocate(CS%h_end)
   deallocate(CS%Kd)
-  if (CS%read_mld) deallocate(CS%mld)
+  if (allocated(CS%mld)) deallocate(CS%mld)
   if (CS%read_all_ts_uvh) then
     deallocate(CS%uhtr_all)
     deallocate(CS%vhtr_all)

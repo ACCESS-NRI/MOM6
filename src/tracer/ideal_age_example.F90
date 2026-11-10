@@ -18,9 +18,9 @@ use MOM_open_boundary, only : ocean_OBC_type
 use MOM_restart, only : query_initialized, set_initialized, MOM_restart_CS
 use MOM_spatial_means, only : global_mass_int_EFP
 use MOM_sponge, only : set_up_sponge_field, sponge_CS
-use MOM_time_manager, only : time_type, time_type_to_real
+use MOM_time_manager, only : time_type, time_to_real
 use MOM_tracer_registry, only : register_tracer, tracer_registry_type
-use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut
+use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut, tracer_diabatic_CS
 use MOM_tracer_Z_init, only : tracer_Z_init
 use MOM_unit_scaling, only : unit_scale_type
 use MOM_variables, only : surface
@@ -179,7 +179,7 @@ function register_ideal_age_tracer(HI, GV, param_file, CS, tr_Reg, restart_CS)
 
   CS%BL_residence_num = 0
   if (do_BL_residence) then
-    CS%ntr = CS%ntr + 1 ; m = CS%ntr; CS%BL_residence_num = CS%ntr
+    CS%ntr = CS%ntr + 1 ; m = CS%ntr ; CS%BL_residence_num = CS%ntr
     CS%tr_desc(m) = var_desc("BL_age", "yr", "BL Residence Time Tracer", caller=mdl)
     CS%tracer_ages(m) = .true. ; CS%growth_rate(m) = 0.0
     CS%IC_val(m) = 0.0 ; CS%young_val(m) = 0.0 ; CS%tracer_start_year(m) = 0.0
@@ -299,7 +299,7 @@ end subroutine initialize_ideal_age_tracer
 
 !> Applies diapycnal diffusion, aging and regeneration at the surface to the ideal age tracers
 subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, CS, &
-              evap_CFL_limit, minimum_forcing_depth, Hbl)
+              evap_CFL_limit, minimum_forcing_depth, Hbl, tracer_diabatic_CSp)
   type(ocean_grid_type),   intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type), intent(in) :: GV   !< The ocean's vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -325,6 +325,8 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   real,          optional, intent(in) :: minimum_forcing_depth !< The smallest depth over which
                                               !! fluxes can be applied [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G)), optional, intent(in) :: Hbl !< Boundary layer thickness [H ~> m or kg m-2]
+  type(tracer_diabatic_CS), optional, intent(in) :: tracer_diabatic_CSp !< The control structure for the
+                                              !! tracer vertical diffusion, with its block sizes
 
 !   This subroutine applies diapycnal diffusion and any other column
 ! tracer physics or chemistry to the tracers from this file.
@@ -349,6 +351,7 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   endif
 
   if (CS%use_real_BL_depth .and. present(Hbl)) then
+    !$omp target update from(h_old)
     call count_BL_layers(G, GV, h_old, Hbl, BL_layers)
   endif
 
@@ -356,24 +359,41 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   if (CS%ntr < 1) return
 
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !   h_old is mapped to the device by the caller.  The tracers, the working copy of the
+    ! thicknesses and the freshwater fluxes that applyTracerBoundaryFluxesInOut uses are mapped
+    ! here.  Each pointer component is mapped under the same test that gates its use, because an
+    ! unassociated pointer component can not be mapped.
+    !$omp target enter data map(alloc: h_work)
+    !$omp target enter data map(to: CS%tr)
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+    !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
     do m=1,CS%ntr
-      do k=1,nz ;do j=js,je ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
         h_work(i,j,k) = h_old(i,j,k)
-      enddo ; enddo ; enddo
+      enddo
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
-      call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV, CS=tracer_diabatic_CSp)
     enddo
+    !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+    !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(from: CS%tr)
+    !$omp target exit data map(delete: h_work)
   else
+    !   h_old, ea and eb are mapped to the device by the caller.
+    !$omp target enter data map(to: CS%tr)
     do m=1,CS%ntr
-      call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV, CS=tracer_diabatic_CSp)
     enddo
+    !$omp target exit data map(from: CS%tr)
   endif
 
   Isecs_per_year = 1.0 / (365.0*86400.0*US%s_to_T)
   !   Set the surface value of tracer 1 to increase exponentially
   ! with a 30 year time scale.
-  year = US%s_to_T*time_type_to_real(CS%Time) * Isecs_per_year
+  year = time_to_real(CS%Time, scale=US%s_to_T) * Isecs_per_year
 
   do m=1,CS%ntr
 
