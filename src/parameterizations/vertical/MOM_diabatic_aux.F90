@@ -722,7 +722,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                  optional, pointer       :: MLD_h !< Mixed layer thickness for brine plumes [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G)), &
                   optional, intent(in)   :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
-  real, optional, intent(in)             :: shelf_forcing_depth !< Flux depth for shelf regions
+  real, optional, intent(in)             :: shelf_forcing_depth !< Flux depth for shelf regions [H ~> m or kg m-2].
 
   ! Local variables
   integer, parameter :: maxGroundings = 5

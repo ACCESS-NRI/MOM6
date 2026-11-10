@@ -2297,7 +2297,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   type(group_pass_type) :: tmp_pass_uv_T_S_h, pass_uv_T_S_h
 
   real    :: Hmix_z, Hmix_UV_z ! Temporary variables with averaging depths [Z ~> m]
-  real    :: Hmix_shelf_z, Hmix_UV_shelf_z
+  real    :: Hmix_shelf_z, Hmix_UV_shelf_z ! Temporary variables with ice-shelf averaging depths [Z ~> m]
   real    :: HFrz_z            ! Temporary variable with the melt potential depth [Z ~> m]
   real    :: default_val       ! The default value for DTBT_RESET_PERIOD [s]
   logical :: write_geom_files  ! If true, write out the grid geometry files.
@@ -4034,7 +4034,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
   logical :: use_iceshelves
   character(240) :: msg
   integer :: turns    ! Number of quarter turns
-  real :: frac_shelf_u, frac_shelf_v
+  real :: frac_shelf_u, frac_shelf_v ! Ice shelf area fraction at u and v points [nondim]
 
   call callTree_enter("extract_surface_state(), MOM.F90")
   G => CS%G ; G_in => CS%G_in ; GV => CS%GV ; US => CS%US

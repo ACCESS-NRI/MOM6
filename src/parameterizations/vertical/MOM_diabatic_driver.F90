@@ -303,7 +303,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(ocean_OBC_type),                       pointer       :: OBC      !< Open boundaries control structure.
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
-  real, dimension(:,:),             optional, intent(in)    :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
+  real, dimension(SZI_(G),SZJ_(G)), optional, intent(in)    :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
@@ -1269,7 +1269,7 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   type(diabatic_CS),                          pointer       :: CS       !< module control structure
   type(stochastic_CS),                        pointer       :: stoch_CS !< stochastic control structure
   type(Wave_parameters_CS),                   pointer       :: Waves    !< Surface gravity waves
-  real, dimension(:,:),             optional, intent(in) :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
+  real, dimension(SZI_(G),SZJ_(G)), optional, intent(in)    :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
 
   ! local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
@@ -3245,7 +3245,7 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
   type(oda_incupd_CS),     pointer       :: oda_incupd_CSp   !< pointer to the ocean data assimilation incremental
                                                              !! update module control structure
   type(int_tide_CS),       pointer       :: int_tide_CSp     !< pointer to the internal tide structure
-  real, dimension(:,:), optional, intent(in) :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
+  real, dimension(SZI_(G),SZJ_(G)), optional, intent(in) :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
 
   ! Local variables
   real    :: Kd  ! A diffusivity used in the default for other tracer diffusivities [Z2 T-1 ~> m2 s-1]
