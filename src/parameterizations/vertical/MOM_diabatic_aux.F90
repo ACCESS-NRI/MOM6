@@ -1092,8 +1092,8 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
           ! forcing into deeper layers.
           if (present(frac_shelf_h)) then
             IforcingDepthScale = 1. / max(GV%H_subroundoff, &
-              frac_shelf_h(i,j) * (shelf_forcing_depth - netMassOut(i)) &
-              + (1. - frac_shelf_h(i,j)) * (minimum_forcing_depth - netMassOut(i)))
+              (minimum_forcing_depth + frac_shelf_h(i,j) * (shelf_forcing_depth - minimum_forcing_depth)) &
+              - netMassOut(i))
           else
             IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut(i) )
           endif
