@@ -4223,7 +4223,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
             if (G%areaT(i,j) + G%areaT(i+1,j) > 0.0) &
               frac_shelf_u = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
                                + CS%frac_shelf_h(i+1,j) * G%areaT(i+1,j))&
-                             / (G%areaT(i+1,j) + G%areaT(i+1,j))
+                             / (G%areaT(i,j) + G%areaT(i+1,j))
             depth_ml = CS%Hmix_UV + frac_shelf_u * (CS%Hmix_UV_shelf - CS%Hmix_UV)
           endif
           hu = 0.5 * (h(i,j,k) + h(i+1,j,k)) * H_rescale
