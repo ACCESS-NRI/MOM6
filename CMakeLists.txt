@@ -19,6 +19,7 @@ option(MOM6_ACCESS3    "Build MOM6 library for use with ACCESS3"  OFF)
 option(MOM6_SOLO       "Build MOM6 solo executable"               ON)
 option(MOM6_OPENMP     "Enable OpenMP threading"                  OFF)
 option(MOM6_ASYMMETRIC "Use MOM asymmetric memory"                OFF)
+option(MOM6_FAST_RINT  "Use the fast round-to-nearest-integer in the reproducible exp and log" ON)
 option(MOM6_OPENMP_OFFLOAD "Enable NVHPC OpenMP/OpenACC/do-concurrent GPU offload flags (requires NVHPC)" OFF)
 set(MOM6_OFFLOAD_MEM_MODEL "separate" CACHE STRING "GPU memory model for MOM6_OPENMP_OFFLOAD: unified, managed, or separate (maps to -gpu=mem:<model>)")
 set_property(CACHE MOM6_OFFLOAD_MEM_MODEL PROPERTY STRINGS unified managed separate)
@@ -27,6 +28,7 @@ message(STATUS "  - MOM6_ACCESS3     ${MOM6_ACCESS3}")
 message(STATUS "  - MOM6_SOLO        ${MOM6_SOLO}")
 message(STATUS "  - MOM6_OPENMP      ${MOM6_OPENMP}")
 message(STATUS "  - MOM6_ASYMMETRIC  ${MOM6_ASYMMETRIC}")
+message(STATUS "  - MOM6_FAST_RINT   ${MOM6_FAST_RINT}")
 message(STATUS "  - MOM6_OPENMP_OFFLOAD ${MOM6_OPENMP_OFFLOAD}")
 if(MOM6_OPENMP_OFFLOAD)
   message(STATUS "  - MOM6_OFFLOAD_MEM_MODEL ${MOM6_OFFLOAD_MEM_MODEL}")
@@ -163,6 +165,74 @@ end program test"
 )
 if(HAVE_FC_DO_CONCURRENT_LOCALITY)
   add_compile_definitions(HAVE_FC_DO_CONCURRENT_LOCALITY=1)
+endif()
+
+# Find out whether the Fortran compiler honors parentheses in floating-point
+# expressions, which the fast round-to-nearest-integer in the reproducible exp
+# and log (src/framework/intrinsics/MOM_exp.h) relies on: (x + bias) - bias must
+# not be reassociated into x.  Mirrors the autoconf MOM6_FC_FAST_RINT check
+# (ac/m4/mom6_fc_fast_rint.m4), including its --disable-fast-rint (here
+# MOM6_FAST_RINT=OFF), the candidates it tries and the test program.  The first
+# candidate whose program runs and gives the right answer is used: ENABLE_FAST_RINT
+# is defined and its flag, if it needs one, is added to the Fortran flags.  If none
+# works, the ieee_rint fallback of MOM_exp.h is used.
+if(MOM6_FAST_RINT)
+  include(CheckFortranSourceRuns)
+  set(_mom6_fast_rint_found FALSE)
+  if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    message(WARNING "Cross-compiling without an emulator: cannot test whether the Fortran "
+                    "compiler honors parentheses; using the ieee_rint fallback")
+  else()
+    set(_mom6_fast_rint_n 0)
+    foreach(_mom6_fast_rint_flag IN ITEMS "none" "-fprotect-parens" "-assume protect_parens")
+      # The program is run with the flags of the Release build, since that is where an
+      # optimizer could reassociate the expression.
+      set(CMAKE_REQUIRED_FLAGS "${CMAKE_Fortran_FLAGS_RELEASE}")
+      if(NOT _mom6_fast_rint_flag STREQUAL "none")
+        string(APPEND CMAKE_REQUIRED_FLAGS " ${_mom6_fast_rint_flag}")
+      endif()
+      check_fortran_source_runs(
+"program test
+  implicit none
+  real, parameter :: bias = 1.5 * 2.**(digits(1.) - 1)
+  if (fast_rint(1.23) == 1.) stop 0
+  stop 1
+contains
+  function fast_rint(x) result(y)
+    real, intent(in) :: x
+    real :: y
+    y = (x + bias) - bias
+  end function
+end program test"
+        MOM6_FC_FAST_RINT_OK_${_mom6_fast_rint_n}
+        SRC_EXT F90
+      )
+      if(MOM6_FC_FAST_RINT_OK_${_mom6_fast_rint_n})
+        set(_mom6_fast_rint_found TRUE)
+        set(_mom6_fast_rint_chosen "${_mom6_fast_rint_flag}")
+        break()
+      endif()
+      math(EXPR _mom6_fast_rint_n "${_mom6_fast_rint_n} + 1")
+    endforeach()
+    unset(CMAKE_REQUIRED_FLAGS)
+  endif()
+  if(_mom6_fast_rint_found)
+    if(_mom6_fast_rint_chosen STREQUAL "none")
+      message(STATUS "Parentheses are honored by the Fortran compiler: using the fast rint")
+    else()
+      message(STATUS "Using the fast rint with the Fortran flag ${_mom6_fast_rint_chosen}")
+      # Like the offload flags, added to the build type flags so that nothing overrides it.
+      string(APPEND CMAKE_Fortran_FLAGS_RELEASE " ${_mom6_fast_rint_chosen}")
+      string(APPEND CMAKE_Fortran_FLAGS_DEBUG " ${_mom6_fast_rint_chosen}")
+    endif()
+    add_compile_definitions(ENABLE_FAST_RINT=1)
+  else()
+    message(WARNING "No known flag found to protect parentheses; using the ieee_rint fallback")
+  endif()
+  unset(_mom6_fast_rint_n)
+  unset(_mom6_fast_rint_flag)
+  unset(_mom6_fast_rint_chosen)
+  unset(_mom6_fast_rint_found)
 endif()
 
 # C compiler flags
