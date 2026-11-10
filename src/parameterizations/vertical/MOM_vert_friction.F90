@@ -3874,6 +3874,8 @@ subroutine updateCFLtruncationValue(Time, CS, US, activate)
     wghtA = 1. - ( (1. - wghtA)**2 ) ! Convert linear profile to inverted parabolic profile
     CS%CFL_trunc = CS%CFL_truncS + wghtA * ( CS%CFL_truncE - CS%CFL_truncS )
   endif
+  ! The truncation and reporting kernels in vertvisc_limit_vel read CS%CFL_trunc on the device.
+  !$omp target update to(CS%CFL_trunc)
   write(msg(1:12),'(es12.3)') CS%CFL_trunc
   call MOM_error(NOTE, "MOM_vert_friction: updateCFLtruncationValue set CFL limit to "//trim(msg))
 end subroutine updateCFLtruncationValue
