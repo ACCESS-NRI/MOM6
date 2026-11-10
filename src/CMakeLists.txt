@@ -219,6 +219,7 @@ target_sources(mom6shared PRIVATE
   parameterizations/lateral/MOM_load_Love_numbers.F90
   parameterizations/lateral/MOM_MEKE.F90
   parameterizations/lateral/MOM_MEKE_types.F90
+  parameterizations/lateral/MOM_meso_sfn_ANN.F90
   parameterizations/lateral/MOM_mixed_layer_restrat.F90
   parameterizations/lateral/MOM_spherical_harmonics.F90
   parameterizations/lateral/MOM_streaming_filter.F90
@@ -335,6 +336,7 @@ target_sources(mom6shared PRIVATE
 
   ../config_src/external/stochastic_physics/get_stochy_pattern.F90
   ../config_src/external/stochastic_physics/stochastic_physics.F90
+  ../config_src/external/stochastic_physics/stochy_data_mod.F90
 
   ../config_src/infra/FMS2/MOM_coms_infra.F90
   ../config_src/infra/FMS2/MOM_constants.F90
