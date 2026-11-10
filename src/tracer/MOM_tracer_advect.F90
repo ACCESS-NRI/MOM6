@@ -266,6 +266,11 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   ! only update t because other members are zeroed
   !$ do m=1,ntr
     !$omp target enter data map(to: Reg%Tr(m)%t)
+    ! t_pre_adv is filled on the device at the first iteration and read back on the host below.
+    ! It is only touched by the call that advects the tracers (flux_type 0), because the calls
+    ! that diagnose the resolved and parameterized fluxes run on tracers that were already advected.
+    !$omp target enter data map(alloc: Reg%Tr(m)%t_pre_adv) &
+    !$omp   if (associated(Reg%Tr(m)%t_pre_adv) .and. (flux_type_ctrl == 0))
   !$ enddo
 
   ! initialize diagnostic fluxes and tendencies and determine which tracers to advect
@@ -371,11 +376,17 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     if (isv > is-stencil) then
       call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass, omp_offload=.true.)
 
-      if (itt == 1) then
-        ! Store the tracer concentrations before any advection for use in diagnostics.
-        do m=1,ntr ; if (associated(Reg%Tr(m)%t_pre_adv)) then
-          Reg%Tr(m)%t_pre_adv(:,:,:) = Reg%Tr(m)%t(:,:,:)
-        endif ; enddo
+      if ((itt == 1) .and. (flux_type_ctrl == 0)) then
+        ! Store the tracer concentrations before any advection for use in diagnostics.  This is done
+        ! on the device, where Tr%t (including the halo points just updated above) is resident, for
+        ! all of the layers before the first block of layers is advected.
+        do concurrent (m=1:ntr)
+          if (associated(Reg%Tr(m)%t_pre_adv)) then
+            do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+              Reg%Tr(m)%t_pre_adv(i,j,k) = Reg%Tr(m)%t(i,j,k)
+            enddo
+          endif
+        enddo
       endif
 
       isv = is - nsten_halo * stencil ; jsv = js - nsten_halo * stencil
@@ -514,6 +525,8 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   ! TODO: flux_type_ctrl == 1 or 2 may not need to download t?
   !$ do m=1,ntr
     !$omp target exit data map(from: Reg%Tr(m)%t)
+    !$omp target exit data map(from: Reg%Tr(m)%t_pre_adv) &
+    !$omp   if (associated(Reg%Tr(m)%t_pre_adv) .and. (flux_type_ctrl == 0))
   !$ enddo
 
   if (flux_type_ctrl == 0) then
