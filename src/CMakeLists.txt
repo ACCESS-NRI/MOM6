@@ -18,6 +18,11 @@ target_include_directories(mom6shared PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../config_src/memory/dynamic_symmetric>>
 )
 
+# MOM_exp.F90 includes MOM_exp.h from its own directory.
+target_include_directories(mom6shared PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/framework/intrinsics>
+)
+
 target_sources(mom6shared PRIVATE
   ALE/coord_adapt.F90
   ALE/coord_hycom.F90
@@ -182,6 +187,10 @@ target_sources(mom6shared PRIVATE
   framework/MOM_write_cputime.F90
   framework/posix.F90
   framework/MOM_coupler_types.F90
+  framework/intrinsics/MOM_exp.F90
+  framework/intrinsics/MOM_exp_data_n128.F90
+  framework/intrinsics/MOM_log.F90
+  framework/intrinsics/MOM_log_data_n128.F90
 
   ice_shelf/MOM_ice_shelf_diag_mediator.F90
   ice_shelf/MOM_ice_shelf_dynamics.F90
