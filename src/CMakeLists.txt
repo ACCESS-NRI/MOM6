@@ -365,3 +365,17 @@ target_sources(mom6shared PRIVATE
   ../config_src/external/MARBL/marbl_interface_public_types.F90
   ../config_src/external/MARBL/marbl_logging.F90
 )
+
+# nvfortran 26.5 compile time: with the inliner, which is on by default from -O2,
+# these two files take about 11 min (MOM_hor_bnd_diffusion.F90) and 31 min
+# (MOM_neutral_diffusion.F90) to compile, against about 17 s and 37 s with
+# -Mnoinline.  The compiler spends the time comparing derived types
+# (cblock_eq_dtypes) while it builds its inline library.  Neither file has
+# offload directives or do concurrent loops.  Only for the optimised build types.
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  set_source_files_properties(
+    tracer/MOM_hor_bnd_diffusion.F90
+    tracer/MOM_neutral_diffusion.F90
+    PROPERTIES COMPILE_OPTIONS
+      "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:-Mnoinline>")
+endif()
