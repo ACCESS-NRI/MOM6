@@ -377,6 +377,10 @@ type, public :: MOM_control_struct ; private
                                 !! feedback to the coupler/driver [H ~> m or kg m-2] when
                                 !! bulk mixed layer is not used, or a negative value
                                 !! if a bulk mixed layer is being used.
+  real :: Hmix_shelf            !< Diagnostic surface boundary layer thickness over which
+                                !! to average tracer properties under ice shelves [H ~> m or kg m-2].
+  real :: Hmix_UV_shelf         !< Depth scale over which to average sub-ice shelf surface
+                                !! flow [H ~> m or kg m-2].
   logical :: check_bad_sfc_vals !< If true, scan surface state for ridiculous values.
   real    :: bad_val_ssh_max    !< Maximum SSH before triggering bad value message [Z ~> m]
   real    :: bad_val_sst_max    !< Maximum SST before triggering bad value message [C ~> degC]
@@ -1611,6 +1615,7 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
   logical :: debug_redundant ! If true, check redundant values on PE boundaries when debugging.
   logical :: showCallTree
+  logical :: use_ice_shelf
   type(group_pass_type) :: pass_T_S, pass_T_S_h, pass_uv_T_S_h
   integer :: dynamics_stencil  ! The computational stencil for the calculations
                                ! in the dynamic core.
@@ -1621,6 +1626,8 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("step_MOM_thermo(), MOM.F90")
   if (CS%debug) call query_debugging_checks(do_redundant=debug_redundant)
+  use_ice_shelf = .false.
+  if (associated(CS%frac_shelf_h)) use_ice_shelf = .true.
 
   call enable_averages(dtdia, Time_end_thermo, CS%diag)
 
@@ -2284,6 +2291,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   type(group_pass_type) :: tmp_pass_uv_T_S_h, pass_uv_T_S_h
 
   real    :: Hmix_z, Hmix_UV_z ! Temporary variables with averaging depths [Z ~> m]
+  real    :: Hmix_shelf_z, Hmix_UV_shelf_z ! Temporary variables with ice-shelf averaging depths [Z ~> m]
   real    :: HFrz_z            ! Temporary variable with the melt potential depth [Z ~> m]
   real    :: default_val       ! The default value for DTBT_RESET_PERIOD [s]
   logical :: write_geom_files  ! If true, write out the grid geometry files.
@@ -2588,6 +2596,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 
   if (bulkmixedlayer) then
     CS%Hmix = -1.0 ; CS%Hmix_UV = -1.0
+    CS%Hmix_shelf = -1.0 ; CS%Hmix_UV_shelf = -1.0
   else
     call get_param(param_file, "MOM", "HMIX_SFC_PROP", Hmix_z, &
                  "If BULKMIXEDLAYER is false, HMIX_SFC_PROP is the depth "//&
@@ -2597,6 +2606,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call get_param(param_file, "MOM", "HMIX_UV_SFC_PROP", Hmix_UV_z, &
                  "If BULKMIXEDLAYER is false, HMIX_UV_SFC_PROP is the depth "//&
                  "over which to average to find surface flow properties, "//&
+                 "SSU, SSV. A non-positive value indicates no averaging.", &
+                 units="m", default=0.0, scale=US%m_to_Z)
+
+    call get_param(param_file, "MOM", "HMIX_SHELF_PROP", Hmix_shelf_z, &
+                 "HMIX_SHELF_PROP is the depth over which to average "//&
+                 "to find surface properties like "//&
+                 "SST and SSS or density (but not surface velocities).", &
+                 units="m", default=1.0, scale=US%m_to_Z)
+    call get_param(param_file, "MOM", "HMIX_UV_SHELF_PROP", Hmix_UV_shelf_z, &
+                 "HMIX_UV_SHELF_PROP is the depth over which to average "//&
+                 "to find surface flow properties, "//&
                  "SSU, SSV. A non-positive value indicates no averaging.", &
                  units="m", default=0.0, scale=US%m_to_Z)
   endif
@@ -2894,6 +2914,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (.not.bulkmixedlayer) then
     CS%Hmix = (US%Z_to_m * GV%m_to_H) * Hmix_z
     CS%Hmix_UV = (US%Z_to_m * GV%m_to_H) * Hmix_UV_z
+    CS%Hmix_shelf = (US%Z_to_m * GV%m_to_H) * Hmix_shelf_z
+    CS%Hmix_UV_shelf = (US%Z_to_m * GV%m_to_H) * Hmix_UV_shelf_z
   endif
   CS%HFrz = (US%Z_to_m * GV%m_to_H) * HFrz_z
 
@@ -3609,9 +3631,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call adiabatic_driver_init(Time, G, param_file, diag, CS%diabatic_CSp, &
                                CS%tracer_flow_CSp)
   else
-    call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
-                              CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
-                              CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp)
+     call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
+                               CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
+                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp, &
+                               use_ice_shelf)
   endif
 
   CS%vertex_shear = kappa_shear_at_vertex(param_file)
@@ -3999,6 +4022,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
   logical :: use_iceshelves
   character(240) :: msg
   integer :: turns    ! Number of quarter turns
+  real :: frac_shelf_u, frac_shelf_v ! Ice shelf area fraction at u and v points [nondim]
 
   call callTree_enter("extract_surface_state(), MOM.F90")
   G => CS%G ; G_in => CS%G_in ; GV => CS%GV ; US => CS%US
@@ -4083,6 +4107,9 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo
 
       do k=1,nz ; do i=is,ie
+        if (use_iceshelves) then
+          depth_ml = CS%Hmix + CS%frac_shelf_h(i,j) * (CS%Hmix_shelf - CS%Hmix)
+        endif
         if (depth(i) + h(i,j,k)*H_rescale < depth_ml) then
           dh = h(i,j,k)*H_rescale
         elseif (depth(i) < depth_ml) then
@@ -4147,6 +4174,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
           sfc_state%v(i,J) = 0.0
         enddo
         do k=1,nz ; do i=is,ie
+          if (use_iceshelves) then
+            frac_shelf_v = 0.0
+            if (G%areaT(i,j) + G%areaT(i,j+1) > 0.0) &
+              frac_shelf_v = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
+                               + CS%frac_shelf_h(i,j+1) * G%areaT(i,j+1))&
+                             / (G%areaT(i,j) + G%areaT(i,j+1))
+            depth_ml = CS%Hmix_UV + frac_shelf_v * (CS%Hmix_UV_shelf - CS%Hmix_UV)
+          endif
           hv = 0.5 * (h(i,j,k) + h(i,j+1,k)) * H_rescale
           if (depth(i) + hv < depth_ml) then
             dh = hv
@@ -4171,6 +4206,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
           sfc_state%u(I,j) = 0.0
         enddo
         do k=1,nz ; do I=is-1,ie
+          if (use_iceshelves) then
+            frac_shelf_u = 0.0
+            if (G%areaT(i,j) + G%areaT(i+1,j) > 0.0) &
+              frac_shelf_u = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
+                               + CS%frac_shelf_h(i+1,j) * G%areaT(i+1,j))&
+                             / (G%areaT(i,j) + G%areaT(i+1,j))
+            depth_ml = CS%Hmix_UV + frac_shelf_u * (CS%Hmix_UV_shelf - CS%Hmix_UV)
+          endif
           hu = 0.5 * (h(i,j,k) + h(i+1,j,k)) * H_rescale
           if (depth(i) + hu < depth_ml) then
             dh = hu
