@@ -687,8 +687,8 @@ end subroutine set_pen_shortwave
 !! and calculate the TKE implications of this heating.
 subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, tv, &
                                     aggregate_FW_forcing, evap_CFL_limit, &
-                                    minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, &
-                                    SkinBuoyFlux, MLD_h, frac_shelf_h, shelf_forcing_depth)
+                                    minimum_forcing_depth, shelf_forcing_depth, &
+                                    cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, MLD_h)
   type(diabatic_aux_CS),   pointer       :: CS !< Control structure for diabatic_aux
   type(ocean_grid_type),   intent(in)    :: G  !< Grid structure
   type(verticalGrid_type), intent(in)    :: GV !< ocean vertical grid structure
@@ -707,6 +707,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                                                !! can be evaporated in one time-step [nondim].
   real,                    intent(in)    :: minimum_forcing_depth !< The smallest depth over which
                                                !! heat and freshwater fluxes is applied [H ~> m or kg m-2].
+  real,                    intent(in)    :: shelf_forcing_depth !< Flux depth for shelf regions [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                  optional, intent(out)   :: cTKE !< Turbulent kinetic energy requirement to mix
                                                !! forcing through each layer [R Z3 T-2 ~> J m-2]
@@ -720,9 +721,6 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
                  optional, intent(out)   :: SkinBuoyFlux !< Buoyancy flux at surface [Z2 T-3 ~> m2 s-3].
   real, dimension(:,:), &
                  optional, pointer       :: MLD_h !< Mixed layer thickness for brine plumes [H ~> m or kg m-2]
-  real, dimension(SZI_(G),SZJ_(G)), &
-                  optional, intent(in)   :: frac_shelf_h !< Fractional ice shelf coverage [nondim]
-  real, optional, intent(in)             :: shelf_forcing_depth !< Flux depth for shelf regions [H ~> m or kg m-2].
 
   ! Local variables
   integer, parameter :: maxGroundings = 5
@@ -862,8 +860,7 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
   !$OMP                                  minimum_forcing_depth,evap_CFL_limit,dt,EOSdom,   &
   !$OMP                                  calculate_buoyancy,netPen_rate,SkinBuoyFlux,GoRho,&
   !$OMP                                  calculate_energetics,dSV_dT,dSV_dS,cTKE,g_Hconv2, &
-  !$OMP                                  EnthalpyConst,MLD_h,frac_shelf_h,                 &
-  !$OMP                                  shelf_forcing_depth)                              &
+  !$OMP                                  EnthalpyConst,MLD_h,shelf_forcing_depth)          &
   !$OMP                          private(opacityBand,h2d,T2d,netMassInOut,netMassOut,      &
   !$OMP                                  netHeat,netSalt,Pen_SW_bnd,fractionOfForcing,     &
   !$OMP                                  IforcingDepthScale,g_conv,dSpV_dT,dSpV_dS,        &
@@ -1090,9 +1087,9 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
           ! Place forcing into this layer if this layer has nontrivial thickness.
           ! For layers thin relative to 1/IforcingDepthScale, then distribute
           ! forcing into deeper layers.
-          if (present(frac_shelf_h)) then
+          if (associated(fluxes%frac_shelf_h)) then
             IforcingDepthScale = 1. / max(GV%H_subroundoff, &
-              (minimum_forcing_depth + frac_shelf_h(i,j) * (shelf_forcing_depth - minimum_forcing_depth)) &
+              (minimum_forcing_depth + fluxes%frac_shelf_h(i,j) * (shelf_forcing_depth - minimum_forcing_depth)) &
               - netMassOut(i))
           else
             IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut(i) )

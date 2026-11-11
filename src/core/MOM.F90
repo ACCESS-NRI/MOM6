@@ -1684,14 +1684,8 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
     call cpu_clock_begin(id_clock_diabatic)
 
-    if (use_ice_shelf) then
-      call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
-                    Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves, &
-                    CS%frac_shelf_h)
-    else
-      call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
-                    Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves)
-    endif
+    call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
+                  Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves)
     fluxes%fluxes_used = .true.
 
     if (CS%stoch_CS%do_skeb) then
@@ -3637,16 +3631,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call adiabatic_driver_init(Time, G, param_file, diag, CS%diabatic_CSp, &
                                CS%tracer_flow_CSp)
   else
-    if (use_ice_shelf) then
-      call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
-                                CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
-                                CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp, &
-                                CS%frac_shelf_h)
-    else
-      call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
-                                CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
-                                CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp)
-    endif
+     call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
+                               CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
+                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp, &
+                               use_ice_shelf)
   endif
 
   CS%vertex_shear = kappa_shear_at_vertex(param_file)
