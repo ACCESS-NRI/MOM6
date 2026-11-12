@@ -379,3 +379,13 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
     PROPERTIES COMPILE_OPTIONS
       "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:-Mnoinline>")
 endif()
+
+# Local test: compile these files without vectorisation. Their do concurrent loops
+# otherwise vectorise differently from MOM6 main's plain loops and change the last bit.
+# (Applies to NVHPC only, as -Mnovect is an nvfortran option.)
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  set_source_files_properties(
+    parameterizations/vertical/MOM_set_viscosity.F90
+    diagnostics/MOM_sum_output.F90
+    PROPERTIES COMPILE_OPTIONS "-Mnovect")
+endif()
