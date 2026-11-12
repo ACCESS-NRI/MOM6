@@ -11,6 +11,12 @@ target_link_libraries(mom6lib PRIVATE
   ESMF::ESMF
 )
 
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  # nvfortran .mod files are not self-contained: users of the mom6lib modules
+  # also need the modules of mom6shared and of its dependencies (FMS, ...)
+  target_link_libraries(mom6lib PUBLIC mom6shared)
+endif()
+
 target_compile_definitions(mom6lib PRIVATE CESMCOUPLED)
 
 target_sources(mom6lib PRIVATE
@@ -41,10 +47,20 @@ install(TARGETS mom6lib mom6shared
 # way of handling them in CMake
 target_include_directories(mom6lib PUBLIC "$<INSTALL_INTERFACE:${CMAKE_INSTALL_MODULEDIR}/Mom6lib>")
   get_target_property(mom_moddir mom6lib Fortran_MODULE_DIRECTORY)
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  # nvfortran .mod files are not self-contained: using a module also needs the
+  # .mod files of every module it uses, so install those of mom6shared too
+  get_target_property(mom6shared_moddir mom6shared Fortran_MODULE_DIRECTORY)
+  install(DIRECTORY ${mom_moddir}/ ${mom6shared_moddir}/
+    DESTINATION ${CMAKE_INSTALL_MODULEDIR}/Mom6lib
+    COMPONENT AccessMOM6_Development
+  )
+else()
   install(FILES ${mom_moddir}/ocn_comp_nuopc.mod ${mom_moddir}/mom_cap_mod.mod
   DESTINATION ${CMAKE_INSTALL_MODULEDIR}/Mom6lib
   COMPONENT AccessMOM6_Development
 )
+endif()
 install(EXPORT Mom6libTargets
   FILE Mom6libTargets.cmake
   NAMESPACE Access3::
