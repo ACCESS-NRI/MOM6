@@ -993,10 +993,12 @@ function max_input_line_length(CS, pf_num) result(max_len)
 
     ! Scan through each line of the file
     do count = 1, CS%param_data(ipf)%num_lines
-      ! line = CS%param_data(ipf)%fln(count)%line
-      last = len_trim(CS%param_data(ipf)%fln(count)%line)
+     ! nvfortran 26.5 at -O2 gives 0 for len_trim() of this line referenced
+     ! directly as CS%param_data(ipf)%fln(count)%line, but not via an associate name.
+     associate(fline => CS%param_data(ipf)%fln(count)%line)
+      last = len_trim(fline)
       last_char = " "
-      if (last > 0) last_char = CS%param_data(ipf)%fln(count)%line(last:last)
+      if (last > 0) last_char = fline(last:last)
       ! Check if line ends in continuation character (either & or \)
       ! Note achar(92) is a backslash
       if (last_char == achar(92) .or. last_char == "&") then
@@ -1017,6 +1019,7 @@ function max_input_line_length(CS, pf_num) result(max_len)
         line_len = last
       endif
       max_len = max(max_len, line_len)
+     end associate
     enddo ! CS%param_data(ipf)%num_lines
   enddo paramfile_loop
 
