@@ -1609,13 +1609,15 @@ subroutine gradKE(u, v, h, KE, KEx, KEy, ksb, keb, nkk, G, GV, US, CS)
   endif
 
   ! Term - d(KE)/dx.
+  ! Local change: IdxCu (not IdxCu_OBCmask, which is also 0 on land faces) so that KEx matches MOM6
+  ! 2026.05 at land faces (restart CAu); only correct without open boundaries.
   do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq)
-    KEx(I,j,kk) = (KE(i+1,j,kk) - KE(i,j,kk)) * G%IdxCu_OBCmask(I,j)
+    KEx(I,j,kk) = (KE(i+1,j,kk) - KE(i,j,kk)) * G%IdxCu(I,j)
   enddo
 
   ! Term - d(KE)/dy.
   do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie)
-    KEy(i,J,kk) = (KE(i,j+1,kk) - KE(i,j,kk)) * G%IdyCv_OBCmask(i,J)
+    KEy(i,J,kk) = (KE(i,j+1,kk) - KE(i,j,kk)) * G%IdyCv(i,J)
   enddo
 end subroutine gradKE
 
