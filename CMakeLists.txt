@@ -81,6 +81,12 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -r8 -g")
   set(CMAKE_Fortran_FLAGS_RELEASE "-O2")
   set(CMAKE_Fortran_FLAGS_DEBUG "-O0 -g")
+  # Disabling fused multiply-adds (FMA) is needed for rotational symmetry,
+  # restart reproducibility, and the same results for different layouts.
+  # Use -mno-fma, not just -Mnofma: a -mfma on the command line (e.g. the
+  # target flags added by Spack's compiler wrapper for x86_64_v4) overrides
+  # -Mnofma wherever either appears, but is overridden by a later -mno-fma.
+  string(APPEND CMAKE_Fortran_FLAGS " -mno-fma")
   if(MOM6_OPENMP_OFFLOAD)
     # NVHPC accepts multiple -gpu= flags and accumulates their suboptions, so
     # the memory model and compute-capability list are kept as separate flags
