@@ -91,9 +91,9 @@ type, public :: thermo_var_ptrs
                          !! When conservative temperature is used, this is
                          !! constant and exactly 3991.86795711963 J degC-1 kg-1.
   logical :: T_is_conT = .false. !< If true, the temperature variable tv%T is
-                         !! actually the conservative temperature [degC].
+                         !! actually the conservative temperature [C ~> degC].
   logical :: S_is_absS = .false. !< If true, the salinity variable tv%S is
-                         !! actually the absolute salinity in units of [gSalt kg-1].
+                         !! actually the absolute salinity in units of [S ~> gSalt kg-1].
   real :: min_salinity   !< The minimum value of salinity when BOUND_SALINITY=True [S ~> ppt].
   real, allocatable, dimension(:,:,:) :: SpV_avg
                          !< The layer averaged in situ specific volume [R-1 ~> m3 kg-1].
@@ -292,9 +292,23 @@ type, public :: vertvisc_type
     Ray_v       !< The Rayleigh drag velocity to be applied to each layer at v-points [H T-1 ~> m s-1 or Pa s m-1].
 
   ! The following elements are pointers so they can be used as targets for pointers in the restart registry.
-  real, pointer, dimension(:,:) :: MLD => NULL()  !< Instantaneous active mixing layer depth [Z ~> m].
-  real, pointer, dimension(:,:) :: h_ML => NULL() !< Instantaneous active mixing layer thickness [H ~> m or kg m-2].
-  real, pointer, dimension(:,:) :: sfc_buoy_flx => NULL() !< Surface buoyancy flux (derived) [Z2 T-3 ~> m2 s-3].
+  real, pointer, dimension(:,:) :: MLD => NULL()
+                !< Instantaneous active mixing layer depth as used by the mixed layer restratification
+                !! parameterization [Z ~> m].
+  real, pointer, dimension(:,:) :: Lam2 => NULL()
+                !< (Langmuir Number)^-2  [nondim].
+  real, pointer, dimension(:,:) :: h_ML => NULL()
+                !< Instantaneous active mixing layer thickness as used by the mixed layer restratification
+                !! parameterization [H ~> m or kg m-2]
+  real, pointer, dimension(:,:) :: MLD_param => NULL()
+                !< Instantaneous active mixed or mixing layer depth as used by the brine plume parameterization.
+                !! It could be coordinated with MLD above but we may want the ability to use different scales
+                !! in different parameterizations [Z ~> m].
+  real, pointer, dimension(:,:) :: h_ML_param => NULL()
+                !< Instantaneous active mixed or mixing layer thickness as used by the brine plume
+                !! parameterization [H ~> m or kg m-2].
+  real, pointer, dimension(:,:) :: sfc_buoy_flx => NULL()
+                !< Surface buoyancy flux (derived) [Z2 T-3 ~> m2 s-3].
   real, pointer, dimension(:,:,:) :: Kd_shear => NULL()
                 !< The shear-driven turbulent diapycnal diffusivity at the interfaces between layers
                 !! in tracer columns [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
@@ -367,7 +381,7 @@ contains
 !! the ocean model. Unused fields are unallocated.
 subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
                                   gas_fields_ocn, use_meltpot, use_iceshelves, &
-                                  omit_frazil, sfc_state_in, turns, use_marbl_tracers)
+                                  omit_frazil, sfc_state_in, turns, use_MARBL_tracers)
   type(ocean_grid_type), intent(in)    :: G                !< ocean grid structure
   type(surface),         intent(inout) :: sfc_state        !< ocean surface state type to be allocated.
   logical,     optional, intent(in)    :: use_temperature  !< If true, allocate the space for thermodynamic variables.
@@ -393,7 +407,7 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
                                               !! is present, it is used and tr_fields_in is ignored.
   integer,     optional, intent(in)    :: turns  !< If present, the number of counterclockwise quarter
                                                  !! turns to use on the new grid.
-  logical,     optional, intent(in)    :: use_marbl_tracers  !< If true, allocate the space for CO2 flux from MARBL
+  logical,     optional, intent(in)    :: use_MARBL_tracers  !< If true, allocate the space for CO2 flux from MARBL
 
   ! local variables
   logical :: use_temp, alloc_integ, use_melt_potential, alloc_iceshelves, alloc_frazil, alloc_fco2
@@ -404,14 +418,14 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
 
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
-  isdB = G%isdB ; iedB = G%iedB; jsdB = G%jsdB ; jedB = G%jedB
+  isdB = G%isdB ; iedB = G%iedB ; jsdB = G%jsdB ; jedB = G%jedB
 
   use_temp = .true. ; if (present(use_temperature)) use_temp = use_temperature
   alloc_integ = .true. ; if (present(do_integrals)) alloc_integ = do_integrals
   use_melt_potential = .false. ; if (present(use_meltpot)) use_melt_potential = use_meltpot
   alloc_iceshelves = .false. ; if (present(use_iceshelves)) alloc_iceshelves = use_iceshelves
   alloc_frazil = .true. ; if (present(omit_frazil)) alloc_frazil = .not.omit_frazil
-  alloc_fco2 = .false. ; if (present(use_marbl_tracers)) alloc_fco2 = use_marbl_tracers
+  alloc_fco2 = .false. ; if (present(use_MARBL_tracers)) alloc_fco2 = use_MARBL_tracers
 
   if (sfc_state%arrays_allocated) return
 
@@ -579,12 +593,16 @@ subroutine alloc_BT_cont_type(BT_cont, G, GV, alloc_faces)
     "alloc_BT_cont_type called with an associated BT_cont_type pointer.")
 
   allocate(BT_cont)
+  !$omp target enter data map(to: BT_cont)
   allocate(BT_cont%FA_u_WW(IsdB:IedB,jsd:jed), source=0.0)
   allocate(BT_cont%FA_u_W0(IsdB:IedB,jsd:jed), source=0.0)
   allocate(BT_cont%FA_u_E0(IsdB:IedB,jsd:jed), source=0.0)
   allocate(BT_cont%FA_u_EE(IsdB:IedB,jsd:jed), source=0.0)
   allocate(BT_cont%uBT_WW(IsdB:IedB,jsd:jed), source=0.0)
   allocate(BT_cont%uBT_EE(IsdB:IedB,jsd:jed), source=0.0)
+  !$omp target enter data map(to: BT_cont%FA_u_WW, BT_cont%FA_u_W0)
+  !$omp target enter data map(to: BT_cont%FA_u_E0, BT_cont%FA_u_EE)
+  !$omp target enter data map(to: BT_cont%uBT_WW, BT_cont%uBT_EE)
 
   allocate(BT_cont%FA_v_SS(isd:ied,JsdB:JedB), source=0.0)
   allocate(BT_cont%FA_v_S0(isd:ied,JsdB:JedB), source=0.0)
@@ -592,10 +610,14 @@ subroutine alloc_BT_cont_type(BT_cont, G, GV, alloc_faces)
   allocate(BT_cont%FA_v_NN(isd:ied,JsdB:JedB), source=0.0)
   allocate(BT_cont%vBT_SS(isd:ied,JsdB:JedB), source=0.0)
   allocate(BT_cont%vBT_NN(isd:ied,JsdB:JedB), source=0.0)
+  !$omp target enter data map(to: BT_cont%FA_v_SS, BT_cont%FA_v_S0)
+  !$omp target enter data map(to: BT_cont%FA_v_N0, BT_cont%FA_v_NN)
+  !$omp target enter data map(to: BT_cont%vBT_SS, BT_cont%vBT_NN)
 
   if (present(alloc_faces)) then ; if (alloc_faces) then
     allocate(BT_cont%h_u(IsdB:IedB,jsd:jed,1:nz), source=0.0)
     allocate(BT_cont%h_v(isd:ied,JsdB:JedB,1:nz), source=0.0)
+    !$omp target enter data map(to: BT_cont%h_u, BT_cont%h_v)
   endif ; endif
 
 end subroutine alloc_BT_cont_type
@@ -606,19 +628,28 @@ subroutine dealloc_BT_cont_type(BT_cont)
 
   if (.not.associated(BT_cont)) return
 
-  deallocate(BT_cont%FA_u_WW) ; deallocate(BT_cont%FA_u_W0)
-  deallocate(BT_cont%FA_u_E0) ; deallocate(BT_cont%FA_u_EE)
+  !$omp target exit data map(delete: BT_cont%FA_u_EE, BT_cont%FA_u_E0)
+  !$omp target exit data map(delete: BT_cont%FA_u_W0, BT_cont%FA_u_WW)
+  !$omp target exit data map(delete: BT_cont%uBT_WW, BT_cont%uBT_EE)
+  deallocate(BT_cont%FA_u_EE) ; deallocate(BT_cont%FA_u_E0)
+  deallocate(BT_cont%FA_u_W0) ; deallocate(BT_cont%FA_u_WW)
   deallocate(BT_cont%uBT_WW)  ; deallocate(BT_cont%uBT_EE)
 
-  deallocate(BT_cont%FA_v_SS) ; deallocate(BT_cont%FA_v_S0)
-  deallocate(BT_cont%FA_v_N0) ; deallocate(BT_cont%FA_v_NN)
+  !$omp target exit data map(delete: BT_cont%FA_v_NN, BT_cont%FA_v_N0)
+  !$omp target exit data map(delete: BT_cont%FA_v_S0, BT_cont%FA_v_SS)
+  !$omp target exit data map(delete: BT_cont%vBT_SS, BT_cont%vBT_NN)
+  deallocate(BT_cont%FA_v_NN) ; deallocate(BT_cont%FA_v_N0)
+  deallocate(BT_cont%FA_v_S0) ; deallocate(BT_cont%FA_v_SS)
   deallocate(BT_cont%vBT_SS)  ; deallocate(BT_cont%vBT_NN)
 
-  if (allocated(BT_cont%h_u)) deallocate(BT_cont%h_u)
-  if (allocated(BT_cont%h_v)) deallocate(BT_cont%h_v)
+  ! These are always allocated in pairs.
+  if (allocated(BT_cont%h_u) .and. allocated(BT_cont%h_v)) then
+    !$omp target exit data map(delete: BT_cont%h_u, BT_cont%h_v)
+    deallocate(BT_cont%h_u, BT_cont%h_v)
+  endif
 
+  !$omp target exit data map(delete: BT_cont)
   deallocate(BT_cont)
-
 end subroutine dealloc_BT_cont_type
 
 !> Diagnostic checksums on various elements of a thermo_var_ptrs type for debugging.

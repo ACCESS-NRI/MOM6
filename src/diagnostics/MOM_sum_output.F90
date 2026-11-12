@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Reports integrated quantities for monitoring the model state
 module MOM_sum_output
 
@@ -15,7 +17,7 @@ use MOM_file_parser,   only : get_param, log_param, log_version, param_file_type
 use MOM_forcing_type,  only : forcing
 use MOM_grid,          only : ocean_grid_type
 use MOM_interface_heights, only : find_eta
-use MOM_io,            only : create_MOM_file, reopen_MOM_file
+use MOM_io,            only : create_MOM_file, reopen_MOM_file, close_file
 use MOM_io,            only : MOM_infra_file, MOM_netcdf_file, MOM_field
 use MOM_io,            only : file_exists, slasher, vardesc, var_desc, MOM_write_field
 use MOM_io,            only : field_size, read_variable, read_attribute, open_ASCII_file, stdout
@@ -137,7 +139,8 @@ type, public :: sum_output_CS ; private
   integer :: previous_calls = 0 !< The number of times write_energy has been called.
   integer :: prev_n = 0         !< The value of n from the last call.
   type(MOM_netcdf_file) :: fileenergy_nc !< The file handle for the netCDF version of the energy file.
-  integer :: fileenergy_ascii   !< The unit number of the ascii version of the energy file.
+  integer :: fileenergy_ascii = -1
+    !< The unit number of the ascii version of the energy file.
   type(MOM_field), dimension(NUM_FIELDS+MAX_FIELDS_) :: &
              fields             !< fieldtype variables for the output fields.
   character(len=200) :: energyfile  !< The name of the energy file with path.
@@ -306,12 +309,23 @@ end subroutine MOM_sum_output_init
 
 !> MOM_sum_output_end deallocates memory used by the MOM_sum_output module.
 subroutine MOM_sum_output_end(CS)
-  type(Sum_output_CS), pointer :: CS  !< The control structure returned by a
-                                      !! previous call to MOM_sum_output_init.
+  type(Sum_output_CS), pointer :: CS
+    !< Control structure returned by a previous call to MOM_sum_output_init.
+
+  logical :: is_open
+    ! True if CS%fileenergy_ascii is open
+
   if (associated(CS)) then
     if (CS%do_APE_calc) then
       deallocate(CS%DL%depth, CS%DL%area, CS%DL%vol_below)
       deallocate(CS%lH)
+    endif
+
+    if (is_root_PE()) then
+      is_open = .false.
+      if (CS%fileenergy_ascii /= -1) &
+        inquire(unit=CS%fileenergy_ascii, opened=is_open)
+      if (is_open) call close_file(CS%fileenergy_ascii)
     endif
 
     deallocate(CS)
@@ -411,9 +425,9 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   real :: QRZL2_to_J   ! The combination of unit rescaling factors to convert integrated heat
                        ! content into mks units [J Q-1 R-1 Z-1 L-2 ~> 1]
   real :: J_to_QRZL2   ! The combination of unit rescaling factors to rescale integrated heat
-                       ! content from mks units into the internal units of MOM6 [Q R Z L J-1 ~> 1]
+                       ! content from mks units into the internal units of MOM6 [Q R Z L2 J-1 ~> 1]
   real :: kg_to_RZL2   ! The combination of unit rescaling factors to rescale masses from
-                       ! mks units into the internal units of MOM6 [R Z L kg-1 ~> 1]
+                       ! mks units into the internal units of MOM6 [R Z L2 kg-1 ~> 1]
   real :: salt_to_kg   ! A factor used to rescale salt contents [kg R-1 Z-1 L-2 ~> nondim]
   integer :: num_nc_fields  ! The number of fields that will actually go into
                             ! the NetCDF file.
@@ -477,6 +491,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     Tr_units             ! The units for each of the tracers
   integer :: nTr_stocks  ! The total number of tracers in all registered tracer packages
   integer :: iyear, imonth, iday, ihour, iminute, isecond, itick ! For call to get_date()
+  logical :: is_open     ! True if the CS%fileenergy_ascii has been opened
 
  ! A description for output of each of the fields.
   type(vardesc) :: vars(NUM_FIELDS+MAX_FIELDS_)
@@ -552,14 +567,15 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   if (.not.CS%initialized) call MOM_error(FATAL, &
          "write_energy: Module must be initialized before it is used.")
 
-  do j=js,je ; do i=is,ie
-    areaTm(i,j) = G%mask2dT(i,j)*G%areaT(i,j)
-  enddo ; enddo
+  !$omp target enter data map(alloc: areaTm, tmp1, PE_pt, Salt_int, Temp_int, eta, Z_0APE)
 
-  tmp1(:,:,:) = 0.0
-  do k=1,nz ; do j=js,je ; do i=is,ie
+  do concurrent (j=js:je, i=is:ie)
+    areaTm(i,j) = G%mask2dT(i,j)*G%areaT(i,j)
+  enddo
+
+  do concurrent (k=1:nz, j=js:je, i=is:ie)
     tmp1(i,j,k) = h(i,j,k) * (GV%H_to_RZ*areaTm(i,j))
-  enddo ; enddo ; enddo
+  enddo
   mass_tot = reproducing_sum(tmp1, isr, ier, jsr, jer, sums=mass_lay, EFP_sum=mass_EFP, unscale=US%RZL2_to_kg)
 
   if (GV%Boussinesq) then
@@ -567,13 +583,15 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   else
     if (CS%do_APE_calc) then
       call find_eta(h, tv, G, GV, US, eta, dZref=G%Z_ref)
-      do k=1,nz ; do j=js,je ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
         tmp1(i,j,k) = (eta(i,j,K)-eta(i,j,K+1)) * areaTm(i,j)
-      enddo ; enddo ; enddo
+      enddo
       vol_tot = reproducing_sum(tmp1, isr, ier, jsr, jer, sums=vol_lay, unscale=US%Z_to_m*US%L_to_m**2)
     endif
   endif ! Boussinesq
 
+  ! Tracer stock diagnostics (optional; depends on registered tracer packages).
+  ! TODO: Verify Tracer data transfers
   nTr_stocks = 0
   Tr_minmax_avail(:) = .false.
   if (CS%write_min_max .and. CS%write_min_max_loc) then
@@ -616,7 +634,11 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     !  Reopen or create a text output file, with an explanatory header line.
     if (is_root_pe()) then
       if (day > CS%Start_time) then
-        call open_ASCII_file(CS%fileenergy_ascii, trim(CS%energyfile), action=APPEND_FILE)
+        is_open = .false.
+        if (CS%fileenergy_ascii /= -1) &
+          inquire(unit=CS%fileenergy_ascii, opened=is_open)
+        if (.not. is_open) &
+          call open_ASCII_file(CS%fileenergy_ascii, trim(CS%energyfile), action=APPEND_FILE)
       else
         call open_ASCII_file(CS%fileenergy_ascii, trim(CS%energyfile), action=WRITEONLY_FILE)
         if (abs(CS%timeunit - 86400.0) < 1.0) then
@@ -697,9 +719,12 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     !   Calculate the Available Potential Energy integrated over each interface.  With a nonlinear
     ! equation of state or with a bulk mixed layer this calculation is only approximate.
     ! With an ALE model this does not make sense and should be revisited.
-    PE_pt(:,:,:) = 0.0
+    !$omp target update to(Z_0APE)
+    do concurrent (k=1:nz+1, j=1:size(PE_pt,2), i=1:size(PE_pt,1))
+      PE_pt(i,j,k) = 0.0
+    enddo
     if (GV%Boussinesq) then
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(hbelow, hint, hbot, k))
         hbelow = 0.0
         do K=nz,1,-1
           hbelow = hbelow + h(i,j,k) * GV%H_to_Z
@@ -709,18 +734,18 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
           PE_pt(i,j,K) = (0.5 * areaTm(i,j)) * (GV%Rho0*GV%g_prime(K)) * &
                   (hint * hint - hbot * hbot)
         enddo
-      enddo ; enddo
+      enddo
     elseif (GV%semi_Boussinesq) then
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(hint, hbot, k))
         do K=nz,1,-1
           hint = Z_0APE(K) + eta(i,j,K)  ! eta and H_0 have opposite signs.
           hbot = max(Z_0APE(K) - (G%bathyT(i,j) + G%Z_ref), 0.0)
           PE_pt(i,j,K) = (0.5 * areaTm(i,j) * (GV%Rho0*GV%g_prime(K))) * &
                          (hint * hint - hbot * hbot)
         enddo
-      enddo ; enddo
+      enddo
     else
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(hint, hbot, k))
         do K=nz,2,-1
           hint = Z_0APE(K) + eta(i,j,K)  ! eta and H_0 have opposite signs.
           hbot = max(Z_0APE(K) - (G%bathyT(i,j) + G%Z_ref), 0.0)
@@ -732,7 +757,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
         hbot = max(Z_0APE(1) - (G%bathyT(i,j) + G%Z_ref), 0.0)
         PE_pt(i,j,1) = (0.5 * areaTm(i,j) * (GV%Rlay(1)*GV%g_prime(1))) * &
                        (hint * hint - hbot * hbot)
-      enddo ; enddo
+      enddo
     endif
 
     PE_tot = reproducing_sum(PE_pt, isr, ier, jsr, jer, sums=PE, unscale=RZL4_T2_to_J)
@@ -742,21 +767,23 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   endif
 
   ! Calculate the Kinetic Energy integrated over each layer.
-  tmp1(:,:,:) = 0.0
-  do k=1,nz ; do j=js,je ; do i=is,ie
+  do concurrent (k=1:nz, j=js:je, i=is:ie)
     tmp1(i,j,k) = (0.25 * GV%H_to_RZ*(areaTm(i,j) * h(i,j,k))) * &
             (((u(I-1,j,k)**2) + (u(I,j,k)**2)) + ((v(i,J-1,k)**2) + (v(i,J,k)**2)))
-  enddo ; enddo ; enddo
+  enddo
 
   KE_tot = reproducing_sum(tmp1, isr, ier, jsr, jer, sums=KE, unscale=RZL4_T2_to_J)
 
   ! Use reproducing sums to do global integrals relate to the heat, salinity and water budgets.
   if (CS%use_temperature) then
-    Temp_int(:,:) = 0.0 ; Salt_int(:,:) = 0.0
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      Salt_int(i,j) = Salt_int(i,j) + tv%S(i,j,k) * (h(i,j,k)*(GV%H_to_RZ * areaTm(i,j)))
-      Temp_int(i,j) = Temp_int(i,j) + (tv%C_p * tv%T(i,j,k)) * (h(i,j,k)*(GV%H_to_RZ * areaTm(i,j)))
-    enddo ; enddo ; enddo
+    !$omp target enter data map(to:tv%S, tv%T)
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k))
+      Salt_int(i,j) = 0.0 ; Temp_int(i,j) = 0.0
+      do k=1,nz
+        Salt_int(i,j) = Salt_int(i,j) + tv%S(i,j,k) * (h(i,j,k)*(GV%H_to_RZ * areaTm(i,j)))
+        Temp_int(i,j) = Temp_int(i,j) + (tv%C_p * tv%T(i,j,k)) * (h(i,j,k)*(GV%H_to_RZ * areaTm(i,j)))
+      enddo
+    enddo
     salt_EFP = reproducing_sum_EFP(Salt_int, isr, ier, jsr, jer, only_on_PE=.true., &
                                    unscale=US%RZL2_to_kg*US%S_to_ppt)
     heat_EFP = reproducing_sum_EFP(Temp_int, isr, ier, jsr, jer, only_on_PE=.true., &
@@ -769,10 +796,12 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     ! Return the globally summed values to the original variables.
     salt_EFP = EFP_list(1) ; heat_EFP = EFP_list(2) ; CS%fresh_water_in_EFP = EFP_list(3)
     CS%net_salt_in_EFP = EFP_list(4) ; CS%net_heat_in_EFP = EFP_list(5)
-
+    !$omp target exit data map(release: tv%S, tv%T)
   else
     call EFP_sum_across_PEs(CS%fresh_water_in_EFP)
   endif
+
+  !$omp target exit data map(delete: areaTm, tmp1, PE_pt, Salt_int, Temp_int, eta, Z_0APE)
 
   ! Calculate the maximum CFL numbers.
   max_CFL(1:2) = 0.0
@@ -1100,7 +1129,8 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
         heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
                        (fluxes%heat_content_evap(i,j) + fluxes%heat_content_lprec(i,j) + &
                         fluxes%heat_content_cond(i,j) + fluxes%heat_content_fprec(i,j) + &
-                        fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j))
+                        fluxes%heat_content_lrunoff(i,j) + fluxes%heat_content_frunoff(i,j) + &
+                        fluxes%heat_content_lrunoff_glc(i,j) + fluxes%heat_content_frunoff_glc(i,j))
       enddo ; enddo
     elseif (associated(tv%TempxPmE)) then
       do j=js,je ; do i=is,ie

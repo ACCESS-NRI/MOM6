@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Implements vertical viscosity (vertvisc)
 module MOM_vert_friction
 
@@ -24,7 +26,7 @@ use MOM_open_boundary, only : ocean_OBC_type, OBC_NONE, OBC_DIRECTION_E
 use MOM_open_boundary, only : OBC_DIRECTION_W, OBC_DIRECTION_N, OBC_DIRECTION_S
 use MOM_PointAccel,    only : write_u_accel, write_v_accel, PointAccel_init
 use MOM_PointAccel,    only : PointAccel_CS
-use MOM_time_manager,  only : time_type, time_type_to_real, operator(-)
+use MOM_time_manager,  only : time_type, time_minus_signed
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs, vertvisc_type
 use MOM_variables,     only : cont_diag_ptrs, accel_diag_ptrs
@@ -82,8 +84,6 @@ type, public :: vertvisc_CS ; private
                              !! [H Z T ~> m2 s or kg s m-1]
   real    :: vel_underflow   !< Velocity components smaller than vel_underflow
                              !! are set to 0 [L T-1 ~> m s-1].
-  logical :: CFL_based_trunc !< If true, base truncations on CFL numbers, not
-                             !! absolute velocities.
   real    :: CFL_trunc       !< Velocity components will be truncated when they
                              !! are large enough that the corresponding CFL number
                              !! exceeds this value [nondim].
@@ -230,8 +230,8 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
   ! local variables
   real, dimension(SZIB_(G),SZJ_(G))  :: hbl_u   !< boundary layer depth (u-pts) [H ~> m]
   real, dimension(SZI_(G),SZJB_(G))  :: hbl_v   !< boundary layer depth (v-pts) [H ~> m]
-  real, dimension(SZIB_(G),SZJ_(G))  :: taux_u  !< kinematic zonal wind stress (u-pts) [L2 T-2 ~> m2 s-2]
-  real, dimension(SZI_(G),SZJB_(G))  :: tauy_v  !< kinematic merid wind stress (v-pts) [L2 T-2 ~> m2 s-2]
+  real, dimension(SZIB_(G),SZJ_(G))  :: taux_u  !< kinematic zonal wind stress (u-pts) [L Z T-2 ~> m2 s-2]
+  real, dimension(SZI_(G),SZJB_(G))  :: tauy_v  !< kinematic merid wind stress (v-pts) [L Z T-2 ~> m2 s-2]
   real, dimension(SZI_(G),SZJ_(G))   :: uS0     !< surface zonal Stokes drift h-pts [L T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJ_(G))   :: vS0     !< surface zonal Stokes drift h-pts [L T-1 ~> m s-1]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: uE_u    !< zonal Eulerian u-pts [L T-1 ~> m s-1]
@@ -247,7 +247,7 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
   real, dimension(SZI_(G) ,SZJ_(G),SZK_(GV)+1) :: omega_tau2s !< angle stress to shear (h-pts) [rad]
   real, dimension(SZI_(G) ,SZJ_(G),SZK_(GV)+1) :: omega_tau2w !< angle stress to wind  (h-pts) [rad]
   real :: omega_tmp, omega_s2x, omega_tau2x                    !< temporary angle wrt the x axis [rad]
-  real :: Irho0        !< Inverse of the mean density rescaled to [Z L-1 R-1 ~> m3 kg-1]
+  real :: Irho0        !< Inverse of the mean density [R-1 ~> m3 kg-1]
   real :: pi           !< ! The ratio of the circumference of a circle to its diameter [nondim]
   real :: tmp_u, tmp_v !< temporary ocean mask weights on u and v points [nondim]
   real :: fexp         !< temporary exponential function [nondim]
@@ -255,15 +255,22 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
   real :: Gat1, Gsig, dGdsig !< Shape parameters [nondim]
   real :: du, dv       !< Intermediate velocity differences [L T-1 ~> m s-1]
   real :: depth        !< Cumulative of thicknesses [H ~> m]
-  integer :: b, kbld, kp1, k, nz !< band and vertical indices
+  integer :: b, kp1, k, nz !< band and vertical indices
   integer :: i, j, is, ie, js, je, Isq, Ieq, Jsq, Jeq !< horizontal indices
 
-  is = G%isc ; ie = G%iec; js = G%jsc; je = G%jec
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
   pi = 4. * atan2(1.,1.)
   Irho0 = 1.0 / GV%Rho0
 
+  ! initialize arrays
+  uE_h(:,:,:)   = 0.0
+  vE_h(:,:,:)   = 0.0
+  uE_u(:,:,:)   = 0.0
+  vE_v(:,:,:)   = 0.0
+  vInc_v(:,:,:) = 0.0
+  uInc_u(:,:,:) = 0.0
   call pass_var(hbl_h , G%Domain, halo=1)
 
   ! u-points
@@ -286,7 +293,7 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
             depth = depth + 0.5*CS%h_u(I,j,k)
             call cvmix_kpp_composite_Gshape(sigma,Gat1,Gsig,dGdsig)
             ! nonlocal boundary-layer increment
-            uInc_u(I,j,k)  = dt * Cemp_NL * taux_u(I,j) * dGdsig / hbl_u(I,j)
+            uInc_u(I,j,k)  = dt * Cemp_NL * taux_u(I,j) * dGdsig / (hbl_u(I,j) * GV%H_to_Z)
             ui(I,j,k) = ui(I,j,k) + uInc_u(I,j,k)
           else
             uInc_u(I,j,k) = 0.0
@@ -320,7 +327,7 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
             depth = depth + 0.5* CS%h_v(i,J,k)
             call cvmix_kpp_composite_Gshape(sigma,Gat1,Gsig,dGdsig)
             ! nonlocal boundary-layer increment
-            vInc_v(i,J,k) = dt * Cemp_NL * tauy_v(i,J) * dGdsig / hbl_v(i,J)
+            vInc_v(i,J,k) = dt * Cemp_NL * tauy_v(i,J) * dGdsig / (hbl_v(i,J) * GV%H_to_Z)
             vi(i,J,k) = vi(i,J,k) + vInc_v(i,J,k)
           else
             vInc_v(i,J,k)  = 0.0
@@ -357,20 +364,20 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
             vInc_h(i,j,k) = (G%mask2dCv(i,j) * vInc_v(i,j,k) + G%mask2dCv(i,j-1) * vInc_v(i,j-1,k)) / tmp_v
           enddo
           ! Wind, Stress and Shear align at surface
-          Omega_tau2w(i,j,1) = 0.0
-          Omega_tau2s(i,j,1) = 0.0
+          Omega_tau2w(i,j,:) = 0.0
+          Omega_tau2s(i,j,:) = 0.0
           do k = 1,nz
             kp1 = min( nz , k+1)
             du = uE_h(i,j,k) - uE_h(i,j,kp1)
             dv = vE_h(i,j,k) - vE_h(i,j,kp1)
-            omega_s2x = atan2( dv , du )
+            omega_s2x = atan2(dv, du)
 
             du = du + uInc_h(i,j,k) - uInc_h(i,j,kp1)
             dv = dv + vInc_h(i,j,k) - vInc_h(i,j,kp1)
-            omega_tau2x = atan2( dv , du )
-
+            omega_tau2x = atan2(dv, du)
             omega_tmp = omega_tau2x - forces%omega_w2x(i,j)
-            if ( (omega_tmp  >   pi   ) )  omega_tmp = omega_tmp - 2.*pi
+
+            if ( (omega_tmp  >   pi   ) ) omega_tmp = omega_tmp - 2.*pi
             if ( (omega_tmp  < (0.-pi)) )  omega_tmp = omega_tmp + 2.*pi
             Omega_tau2w(i,j,kp1) = omega_tmp
 
@@ -439,6 +446,7 @@ end subroutine vertFPmix
 !! a_cpl_gl90 = nu / h = f^2 * alpha / h
 
 subroutine find_coupling_coef_gl90(a_cpl_gl90, hvel, i, j, z_i, G, GV, CS, VarMix, work_on_u)
+  !$omp declare target
   type(ocean_grid_type), intent(in) :: G        !< Grid structure.
   type(verticalGrid_type), intent(in) :: GV     !< Vertical grid structure.
   real, dimension(SZK_(GV)), intent(in) :: hvel !< Distance between interfaces
@@ -557,7 +565,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   type(accel_diag_ptrs), intent(inout)   :: ADp    !< Accelerations in the momentum
                                                    !! equations for diagnostics
   type(cont_diag_ptrs),  intent(inout)   :: CDp    !< Continuity equation terms
-  type(vertvisc_CS),     pointer         :: CS     !< Vertical viscosity control structure
+  type(vertvisc_CS)                      :: CS     !< Vertical viscosity control structure
   real, dimension(SZIB_(G),SZJ_(G)), &
                    optional, intent(out) :: taux_bot !< Zonal bottom stress from ocean to
                                                      !! rock [R L Z T-2 ~> Pa]
@@ -614,11 +622,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   logical :: lfpmix
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, n
-  is = G%isc ; ie = G%iec; js = G%jsc; je = G%jec
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
-
-  if (.not.associated(CS)) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
-         "Module must be initialized before it is used.")
 
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
@@ -646,8 +651,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (CS%StokesMixing) then
     if (present(Waves)) DoStokesMixing = associated(Waves)
     if (.not. DoStokesMixing) &
-      call MOM_error(FATAL,"Stokes Mixing called without allocated"//&
-                     "Waves Control Structure")
+      call MOM_error(FATAL, "Stokes Mixing called without associated Waves Control Structure")
   endif
   lfpmix = .false.
   if ( present(fpmix) ) lfpmix = fpmix
@@ -673,45 +677,50 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
       ADp%du_dt_visc(I,j,k) = u(I,j,k)
-    enddo ; enddo; enddo
+    enddo ; enddo ; enddo
   endif
 
+  !$omp target enter data map(to: ADp)
+  !$omp target enter data map(alloc: surface_stress)
+  !$omp target enter data map(alloc: ADp%dv_dt_str)
+  !$omp target enter data map(alloc: ADp%du_dt_str)
+
   if (associated(ADp%du_dt_visc_gl90)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
       ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (associated(ADp%du_dt_str)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
       ADp%du_dt_str(I,j,k) = 0.0
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       surface_stress(I,j) = 0.0
       stress_mask = G%OBCmaskCu(I,j) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCu(I,j)
-      if (stress_mask > 0.) then
+      if (stress_mask > 0.0) then
         zDS = 0.0
         stress = dt_Rho0 * forces%taux(I,j)
         do k=1,nz
           h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
           hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
           u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
-          if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
+          if (associated(ADp%du_dt_str)) ADp%du_dt_str(I,j,k) = (I_Hmix * hfr * stress) * Idt
           zDS = zDS + h_a ; if (zDS >= Hmix) exit
         enddo
       endif
-    enddo ; enddo
+    enddo
   else
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       stress_mask = G%OBCmaskCu(I,j) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCu(I,j)
       surface_stress(I,j) = dt_Rho0 * (stress_mask*forces%taux(I,j))
-    enddo ; enddo
+    enddo
   endif
 
   ! perform forward elimination on the tridiagonal system
@@ -740,6 +749,10 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! c1(k) is -c'_(k - 1)
   ! and the right-hand-side is destructively updated to be d'_k
 
+  !$omp target enter data map(alloc: c1)
+
+  !$omp target teams loop collapse(2) &
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
@@ -768,6 +781,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
 
       !### Force FMA evaluation of b1 by blocking lookahead with an impossible branch.
+      ! XXX: Check GPU behavior
       if (dt < 0) exit
     enddo
 
@@ -840,12 +854,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%du_dt_visc)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
-      ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+      do k=1,nz
+        ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
-      if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
-        ADp%du_dt_visc(I,j,k) = 0.0
-    enddo ; enddo ; enddo
+        if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
+          ADp%du_dt_visc(I,j,k) = 0.0
+      enddo
+    enddo
   endif
 
   if (allocated(visc%taux_shelf)) then
@@ -855,14 +871,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (present(taux_bot)) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
-    enddo ; enddo
+    enddo
 
     if (allocated(visc%Ray_u)) then
-      do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
-        taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
-      enddo ; enddo ; enddo
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+        do k=1,nz
+          taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
+        enddo
+      enddo
     endif
   endif
 
@@ -895,9 +913,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
       ADp%dv_dt_visc(i,J,k) = v(i,J,k)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
@@ -907,19 +925,19 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_str)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
       ADp%dv_dt_str(i,J,k) = 0.0
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       surface_stress(i,J) = 0.0
       stress_mask = G%OBCmaskCv(i,J) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCv(i,J)
-      if (stress_mask > 0.) then
+      if (stress_mask > 0.0) then
         zDS = 0.0
         stress = dt_Rho0 * forces%tauy(i,J)
         do k=1,nz
@@ -930,14 +948,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           zDS = zDS + h_a ; if (zDS >= Hmix) exit
         enddo
       endif
-    enddo ; enddo
+    enddo
   else
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       stress_mask = G%OBCmaskCv(i,J) ; if (CS%OBC_stress_bug) stress_mask = G%mask2dCv(i,J)
       surface_stress(i,J) = dt_Rho0 * (stress_mask * forces%tauy(i,J))
-    enddo ; enddo
+    enddo
   endif
 
+  !$omp target teams loop collapse(2) &
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
@@ -966,6 +986,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
 
       !### Force FMA evaluation of b1 by blocking lookahead with an impossible branch.
+      ! XXX: Check GPU behavior
       if (dt < 0) exit
     enddo
 
@@ -1038,10 +1059,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-      ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-      if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
-    enddo ; enddo ; enddo
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      do k=1,nz
+        ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
+        if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
+      enddo
+    enddo
   endif
 
   if (allocated(visc%tauy_shelf)) then
@@ -1050,15 +1073,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo
   endif
 
+  ! JORGE TODO: this has to be malloced
   if (present(tauy_bot)) then
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
-    enddo; enddo
+    enddo
 
     if (allocated(visc%Ray_v)) then
-      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-        tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
-      enddo ; enddo ; enddo
+      do concurrent (J=Jsq:Jeq, i=is:ie)
+        do k=1,nz
+          tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
+        enddo
+      enddo
     endif
   endif
 
@@ -1093,6 +1119,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
+
+  !$omp target exit data map(delete: c1)
+
+  !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
+  !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(delete: surface_stress)
 
   ! Here the velocities associated with open boundary conditions are applied.
   if (associated(OBC)) then
@@ -1185,7 +1217,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
                                               !! viscosity is applied in the meridional direction [nondim]
   real,                  intent(in)    :: dt  !< Time increment [T ~> s]
   type(unit_scale_type), intent(in)    :: US  !< A dimensional unit scaling type
-  type(vertvisc_CS),     pointer       :: CS  !< Vertical viscosity control structure
+  type(vertvisc_CS)                    :: CS  !< Vertical viscosity control structure
 
   ! Local variables
 
@@ -1204,14 +1236,13 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   is = G%isc ; ie = G%iec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
-  if (.not.associated(CS)) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
-         "Module must be initialized before it is used.")
-
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remnant): "// &
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
 
+  !$omp target teams loop collapse(2) &
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
@@ -1231,6 +1262,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1
 
       !### Force FMA evaluation of b1 by blocking lookahead with an impossible branch.
+      ! XXX: Check GPU behavior
       if (dt < 0) exit
     enddo
 
@@ -1241,6 +1273,8 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
 
+  !$omp target teams loop collapse(2) &
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
@@ -1260,6 +1294,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1
 
       !### Force FMA evaluation of b1 by blocking lookahead with an impossible branch.
+      ! XXX: Check GPU behavior
       if (dt < 0) exit
     enddo
 
@@ -1269,6 +1304,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   endif ; enddo ; enddo
 
   if (CS%debug) then
+    !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   scalar_pair=.true.)
   endif
@@ -1376,7 +1412,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   logical :: do_any_shelf
   integer :: zi_dir
     ! A ternary logical indicating which thickness to use for finding z_clear.
-  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, ij
+  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
@@ -1409,10 +1445,27 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     allocate(CS%a1_shelf_v(G%isd:G%ied,G%JsdB:G%JedB), source=0.0)
   endif
 
+  !$omp target enter data map(alloc: Ustar_2d)
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
 
   ! First do u-points
 
+  ! TODO: tv probably should be conditionally transferred (if at all)
+  !$omp target enter data map(alloc: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp& tv, hvel_shelf, dz_vel_shelf, a_shelf)
+
+  ! These are used in diagnostics, so they need to be mapped back and forth
+  !$omp target enter data map(to: hML_u, kv_u, kv_gl90_u )
+  !$omp target enter data map(to: hML_v, kv_v, kv_gl90_v)
+
+  !$omp target update to(visc%Kv_shear) if (associated(visc%Kv_shear))
+  !$omp target update to(visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
+
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   private(z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp&     I_Hbbl, I_Hbbl_gl90, kv_bbl, bbl_thick, Dmin, zi_dir, zh, zcol, &
+  !$omp&     zcol_p1, h_harm, h_arith, h_delta, dz_arith, z2, botfn, z_clear, &
+  !$omp&     z2_wt, h_ml)
   do j=js,je ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     I_Hbbl = 1. / (CS%Hbbl + dz_neglect)
     if (CS%use_GL90_in_SSW) then
@@ -1559,7 +1612,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif
     enddo
 
-    call find_coupling_coef(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
+    call find_coupling_coef_k(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
         h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC)
 
     if (allocated(hML_u)) hML_u(I,j) = h_ml
@@ -1717,6 +1770,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   ! Now work on v-points.
 
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   private(z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp     I_Hbbl, I_Hbbl_gl90, kv_bbl, bbl_thick, Dmin, zi_dir, zh, zcol, &
+  !$omp     zcol_p1, h_harm, h_arith, h_delta, dz_arith, z2, botfn, z_clear, &
+  !$omp     z2_wt, h_ml)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     I_Hbbl = 1. / (CS%Hbbl + dz_neglect)
     if (CS%use_GL90_in_SSW) then
@@ -1858,7 +1916,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif
     enddo
 
-    call find_coupling_coef(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
+    call find_coupling_coef_k(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
         h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
 
     if (allocated(hML_v)) hML_v(i,J) = h_ml
@@ -2013,8 +2071,18 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif
   endif ; enddo ; enddo
 
+  !$omp target exit data map(delete: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp& tv, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
+
+  ! These are used in diagnostics, so they need to be mapped back and forth
+  !$omp target exit data map(from: hML_u, kv_u, kv_gl90_u )
+  !$omp target exit data map(from: hML_v, kv_v, kv_gl90_v)
+
+  !$omp target exit data map(delete: Ustar_2d)
+
   if (CS%debug) then
-    call uvchksum("vertvisc_coef h_[uv]", CS%h_u, CS%h_v, G%HI, haloshift=0, &
+    !$omp target update from(CS%h_u, CS%h_v, CS%a_u, CS%a_v)
+    call uvchksum("loop vertvisc_coef h_[uv]", CS%h_u, CS%h_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m, scalar_pair=.true.)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m*US%s_to_T, scalar_pair=.true.)
@@ -2046,12 +2114,522 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 end subroutine vertvisc_coef
 
+!> Calculate the 'coupling coefficient' (a_cpl) at the interfaces.
+!! If BOTTOMDRAGLAW is defined, the minimum of Hbbl and half the adjacent
+!! layer thicknesses are used to calculate a_cpl near the bottom.
+pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i, h_ml, &
+                              dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf)
+  !$omp declare target
+  type(ocean_grid_type),     intent(in)  :: G  !< Ocean grid structure
+  type(verticalGrid_type),   intent(in)  :: GV !< Ocean vertical grid structure
+  type(unit_scale_type),     intent(in)  :: US !< A dimensional unit scaling type
+  real, dimension(SZK_(GV)+1), &
+                             intent(out) :: a_cpl !< Coupling coefficient across interfaces [H T-1 ~> m s-1 or Pa s m-1]
+  real, dimension(SZK_(GV)), &
+                             intent(in)  :: hvel !< Distance between interfaces at velocity points [Z ~> m]
+  integer,                   intent(in)  :: i    !< Column i-index
+  integer,                   intent(in)  :: j    !< Column j-index
+  real, dimension(SZK_(GV)), &
+                             intent(in)  :: h_harm !< Harmonic mean of thicknesses around a velocity
+                                                   !! grid point [Z ~> m]
+  real, intent(in)  :: bbl_thick !< Bottom boundary layer thickness [Z ~> m]
+  real, intent(in)  :: kv_bbl !< Bottom boundary layer viscosity, exclusive of
+                                                   !! any depth-dependent contributions from
+                                                   !! visc%Kv_shear [H Z T-1 ~> m2 s-1 or Pa s]
+  real, dimension(SZK_(GV)+1), intent(in) :: z_i !< Estimate of interface heights above the bottom,
+                                                 !! normalized by the bottom boundary layer thickness [nondim]
+  real,                      intent(out) :: h_ml !< Mixed layer depth [Z ~> m]
+  real,                      intent(in)  :: dt   !< Time increment [T ~> s]
+  type(vertvisc_CS),         intent(in)  :: CS   !< Vertical viscosity control structure
+  type(vertvisc_type),       intent(in)  :: visc !< Structure containing viscosities and bottom drag
+  real, dimension(SZI_(G),SZJ_(G)), &
+                             intent(in)  :: Ustar_2d !< The wind friction velocity, calculated using
+                                                 !! the Boussinesq reference density or the
+                                                 !! time-evolving surface density in non-Boussinesq
+                                                 !! mode [Z T-1 ~> m s-1]
+  type(thermo_var_ptrs),     intent(in)  :: tv   !< A structure containing pointers to any available
+                                                 !! thermodynamic fields.
+  logical,                   intent(in)  :: work_on_u !< If true, u-points are being calculated,
+                                                  !! otherwise they are v-points
+  type(ocean_OBC_type),      pointer     :: OBC   !< Open boundary condition structure
+  logical,         optional, intent(in)  :: shelf !< If present and true, use a surface boundary
+                                                  !! condition appropriate for an ice shelf.
+
+  real :: u_star    ! ustar at a velocity point [Z T-1 ~> m s-1]
+  real :: tau_mag   ! The magnitude of the wind stress at a velocity point including gustiness [H Z T-2 ~> m2 s-2 or Pa]
+  real :: absf      ! The average of the neighboring absolute values of f [T-1 ~> s-1].
+  real :: rho_av1   ! The harmonic mean surface layer density at velocity points [R ~> kg m-3]
+  real :: z_t       ! The distance from the top, sometimes normalized
+                    ! by Hmix, [Z ~> m] or [nondim].
+  real :: kv_TBL    ! The viscosity in a top boundary layer under ice [H Z T-1 ~> m2 s-1 or Pa s]
+  real :: tbl_thick ! The thickness of the top boundary layer [Z ~> m]
+  real :: Kv_add    ! A viscosity to add [H Z T-1 ~> m2 s-1 or Pa s]
+  real :: Kv_tot    ! The total viscosity at an interface [H Z T-1 ~> m2 s-1 or Pa s]
+  integer :: nk_in_ml   ! The index of the deepest interface in the mixed layer.
+  real :: h_shear ! The distance over which shears occur [Z ~> m].
+  real :: dhc     ! The distance between the center of adjacent layers [Z ~> m].
+  real :: visc_ml ! The mixed layer viscosity [H Z T-1 ~> m2 s-1 or Pa s].
+  real :: I_Hmix  ! The inverse of the mixed layer thickness [Z-1 ~> m-1].
+  real :: a_ml    ! The layer coupling coefficient across an interface in
+                  ! the mixed layer [H T-1 ~> m s-1 or Pa s m-1].
+  real :: a_floor ! A lower bound on the layer coupling coefficient across an interface in
+                  ! the mixed layer [H T-1 ~> m s-1 or Pa s m-1].
+  real :: I_amax  ! The inverse of the maximum coupling coefficient [T H-1 ~> s m-1 or s m2 kg-1].
+  real :: temp1   ! A temporary variable [Z2 ~> m2]
+  real :: ustar2_denom ! A temporary variable in the surface boundary layer turbulence
+                  ! calculations [H Z-1 T-1 ~> s-1 or kg m-3 s-1]
+  real :: h_neglect ! A vertical distance that is so small it is usually lost
+                  ! in roundoff and can be neglected [Z ~> m].
+  real :: z2      ! A copy of z_i [nondim]
+  real :: botfn   ! A function that is 1 at the bottom and small far from it [nondim]
+  real :: topfn   ! A function that is 1 at the top and small far from it [nondim]
+  real :: kv_top  ! A viscosity associated with the top boundary layer [H Z T-1 ~> m2 s-1 or Pa s]
+  logical :: do_shelf, do_OBCs, can_exit
+  integer :: k
+  integer :: nz, max_nk
+
+  nz = GV%ke
+
+  h_neglect = GV%dZ_subroundoff
+
+  if (CS%answer_date < 20190101) then
+    !   The maximum coupling coefficient was originally introduced to avoid
+    ! truncation error problems in the tridiagonal solver. Effectively, the 1e-10
+    ! sets the maximum coupling coefficient increment to 1e10 m per timestep.
+    I_amax = (1.0e-10*GV%H_to_m) * dt
+  else
+    I_amax = 0.0
+  endif
+
+  do_shelf = .false. ; if (present(shelf)) do_shelf = shelf
+
+  do_OBCs = .false.
+  !if (associated(OBC)) then
+  !  if (work_on_u) then
+  !    do_OBCS = OBC%u_E_OBCs_on_PE .or. OBC%u_W_OBCs_on_PE
+  !  else
+  !    do_OBCS = OBC%v_N_OBCs_on_PE .or. OBC%v_S_OBCs_on_PE
+  !  endif
+  !endif
+
+  a_cpl(:) = 0.
+  h_ml = 0.
+
+  if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
+    I_Hmix = 1. / (CS%Hmix + h_neglect)
+    z_t = h_neglect * I_Hmix
+  endif
+
+  do K=2,nz
+    Kv_tot = CS%Kv
+
+    if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
+      ! This is an older (vintage ~1997) way to prevent wind stresses from driving very
+      ! large flows in nearly massless near-surface layers when there is not a physically-
+      ! based surface boundary layer parameterization.  It does not have a plausible
+      ! physical basis, and probably should not be used.
+      z_t = z_t + h_harm(k-1) * I_Hmix
+      Kv_tot = CS%Kv + CS%Kvml_invZ2 / ((z_t * z_t) *  &
+               (1. + 0.09 * z_t * z_t * z_t * z_t * z_t * z_t))
+    endif
+
+    if (associated(visc%Kv_shear)) then
+      ! Add in viscosities that are determined by physical processes that are handled in
+      ! other modules, and which do not respond immediately to the changing layer thicknesses.
+      ! These processes may include shear-driven mixing or contributions from some boundary
+      ! layer turbulence schemes.  Other viscosity contributions that respond to the evolving
+      ! layer thicknesses or the surface wind stresses are added later.
+      if (work_on_u) then
+        Kv_add = 0.5 * (visc%Kv_shear(i,j,k) + visc%Kv_shear(i+1,j,k))
+
+        if (do_OBCs) then
+          if (OBC%u_E_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) > 0) then
+              Kv_add = visc%Kv_shear(i,j,k)
+            endif
+          endif
+
+          if (OBC%u_W_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) < 0) then
+              Kv_add = visc%Kv_shear(i+1,j,k)
+            endif
+          endif
+        endif
+
+        Kv_tot = Kv_tot + Kv_add
+      else
+        Kv_add = 0.5 * (visc%Kv_shear(i,j,k) + visc%Kv_shear(i,j+1,k))
+
+        if (do_OBCs) then
+          if (OBC%v_N_OBCs_on_PE) then
+            if (OBC%segnum_v(i,J) > 0) then
+              Kv_add = visc%Kv_shear(i,j,k)
+            endif
+          endif
+
+          if (OBC%v_S_OBCs_on_PE) then
+            if (OBC%segnum_v(i,J) < 0) then
+              Kv_add = visc%Kv_shear(i,j+1,k)
+            endif
+          endif
+        endif
+
+        Kv_tot = Kv_tot + Kv_add
+      endif
+    endif
+
+    if (associated(visc%Kv_shear_Bu)) then
+      ! This is similar to what was done above, but for contributions coming from the corner
+      ! (vorticity) points.  Because OBCs run through the faces and corners there is no need
+      ! to further modify these viscosities here to take OBCs into account.
+      if (work_on_u) then
+        Kv_tot = Kv_tot + 0.5 * (visc%Kv_shear_Bu(I,J-1,k) + visc%Kv_shear_Bu(I,J,k))
+      else
+        Kv_tot = Kv_tot + 0.5 * (visc%Kv_shear_Bu(I-1,J,k) + visc%Kv_shear_Bu(I,J,k))
+      endif
+    endif
+
+    ! Set the viscous coupling coefficients, excluding surface mixed layer contributions
+    ! for now, but including viscous bottom drag, working up from the bottom.
+    if (CS%bottomdraglaw) then
+      !    botfn determines when a point is within the influence of the bottom
+      !  boundary layer, going from 1 at the bottom to 0 in the interior.
+      z2 = z_i(k)
+      botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
+
+      Kv_tot = Kv_tot + (kv_bbl - CS%Kv) * botfn
+      dhc = 0.5 * (hvel(k) + hvel(k-1))
+      if (dhc > bbl_thick) then
+        h_shear = ((1. - botfn) * dhc + botfn * bbl_thick) + h_neglect
+      else
+        h_shear = dhc + h_neglect
+      endif
+
+      ! Calculate the coupling coefficients from the viscosities.
+      a_cpl(K) = Kv_tot / (h_shear + (I_amax * Kv_tot))
+    elseif (abs(CS%Kv_extra_bbl) > 0.0) then
+      ! There is a simple enhancement of the near-bottom viscosities, but no
+      ! adjustment of the viscous coupling length scales to give a particular
+      ! bottom stress.
+
+      !    botfn determines when a point is within the influence of the bottom
+      !  boundary layer, going from 1 at the bottom to 0 in the interior.
+      z2 = z_i(k)
+      botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
+
+      Kv_tot = Kv_tot + CS%Kv_extra_bbl * botfn
+      h_shear = 0.5 * (hvel(k) + hvel(k-1) + h_neglect)
+
+      ! Calculate the coupling coefficients from the viscosities.
+      a_cpl(K) = Kv_tot / (h_shear + I_amax * Kv_tot)
+    else
+      ! Any near-bottom viscous enhancements were already incorporated into
+      ! Kv_tot, and there is no adjustment of the viscous coupling length
+      ! scales to give a particular bottom stress.
+
+      h_shear = 0.5 * (hvel(k) + hvel(k-1) + h_neglect)
+      ! Calculate the coupling coefficients from the viscosities.
+      a_cpl(K) = Kv_tot / (h_shear + I_amax * Kv_tot)
+    endif
+  enddo
+
+  ! Assign the bottom coupling coefficients
+  if (CS%bottomdraglaw) then
+    dhc = hvel(nz) * 0.5
+    a_cpl(nz+1) = kv_bbl / ((min(dhc, bbl_thick) + h_neglect) + I_amax * kv_bbl)
+  elseif (abs(CS%Kv_extra_bbl) > 0.0) then
+    a_cpl(nz+1) = (CS%Kv + CS%Kv_extra_bbl) &
+        / ((0.5 * hvel(nz) + h_neglect) + I_amax * (CS%Kv + CS%Kv_extra_bbl))
+  else
+    a_cpl(nz+1) = CS%Kv / ((0.5 * hvel(nz) + h_neglect) + I_amax * CS%Kv)
+  endif
+
+  ! Add surface intensified viscous coupling, either as a no-slip boundary condition under a
+  ! rigid ice-shelf, or due to wind-stress driven surface boundary layer mixing that has not
+  ! already been added via visc%Kv_shear.
+  if (do_shelf) then
+    ! Set the coefficients to include the no-slip surface stress.
+    if (work_on_u) then
+      kv_TBL = visc%Kv_tbl_shelf_u(I,j)
+      tbl_thick = visc%tbl_thick_shelf_u(I,j) + h_neglect
+    else
+      kv_TBL = visc%Kv_tbl_shelf_v(i,J)
+      tbl_thick = visc%tbl_thick_shelf_v(i,J) + h_neglect
+    endif
+    z_t = 0.0
+
+    ! If a_cpl(1) were not already 0, it would be added here.
+    if (0.5 * hvel(1) > tbl_thick) then
+      a_cpl(1) = kv_TBL / (tbl_thick + I_amax * kv_TBL)
+    else
+      a_cpl(1) = kv_TBL / ((0.5 * hvel(1) + h_neglect) + I_amax * kv_TBL)
+    endif
+
+    do K=2,nz
+      z_t = z_t + hvel(k-1) / tbl_thick
+      topfn = 1. / (1. + 0.09 * z_t**6)
+
+      dhc = 0.5 * (hvel(k) + hvel(k-1))
+      if (dhc > tbl_thick) then
+        h_shear = ((1. - topfn) * dhc + topfn * tbl_thick) + h_neglect
+      else
+        h_shear = dhc + h_neglect
+      endif
+
+      kv_top = topfn * kv_TBL
+      a_cpl(K) = a_cpl(K) + kv_top / (h_shear + I_amax * kv_top)
+    enddo
+  elseif (CS%dynamic_viscous_ML .or. (GV%nkml>0) .or. CS%fixed_LOTW_ML .or. CS%apply_LOTW_floor) then
+
+    ! Find the friction velocity and the absolute value of the Coriolis parameter at this point.
+    ! Zero out the friction velocity on land points.
+    u_star = 0.
+    tau_mag = 0.
+
+    if (allocated(tv%SpV_avg)) then
+      rho_av1 = 0.
+
+      if (work_on_u) then
+        u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
+        rho_av1 = 2. / (tv%SpV_avg(i,j,1) + tv%SpV_avg(i+1,j,1))
+        absf = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
+
+        if (do_OBCs) then
+          if (OBC%u_E_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) > 0) then
+              u_star = Ustar_2d(i,j)
+              rho_av1 = 1. / tv%SpV_avg(i,j,1)
+            endif
+          endif
+
+          if (OBC%u_W_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) < 0) then
+              u_star = Ustar_2d(i+1,j)
+              rho_av1 = 1. / tv%SpV_avg(i+1,j,1)
+            endif
+          endif
+        endif
+      else
+        u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i,j+1))
+        rho_av1 = 2. / (tv%SpV_avg(i,j,1) + tv%SpV_avg(i,j+1,1))
+        absf = 0.5 * (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))
+
+        if (do_OBCs) then
+          if (OBC%v_N_OBCs_on_PE) then
+            if (OBC%segnum_v(i,J) > 0) then
+              u_star = Ustar_2d(i,j)
+              rho_av1 = 1. / tv%SpV_avg(i,j,1)
+            endif
+          endif
+
+          if (OBC%v_S_OBCs_on_PE) then
+            if (OBC%segnum_v(i,J) < 0) then
+              u_star = Ustar_2d(i,j+1)
+              rho_av1 = 1. / tv%SpV_avg(i,j+1,1)
+            endif
+          endif
+        endif
+      endif
+
+      tau_mag = GV%RZ_to_H * rho_av1 * u_star**2
+    else ! (.not.allocated(tv%SpV_avg))
+      if (work_on_u) then
+        u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
+        absf = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
+
+        if (do_OBCs) then
+          if (OBC%u_E_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) > 0) then
+              u_star = Ustar_2d(i,j)
+            endif
+          endif
+
+          if (OBC%u_W_OBCs_on_PE) then
+            if (OBC%segnum_u(I,j) < 0) then
+              u_star = Ustar_2d(i+1,j)
+            endif
+          endif
+        endif
+      else
+        u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i,j+1))
+        absf = 0.5 * (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))
+
+        if (do_OBCs) then
+          if (OBC%v_N_OBCs_on_PE) then
+              if (OBC%segnum_v(i,J) > 0) then
+                u_star = Ustar_2d(i,j)
+              endif
+          endif
+
+          if (OBC%v_S_OBCs_on_PE) then
+            if (OBC%segnum_v(i,J) < 0) then
+              u_star = Ustar_2d(i,j+1)
+            endif
+          endif
+        endif
+      endif
+
+      tau_mag = GV%Z_to_H * u_star**2
+    endif
+
+    ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
+    nk_in_ml = 0
+
+    if (CS%dynamic_viscous_ML) then
+      ! The fractional number of layers that are within the viscous boundary layer were
+      ! previously stored in visc%nkml_visc_[uv].
+      h_ml = h_neglect
+      max_nk = 0
+
+      if (work_on_u) then
+        nk_in_ml = ceiling(visc%nkml_visc_u(I,j))
+        max_nk = max(max_nk, nk_in_ml)
+
+        do k=1,max_nk
+          if (k <= visc%nkml_visc_u(I,j)) then ! This layer is all in the ML.
+            h_ml = h_ml + hvel(k)
+          elseif (k < visc%nkml_visc_u(I,j) + 1.) then ! Part of this layer is in the ML.
+            h_ml = h_ml + ((visc%nkml_visc_u(I,j) + 1.) - k) * hvel(k)
+          endif
+        enddo
+      else
+        nk_in_ml = ceiling(visc%nkml_visc_v(i,J))
+        max_nk = max(max_nk, nk_in_ml)
+
+        do k=1,max_nk
+          if (k <= visc%nkml_visc_v(i,J)) then ! This layer is all in the ML.
+            h_ml = h_ml + hvel(k)
+          elseif (k < visc%nkml_visc_v(i,J) + 1.) then ! Part of this layer is in the ML.
+            h_ml = h_ml + ((visc%nkml_visc_v(i,J) + 1.) - k) * hvel(k)
+          endif
+        enddo
+      endif
+    elseif (GV%nkml>0) then
+      ! This is a simple application of a refined-bulk mixed layer with GV%nkml sublayers.
+      max_nk = GV%nkml
+      nk_in_ml = GV%nkml
+
+      h_ml = h_neglect
+
+      do k=1,GV%nkml
+        h_ml = h_ml + hvel(k)
+      enddo
+    elseif (CS%fixed_LOTW_ML .or. CS%apply_LOTW_floor) then
+      ! Determine which interfaces are within CS%Hmix of the surface, and set the viscous
+      ! boundary layer thickness to the the smaller of CS%Hmix and the depth of the ocean.
+      h_ml = 0.0
+      do k=1,nz
+        can_exit = .true.
+        if (h_ml < CS%Hmix) then
+          nk_in_ml = k
+
+          if (h_ml + hvel(k) < CS%Hmix) then
+            h_ml = h_ml + hvel(k)
+            can_exit = .false.  ! Part of the next deeper layer is also in the mixed layer.
+          else
+            h_ml = CS%Hmix
+          endif
+        endif
+
+        if (can_exit) exit  ! All remaining layers in this row are below the mixed layer depth.
+      enddo
+
+      ! This made more sense in the slab/layer solvers...
+      max_nk = 0
+      max_nk = max(max_nk, nk_in_ml)
+    endif
+
+    ! Avoid working on land or on columns where the viscous coupling could not be increased.
+    if (u_star <= 0.) nk_in_ml = 0
+
+    ! Set the viscous coupling at the interfaces as the larger of what was previously
+    ! set and the contributions from the surface boundary layer.
+    z_t = 0.0
+    if (CS%apply_LOTW_floor .and. &
+        (CS%dynamic_viscous_ML .or. GV%nkml > 0 .or. CS%fixed_LOTW_ML)) then
+      do K=2,max_nk
+        if (k <= nk_in_ml) then
+          z_t = z_t + hvel(k-1)
+
+          !   The viscosity in visc_ml is set to go to 0 at the mixed layer top and bottom
+          ! (in a log-layer) and be further limited by rotation to give the natural Ekman length.
+          temp1 = (z_t * h_ml - z_t * z_t)
+          if (GV%Boussinesq) then
+            ustar2_denom = (CS%vonKar * GV%Z_to_H * u_star**2) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          else
+            ustar2_denom = (CS%vonKar * tau_mag) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          endif
+
+          visc_ml = temp1 * ustar2_denom
+          ! Set the viscous coupling based on the model's vertical resolution.  The omission of
+          ! the I_amax factor here is consistent with answer dates above 20190101.
+          a_ml = visc_ml / (0.25 * (hvel(k) + hvel(k-1) + h_neglect))
+
+          ! As a floor on the viscous coupling, assume that the length scale in the denominator can
+          ! not be larger than the distance from the surface, consistent with a logarithmic velocity
+          ! profile.  This is consistent with visc_ml, but cancels out common factors of z_t.
+          a_floor = (h_ml - z_t) * ustar2_denom
+
+          ! Choose the largest estimate of a_cpl.
+          a_cpl(K) = max(a_cpl(K), a_ml, a_floor)
+          ! An option could be added to change this to: a_cpl(i,K) = max(a_cpl(i,K) + a_ml, a_floor)
+        endif
+      enddo
+    elseif (CS%apply_LOTW_floor) then
+      do K=2,max_nk
+        if (k <= nk_in_ml) then
+          z_t = z_t + hvel(k-1)
+
+          temp1 = (z_t * h_ml - z_t * z_t)
+          if (GV%Boussinesq) then
+            ustar2_denom = (CS%vonKar * GV%Z_to_H * u_star**2) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          else
+            ustar2_denom = (CS%vonKar * tau_mag) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          endif
+
+          ! As a floor on the viscous coupling, assume that the length scale in the denominator can not
+          ! be larger than the distance from the surface, consistent with a logarithmic velocity profile.
+          a_cpl(K) = max(a_cpl(K), (h_ml - z_t) * ustar2_denom)
+        endif
+      enddo
+    else
+      do K=2,max_nk
+        if (k <= nk_in_ml) then
+          z_t = z_t + hvel(k-1)
+
+          temp1 = (z_t * h_ml - z_t * z_t)
+          !   This viscosity is set to go to 0 at the mixed layer top and bottom (in a log-layer)
+          ! and be further limited by rotation to give the natural Ekman length.
+          ! The following expressions are mathematically equivalent.
+          if (GV%Boussinesq .or. (CS%answer_date < 20230601)) then
+            visc_ml = u_star * CS%vonKar * (GV%Z_to_H * temp1 * u_star) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          else
+            visc_ml = CS%vonKar * (temp1 * tau_mag) &
+                / (absf * temp1 + (h_ml + h_neglect) * u_star)
+          endif
+          a_ml = visc_ml / (0.25 * (hvel(k) + hvel(k-1) + h_neglect) + 0.5 * I_amax * visc_ml)
+
+          ! Choose the largest estimate of a_cpl, but these could be changed to be additive.
+          a_cpl(K) = max(a_cpl(K), a_ml)
+          ! An option could be added to change this to: a_cpl(i,K) = a_cpl(i,K) + a_ml
+        endif
+      enddo
+    endif
+  endif
+end subroutine find_coupling_coef_k
+
 
 !> Calculate the 'coupling coefficient' (a_cpl) at the interfaces.
 !! If BOTTOMDRAGLAW is defined, the minimum of Hbbl and half the adjacent
 !! layer thicknesses are used to calculate a_cpl near the bottom.
 subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i, h_ml, &
                               dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf)
+  !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G  !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV !< Ocean vertical grid structure
   type(unit_scale_type),     intent(in)  :: US !< A dimensional unit scaling type
@@ -2452,7 +3030,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
       enddo
     elseif (CS%fixed_LOTW_ML .or. CS%apply_LOTW_floor) then
       ! Determine which interfaces are within CS%Hmix of the surface, and set the viscous
-      ! boundary layer thickness to the the smaller of CS%Hmix and the depth of the ocean.
+      ! boundary layer thickness to the smaller of CS%Hmix and the depth of the ocean.
       h_ml = 0.0
       do k=1,nz
         can_exit = .true.
@@ -2557,6 +3135,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
   endif
 end subroutine find_coupling_coef
 
+
 !> Velocity components which exceed a threshold for physically reasonable values are truncated,
 !! and the running sum of the number of trunctionas within the non-symmetric memory computational
 !! domain is incremented.  Optionally, any column with excessive velocities may be sent
@@ -2576,7 +3155,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   type(mech_forcing),      intent(in)    :: forces !< A structure with the driving mechanical forces
   type(vertvisc_type),     intent(in)    :: visc   !< Viscosities and bottom drag
   real,                    intent(in)    :: dt     !< Time increment [T ~> s]
-  type(vertvisc_CS),       pointer       :: CS     !< Vertical viscosity control structure
+  type(vertvisc_CS)                      :: CS     !< Vertical viscosity control structure
 
   ! Local variables
   real :: CFL              ! The local CFL number [nondim]
@@ -2584,140 +3163,164 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   real :: vel_report(SZIB_(G),SZJB_(G))   ! The velocity to report [L T-1 ~> m s-1]
   real :: u_old(SZIB_(G),SZJ_(G),SZK_(GV)) ! The previous u-velocity [L T-1 ~> m s-1]
   real :: v_old(SZI_(G),SZJB_(G),SZK_(GV)) ! The previous v-velocity [L T-1 ~> m s-1]
+  logical :: trunc_any_array(SZI_(G),SZJB_(G),SZK_(GV))
   logical :: trunc_any, dowrite(SZIB_(G),SZJB_(G))
+  logical :: do_any_write
+  integer :: ntrunc         ! Thread-safe truncation counter
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
   H_report = 3.0 * GV%Angstrom_H
 
+  !$omp target enter data map(alloc: dowrite, vel_report)
+  !$omp target enter data map(alloc: u_old, v_old)
+
   if (len_trim(CS%u_trunc_file) > 0) then
-    !$OMP parallel do default(shared) private(trunc_any,CFL)
-    do j=js,je
-      trunc_any = .false.
-      do I=Isq,Ieq ; dowrite(I,j) = .false. ; enddo
-      do I=Isq,Ieq ; vel_report(i,j) = 3.0e8*US%m_s_to_L_T ; enddo ! Speed of light default.
-      do k=1,nz ; do I=Isq,Ieq
-        if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
-        if (u(I,j,k) < 0.0) then
-          CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
-        else
-          CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
-        endif
-        if (CFL > CS%CFL_trunc) trunc_any = .true.
-        if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
-            ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
-          dowrite(I,j) = .true.
-          vel_report(I,j) = MIN(vel_report(I,j), abs(u(I,j,k)))
-        endif
-      enddo ; enddo
+    do_any_write = .false.
+    trunc_any = .false.
 
-      do I=Isq,Ieq ; if (dowrite(I,j)) then
-        u_old(I,j,:) = u(I,j,:)
-      endif ; enddo
+    do concurrent (j=js:je, I=Isq:Ieq)
+      dowrite(I,j) = .false.
+      vel_report(I,j) = 3.0e8 * US%m_s_to_L_T
+    enddo
 
-      if (trunc_any) then
-        do k=1,nz ; do I=Isq,Ieq
-          if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-            u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
-            if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
-                (CS%h_u(I,j,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
-          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
-            if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
-                (CS%h_u(I,j,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
-          endif
-        enddo ; enddo
+    do concurrent (k=1:nz, j=js:je, I=Isq:Ieq) &
+        DO_LOCALITY(reduce(.or.: trunc_any, do_any_write))
+      if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
+      if (u(I,j,k) < 0.0) then
+        CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
+      else
+        CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
       endif
-    enddo ! j-loop
+      if (CFL > CS%CFL_trunc) trunc_any = .true.
+      if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
+          ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
+        dowrite(I,j) = .true.
+        do_any_write = .true.
+        vel_report(I,j) = min(vel_report(I,j), abs(u(I,j,k)))
+      endif
+    enddo
+
+    do concurrent (j=js:je, I=Isq:Ieq, dowrite(I,j))
+      u_old(I,j,:) = u(I,j,:)
+    enddo
+
+    if (trunc_any) then
+      ntrunc = 0
+      do concurrent (k=1:nz, j=js:je, I=Isq:Ieq) DO_LOCALITY(reduce(+: ntrunc))
+        if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+          u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
+          if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
+              (CS%h_u(I,j,k) > H_report)) ntrunc = ntrunc + 1
+        elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
+          u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
+          if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
+              (CS%h_u(I,j,k) > H_report)) ntrunc = ntrunc + 1
+        endif
+      enddo
+      CS%ntrunc = CS%ntrunc + ntrunc
+    endif
+
+    if (do_any_write) then
+      !$omp target update from (u_old, vel_report)
+      do j=js,je ; do I=Isq,Ieq ; if (dowrite(I,j)) then
+        ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
+        call write_u_accel(I, j, u_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
+                           vel_report(I,j), forces%taux(I,j), a=CS%a_u, hv=CS%h_u)
+      endif ; enddo ; enddo
+    endif
   else  ! Do not report accelerations leading to large velocities.
-    !$OMP parallel do default(shared)
-    do k=1,nz ; do j=js,je ; do I=Isq,Ieq
+    ntrunc = 0
+    do concurrent (k=1:nz, j=js:je, I=Isq:Ieq) DO_LOCALITY(reduce(+: ntrunc))
       if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
       elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
         u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
         if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
-            (CS%h_u(I,j,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
+            (CS%h_u(I,j,k) > H_report)) ntrunc = ntrunc + 1
       elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
         u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
         if (((I >= G%isc) .and. (I <= G%iec) .and. (j >= G%jsc) .and. (j <= G%jec)) .and. &
-            (CS%h_u(I,j,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
+            (CS%h_u(I,j,k) > H_report)) ntrunc = ntrunc + 1
       endif
-    enddo ; enddo ; enddo
-  endif
-
-  if (len_trim(CS%u_trunc_file) > 0) then
-    do j=js,je ; do I=Isq,Ieq ; if (dowrite(I,j)) then
-      ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
-      call write_u_accel(I, j, u_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
-                         vel_report(I,j), forces%taux(I,j), a=CS%a_u, hv=CS%h_u)
-    endif ; enddo ; enddo
+    enddo
+    CS%ntrunc = CS%ntrunc + ntrunc
   endif
 
   if (len_trim(CS%v_trunc_file) > 0) then
-    !$OMP parallel do default(shared) private(trunc_any,CFL)
-    do J=Jsq,Jeq
-      trunc_any = .false.
-      do i=is,ie ; dowrite(i,J) = .false. ; enddo
-      do i=is,ie ; vel_report(i,J) = 3.0e8*US%m_s_to_L_T ; enddo ! Speed of light default.
-      do k=1,nz ; do i=is,ie
-        if (abs(v(i,J,k)) < CS%vel_underflow) v(i,J,k) = 0.0
-        if (v(i,J,k) < 0.0) then
-          CFL = (-v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j+1))
-        else
-          CFL = (v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
-        endif
-        if (CFL > CS%CFL_trunc) trunc_any = .true.
-        if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
-            ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
-          dowrite(i,J) = .true.
-          vel_report(i,J) = MIN(vel_report(i,J), abs(v(i,J,k)))
-        endif
-      enddo ; enddo
+    do_any_write =.false.
+    trunc_any = .false.
 
-      do i=is,ie ; if (dowrite(i,J)) then
-        v_old(i,J,:) = v(i,J,:)
-      endif ; enddo
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      dowrite(i,J) = .false.
+      vel_report(i,J) = 3.0e8 * US%m_s_to_L_T
+    enddo
 
-      if (trunc_any) then
-        do k=1,nz ; do i=is,ie
-          if ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
-            v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
-            if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
-                (CS%h_v(i,J,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
-          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
-            if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
-                (CS%h_v(i,J,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
-          endif
-        enddo ; enddo
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie) &
+        DO_LOCALITY(reduce(.or.: trunc_any, do_any_write))
+      if (abs(v(i,J,k)) < CS%vel_underflow) v(i,J,k) = 0.0
+      if (v(i,J,k) < 0.0) then
+        CFL = (-v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j+1))
+      else
+        CFL = (v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
       endif
-    enddo ! J-loop
+      if (CFL > CS%CFL_trunc) trunc_any = .true.
+      if ((CS%CFL_report_follow .and. CFL > CS%CFL_trunc) .or. &
+          ((.not. CS%CFL_report_follow) .and. CFL > CS%CFL_report)) then
+        dowrite(i,J) = .true.
+        do_any_write = .true.
+        vel_report(i,J) = min(vel_report(i,J), abs(v(i,J,k)))
+      endif
+    enddo
+
+    do concurrent (J=Jsq:Jeq, i=is:ie, dowrite(i,J))
+      v_old(i,J,:) = v(i,J,:)
+    enddo
+
+    if (trunc_any) then
+      ntrunc = 0
+      do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(reduce(+: ntrunc))
+        if ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
+          v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
+          if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
+              (CS%h_v(i,J,k) > H_report)) ntrunc = ntrunc + 1
+        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
+          v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
+          if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
+              (CS%h_v(i,J,k) > H_report)) ntrunc = ntrunc + 1
+        endif
+      enddo
+      CS%ntrunc = CS%ntrunc + ntrunc
+    endif
+
+    if (do_any_write) then
+      !$omp target update from(v_old, vel_report)
+      do J=Jsq,Jeq ; do i=is,ie ; if (dowrite(i,J)) then
+        ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
+        call write_v_accel(i, J, v_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
+                           vel_report(i,J), forces%tauy(i,J), a=CS%a_v, hv=CS%h_v)
+      endif ; enddo ; enddo
+    endif
   else  ! Do not report accelerations leading to large velocities.
-    !$OMP parallel do default(shared)
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+    ntrunc = 0
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(reduce(+: ntrunc))
       if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
       elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
         v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
         if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
-            (CS%h_v(i,J,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
+            (CS%h_v(i,J,k) > H_report)) ntrunc = ntrunc + 1
       elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
         v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
         if (((i >= G%isc) .and. (i <= G%iec) .and. (J >= G%jsc) .and. (J <= G%jec)) .and. &
-            (CS%h_v(i,J,k) > H_report)) CS%ntrunc = CS%ntrunc + 1
+            (CS%h_v(i,J,k) > H_report)) ntrunc = ntrunc + 1
       endif
-    enddo ; enddo ; enddo
+    enddo
+    CS%ntrunc = CS%ntrunc + ntrunc
   endif
 
-  if (len_trim(CS%v_trunc_file) > 0) then
-    do J=Jsq,Jeq ; do i=is,ie ; if (dowrite(i,J)) then
-      ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
-      call write_v_accel(i, J, v_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
-                         vel_report(i,J), forces%tauy(i,J), a=CS%a_v, hv=CS%h_v)
-    endif ; enddo ; enddo
-  endif
-
+  !$omp target exit data map(release: u_old, v_old, dowrite, vel_report)
 end subroutine vertvisc_limit_vel
+
 
 !> Initialize the vertical friction module
 subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
@@ -2735,7 +3338,7 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   type(accel_diag_ptrs),   intent(inout) :: ADp    !< Acceleration diagnostic pointers
   type(directories),       intent(in)    :: dirs   !< Relevant directory paths
   integer, target,         intent(inout) :: ntrunc !< Number of velocity truncations
-  type(vertvisc_CS),       pointer       :: CS     !< Vertical viscosity control structure
+  type(vertvisc_CS),       intent(inout) :: CS     !< Vertical viscosity control structure
   logical, optional,       intent(in)    :: fpmix  !< Nonlocal momentum mixing
 
   ! Local variables
@@ -2755,17 +3358,10 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   character(len=40)  :: thickness_units
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
-  if (associated(CS)) then
-    call MOM_error(WARNING, "vertvisc_init called with an associated "// &
-                            "control structure.")
-    return
-  endif
-  allocate(CS)
-
   CS%initialized = .true.
 
-  if (GV%Boussinesq) then; thickness_units = "m"
-  else; thickness_units = "kg m-2"; endif
+  if (GV%Boussinesq) then ; thickness_units = "m"
+  else ; thickness_units = "kg m-2" ; endif
 
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -3038,12 +3634,19 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
                  "1e-30 m/s, which is less than an Angstrom divided by "//&
                  "the age of the universe.", units="m s-1", default=0.0, scale=US%m_s_to_L_T)
 
+  !$omp target update to(CS)
+
   ALLOC_(CS%a_u(IsdB:IedB,jsd:jed,nz+1)) ; CS%a_u(:,:,:) = 0.0
   ALLOC_(CS%a_u_gl90(IsdB:IedB,jsd:jed,nz+1)) ; CS%a_u_gl90(:,:,:) = 0.0
   ALLOC_(CS%h_u(IsdB:IedB,jsd:jed,nz))   ; CS%h_u(:,:,:) = 0.0
   ALLOC_(CS%a_v(isd:ied,JsdB:JedB,nz+1)) ; CS%a_v(:,:,:) = 0.0
   ALLOC_(CS%a_v_gl90(isd:ied,JsdB:JedB,nz+1)) ; CS%a_v_gl90(:,:,:) = 0.0
   ALLOC_(CS%h_v(isd:ied,JsdB:JedB,nz))   ; CS%h_v(:,:,:) = 0.0
+
+  !$omp target enter data map(to: CS%a_u, CS%a_v)
+  !$omp target enter data map(to: CS%h_u, CS%h_v)
+  ! TODO: Conditional?
+  !$omp target enter data map(to: CS%a_u_gl90, CS%a_v_gl90)
 
   CS%id_Kv_slow = register_diag_field('ocean_model', 'Kv_slow', diag%axesTi, Time, &
       'Slow varying vertical viscosity', 'm2 s-1', conversion=GV%HZ_T_to_m2_s)
@@ -3260,7 +3863,7 @@ subroutine updateCFLtruncationValue(Time, CS, US, activate)
     endif
   endif
   if (.not.CS%CFLrampingIsActivated) return
-  deltaTime = max( 0., US%s_to_T*time_type_to_real( Time - CS%rampStartTime ) )
+  deltaTime = max(0., time_minus_signed(Time, CS%rampStartTime, scale=US%s_to_T))
   if (deltaTime >= CS%truncRampTime) then
     CS%CFL_trunc = CS%CFL_truncE
     CS%truncRampTime = 0. ! This turns off ramping after this call
@@ -3271,9 +3874,10 @@ subroutine updateCFLtruncationValue(Time, CS, US, activate)
     wghtA = 1. - ( (1. - wghtA)**2 ) ! Convert linear profile to inverted parabolic profile
     CS%CFL_trunc = CS%CFL_truncS + wghtA * ( CS%CFL_truncE - CS%CFL_truncS )
   endif
+  ! The truncation and reporting kernels in vertvisc_limit_vel read CS%CFL_trunc on the device.
+  !$omp target update to(CS%CFL_trunc)
   write(msg(1:12),'(es12.3)') CS%CFL_trunc
-  call MOM_error(NOTE, "MOM_vert_friction: updateCFLtruncationValue set CFL"// &
-                       " limit to "//trim(msg))
+  call MOM_error(NOTE, "MOM_vert_friction: updateCFLtruncationValue set CFL limit to "//trim(msg))
 end subroutine updateCFLtruncationValue
 
 !> Clean up and deallocate the vertical friction module

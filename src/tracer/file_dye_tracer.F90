@@ -222,17 +222,32 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
   if (.not. associated(CS)) return
   if (CS%ntr < 1) return
 
+  ! h_old, ea and eb are mapped to the device by the diabatic driver, which may hold the
+  ! current values only there, so h_old is copied back before it is read on the host below.
+  ! The tracer arrays are mapped around the calls that work on the device, as in dye_example.
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !$omp target update from(h_old)
     do m = 1, CS%ntr
       h_work(is:ie,js:je,1:nz) = h_old(is:ie,js:je,1:nz)
 
+      !$omp target enter data map(to: h_work, CS%tr(:,:,:,m))
+      !$omp target enter data map(to: fluxes)
+      !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+      !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
       call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+      !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+      !$omp target exit data map(release: fluxes)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
+      !$omp target exit data map(delete: h_work)
     end do
   else
     do m = 1, CS%ntr
+      !$omp target enter data map(to: CS%tr(:,:,:,m))
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
     end do
   end if
 

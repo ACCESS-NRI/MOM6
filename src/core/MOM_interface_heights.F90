@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Functions for calculating interface heights, including free surface height.
 module MOM_interface_heights
 
@@ -19,7 +21,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public find_eta, dz_to_thickness, thickness_to_dz, dz_to_thickness_simple
+public find_eta, find_dz_for_eta, dz_to_thickness, thickness_to_dz, dz_to_thickness_simple
 public calc_derived_thermo
 public convert_MLD_to_ML_thickness
 public find_rho_bottom, find_col_avg_SpV, find_col_mass
@@ -38,10 +40,89 @@ end interface dz_to_thickness
 !> Converts layer thickness in thickness units into the vertical distance between the
 !! interfaces around a layer in height units.
 interface thickness_to_dz
-  module procedure thickness_to_dz_3d, thickness_to_dz_jslice
+  module procedure thickness_to_dz_3d, thickness_to_dz_block, thickness_to_dz_jslice
 end interface thickness_to_dz
 
+!> Finds the near-bottom density using either a single row or a j-range.
+interface find_rho_bottom
+  module procedure find_rho_bottom_1d, find_rho_bottom_2d
+end interface find_rho_bottom
+
 contains
+
+!> Calculates the change in height across layers, using the appropriate form for
+!! consistency with the calculation of the pressure gradient forces.
+subroutine find_dz_for_eta(h, tv, G, GV, US, dz_lay, halo_size)
+  type(ocean_grid_type),                      intent(in)  :: G   !< The ocean's grid structure.
+  type(verticalGrid_type),                    intent(in)  :: GV  !< The ocean's vertical grid structure.
+  type(unit_scale_type),                      intent(in)  :: US  !< A dimensional unit scaling type
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(in)  :: h   !< Layer thicknesses [H ~> m or kg m-2]
+  type(thermo_var_ptrs),                      intent(in)  :: tv  !< A structure pointing to various
+                                                                 !! thermodynamic variables.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(out) :: dz_lay !< Height change across layers [Z ~> m]
+  integer,                          optional, intent(in)  :: halo_size !< width of halo points on
+                                                                 !! which to calculate eta.
+
+  ! Local variables
+  real :: p(SZI_(G),SZJ_(G),SZK_(GV)+1)   ! Hydrostatic pressure at each interface [R L2 T-2 ~> Pa]
+  real :: dz_geo(SZI_(G),SZJ_(G)) ! The change in geopotential height across a layer [L2 T-2 ~> m2 s-2]
+  real :: SpV_lay_conv(SZK_(GV))  ! The prescribed layer specific volume times a conversion factor from
+                                  ! the units of thickness to layer mass [Z H-1 ~> nondim or m3 kg-1]
+  real :: I_gEarth                ! The inverse of the gravitational acceleration times the
+                                  ! rescaling factor derived from eta_to_m [T2 Z L-2 ~> s2 m-1]
+  integer :: i, j, k, isv, iev, jsv, jev, nz, halo
+
+  halo = 0 ; if (present(halo_size)) halo = max(0,halo_size)
+
+  isv = G%isc-halo ; iev = G%iec+halo ; jsv = G%jsc-halo ; jev = G%jec+halo
+  nz = GV%ke
+
+  if ((isv<G%isd) .or. (iev>G%ied) .or. (jsv<G%jsd) .or. (jev>G%jed)) &
+    call MOM_error(FATAL,"find_dz_for_eta called with an overly large halo_size.")
+
+  if (GV%Boussinesq) then
+    do k=1,nz ; do j=jsv,jev ; do i=isv,iev
+      dz_lay(i,j,K) = h(i,j,k)*GV%H_to_Z
+    enddo ; enddo ; enddo
+  elseif (associated(tv%eqn_of_state)) then
+    I_gEarth = 1.0 / GV%g_Earth
+    !$OMP parallel do default(shared)
+    do j=jsv,jev
+      if (associated(tv%p_surf)) then
+        do i=isv,iev ; p(i,j,1) = tv%p_surf(i,j) ; enddo
+      else
+        do i=isv,iev ; p(i,j,1) = 0.0 ; enddo
+      endif
+      do k=1,nz ; do i=isv,iev
+        p(i,j,K+1) = p(i,j,K) + GV%g_Earth*GV%H_to_RZ*h(i,j,k)
+      enddo ; enddo
+    enddo
+    !$OMP parallel do default(shared) private(dz_geo)
+    do k=1,nz
+      call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p(:,:,K), p(:,:,K+1), &
+                               0.0, G%HI, tv%eqn_of_state, US, dz_geo, halo_size=halo)
+      do j=jsv,jev ; do i=isv,iev
+        dz_lay(i,j,K) = I_gEarth * dz_geo(i,j)
+      enddo ; enddo
+    enddo
+  else ! non-Boussinesq but with no equation of state
+    do k=1,nz ; do j=jsv,jev ; do i=isv,iev
+      dz_lay(i,j,K) = GV%H_to_RZ*h(i,j,k) / GV%Rlay(k)
+    enddo ; enddo ; enddo
+    ! This would be faster but could change answers.
+    ! do k=1,nz ; SpV_lay_conv(k) = GV%H_to_RZ / GV%Rlay(k) ; enddo
+    ! do k=1,nz ; do j=jsv,jev ; do i=isv,iev
+    !   dz_lay(i,j,K) = h(i,j,k) * SpV_lay_conv(k)
+    ! enddo ; enddo ; enddo
+  endif
+
+  ! To find eta, do the following:
+  ! do j=jsv,jev ; do i=isv,iev ; eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref) ; enddo ; enddo
+  ! do k=nz,1,-1 ; do j=jsv,jev ; do i=isv,iev
+  !   eta(i,j,K) = eta(i,j,K+1) + dz_lay(i,j,K)
+  ! enddo ; enddo ; enddo
+
+end subroutine find_dz_for_eta
 
 !> Calculates the heights of all interfaces between layers, using the appropriate
 !! form for consistency with the calculation of the pressure gradient forces.
@@ -66,13 +147,9 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                     !! reference height between G%bathyT and eta [Z ~> m]. The default is 0.
 
   ! Local variables
-  real :: p(SZI_(G),SZJ_(G),SZK_(GV)+1)   ! Hydrostatic pressure at each interface [R L2 T-2 ~> Pa]
-  real :: dz_geo(SZI_(G),SZJ_(G),SZK_(GV)) ! The change in geopotential height
-                                           ! across a layer [L2 T-2 ~> m2 s-2].
+  real :: dz_lay(SZI_(G),SZJ_(G),SZK_(GV)) ! The change in height across a layer [Z ~> m]
   real :: dilate(SZI_(G))                 ! A non-dimensional dilation factor [nondim]
   real :: htot(SZI_(G))                   ! total thickness [H ~> m or kg m-2]
-  real :: I_gEarth          ! The inverse of the gravitational acceleration times the
-                            ! rescaling factor derived from eta_to_m [T2 Z L-2 ~> s2 m-1]
   real :: dZ_ref    ! The difference in the reference height between G%bathyT and eta [Z ~> m].
                     ! dZ_ref is 0 unless the optional argument dZref is present.
   integer :: i, j, k, isv, iev, jsv, jev, nz, halo
@@ -85,22 +162,23 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
   if ((isv<G%isd) .or. (iev>G%ied) .or. (jsv<G%jsd) .or. (jev>G%jed)) &
     call MOM_error(FATAL,"find_eta called with an overly large halo_size.")
 
-  I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
 
-  !$OMP parallel default(shared) private(dilate,htot)
-  !$OMP do
-  do j=jsv,jev ; do i=isv,iev ; eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref) ; enddo ; enddo
-
   if (GV%Boussinesq) then
-    !$OMP do
-    do j=jsv,jev ; do k=nz,1,-1 ; do i=isv,iev
-      eta(i,j,K) = eta(i,j,K+1) + h(i,j,k)*GV%H_to_Z
-    enddo ; enddo ; enddo
+    do concurrent (j=jsv:jev, i=isv:iev)
+      eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref)
+    enddo
+
+    do concurrent (j=jsv:jev, i=isv:iev)
+      do k=nz,1,-1
+        eta(i,j,K) = eta(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+      enddo
+    enddo
+
     if (present(eta_bt)) then
       ! Dilate the water column to agree with the free surface height
       ! that is used for the dynamics.
-      !$OMP do
+      !$omp target update from(eta)
       do j=jsv,jev
         do i=isv,iev
           dilate(i) = (eta_bt(i,j)*GV%H_to_Z + G%bathyT(i,j)) / &
@@ -111,41 +189,22 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                        (G%bathyT(i,j) + dZ_ref)
         enddo ; enddo
       enddo
+      !$omp target update to(eta)
     endif
   else
-    if (associated(tv%eqn_of_state)) then
-      !$OMP do
-      do j=jsv,jev
-        if (associated(tv%p_surf)) then
-          do i=isv,iev ; p(i,j,1) = tv%p_surf(i,j) ; enddo
-        else
-          do i=isv,iev ; p(i,j,1) = 0.0 ; enddo
-        endif
-        do k=1,nz ; do i=isv,iev
-          p(i,j,K+1) = p(i,j,K) + GV%g_Earth*GV%H_to_RZ*h(i,j,k)
-        enddo ; enddo
-      enddo
-      !$OMP do
-      do k=1,nz
-        call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p(:,:,K), p(:,:,K+1), &
-                                 0.0, G%HI, tv%eqn_of_state, US, dz_geo(:,:,k), halo_size=halo)
-      enddo
-      !$OMP do
-      do j=jsv,jev
-        do k=nz,1,-1 ; do i=isv,iev
-          eta(i,j,K) = eta(i,j,K+1) + I_gEarth * dz_geo(i,j,k)
-        enddo ; enddo
-      enddo
-    else
-      !$OMP do
-      do j=jsv,jev ;  do k=nz,1,-1 ; do i=isv,iev
-        eta(i,j,K) = eta(i,j,K+1) + GV%H_to_RZ*h(i,j,k) / GV%Rlay(k)
-      enddo ; enddo ; enddo
-    endif
+    !$omp target update from(eta)
+    call find_dz_for_eta(h, tv, G, GV, US, dz_lay, halo_size)
+
+    do j=jsv,jev
+      do i=isv,iev ; eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref) ; enddo
+      do k=nz,1,-1 ; do i=isv,iev
+        eta(i,j,K) = eta(i,j,K+1) + dz_lay(i,j,k)
+      enddo ; enddo
+    enddo
+
     if (present(eta_bt)) then
       ! Dilate the water column to agree with the free surface height
       ! from the time-averaged barotropic solution.
-      !$OMP do
       do j=jsv,jev
         do i=isv,iev ; htot(i) = GV%H_subroundoff ; enddo
         do k=1,nz ; do i=isv,iev ; htot(i) = htot(i) + h(i,j,k) ; enddo ; enddo
@@ -156,9 +215,8 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
         enddo ; enddo
       enddo
     endif
+    !$omp target update to(eta)
   endif
-  !$OMP end parallel
-
 end subroutine find_eta_3d
 
 !> Calculates the free surface height, using the appropriate form for consistency
@@ -184,13 +242,8 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                     !! reference height between G%bathyT and eta [Z ~> m]. The default is 0.
 
   ! Local variables
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
-    p          ! Hydrostatic pressure at each interface [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
-    dz_geo     ! The change in geopotential height across a layer [L2 T-2 ~> m2 s-2].
+  real :: dz_lay(SZI_(G),SZJ_(G),SZK_(GV)) ! The change in height across a layer [Z ~> m]
   real :: htot(SZI_(G))  ! The sum of all layers' thicknesses [H ~> m or kg m-2].
-  real :: I_gEarth          ! The inverse of the gravitational acceleration times the
-                            ! rescaling factor derived from eta_to_m [T2 Z L-2 ~> s2 m-1]
   real :: dZ_ref    ! The difference in the reference height between G%bathyT and eta [Z ~> m].
                     ! dZ_ref is 0 unless the optional argument dZref is present.
   integer :: i, j, k, is, ie, js, je, nz, halo
@@ -199,58 +252,38 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
   is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
   nz = GV%ke
 
-  I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
-
-  !$OMP parallel default(shared) private(htot)
-  !$OMP do
-  do j=js,je ; do i=is,ie ; eta(i,j) = -(G%bathyT(i,j) + dZ_ref) ; enddo ; enddo
 
   if (GV%Boussinesq) then
     if (present(eta_bt)) then
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         eta(i,j) = GV%H_to_Z*eta_bt(i,j) - dZ_ref
-      enddo ; enddo
+      enddo
     else
-      !$OMP do
-      do j=js,je ; do k=1,nz ; do i=is,ie
-        eta(i,j) = eta(i,j) + h(i,j,k)*GV%H_to_Z
-      enddo ; enddo ; enddo
-    endif
-  else
-    if (associated(tv%eqn_of_state)) then
-      !$OMP do
-      do j=js,je
-        if (associated(tv%p_surf)) then
-          do i=is,ie ; p(i,j,1) = tv%p_surf(i,j) ; enddo
-        else
-          do i=is,ie ; p(i,j,1) = 0.0 ; enddo
-        endif
+      do concurrent (j=js:je)
+        do concurrent (i=is:ie)
+          eta(i,j) = -G%bathyT(i,j) + dZ_ref
+        enddo
 
-        do k=1,nz ; do i=is,ie
-          p(i,j,k+1) = p(i,j,k) + GV%g_Earth*GV%H_to_RZ*h(i,j,k)
+        do k=1,nz ; do concurrent (i=is:ie)
+          eta(i,j) = eta(i,j) + h(i,j,k)*GV%H_to_Z
         enddo ; enddo
       enddo
-      !$OMP do
-      do k = 1, nz
-        call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p(:,:,k), p(:,:,k+1), 0.0, &
-                                 G%HI, tv%eqn_of_state, US, dz_geo(:,:,k), halo_size=halo)
-      enddo
-      !$OMP do
-      do j=js,je ; do k=1,nz ; do i=is,ie
-          eta(i,j) = eta(i,j) + I_gEarth * dz_geo(i,j,k)
-      enddo ; enddo ; enddo
-    else
-      !$OMP do
-      do j=js,je ; do k=1,nz ; do i=is,ie
-        eta(i,j) = eta(i,j) + GV%H_to_RZ*h(i,j,k) / GV%Rlay(k)
-      enddo ; enddo ; enddo
     endif
+  else
+    !$omp target update from(eta)
+    call find_dz_for_eta(h, tv, G, GV, US, dz_lay, halo_size)
+
+    do j=js,je
+      do i=is,ie ; eta(i,j) = -(G%bathyT(i,j) + dZ_ref) ; enddo
+      do k=1,nz ; do i=is,ie
+        eta(i,j) = eta(i,j) + dz_lay(i,j,k)
+      enddo ; enddo
+    enddo
+
     if (present(eta_bt)) then
       !   Dilate the water column to agree with the time-averaged column
       ! mass from the barotropic solution.
-      !$OMP do
       do j=js,je
         do i=is,ie ; htot(i) = GV%H_subroundoff ; enddo
         do k=1,nz ; do i=is,ie ; htot(i) = htot(i) + h(i,j,k) ; enddo ; enddo
@@ -259,10 +292,9 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                      (G%bathyT(i,j) + dZ_ref)
         enddo
       enddo
+      !$omp target update to(eta)
     endif
   endif
-  !$OMP end parallel
-
 end subroutine find_eta_2d
 
 
@@ -461,7 +493,7 @@ end subroutine find_col_mass
 
 !> Determine the in situ density averaged over a specified distance from the bottom,
 !! calculating it as the inverse of the mass-weighted average specific volume.
-subroutine find_rho_bottom(G, GV, US, tv, h, dz, pres_int, dz_avg, j, Rho_bot, h_bot, k_bot)
+subroutine find_rho_bottom_1d(G, GV, US, tv, h, dz, pres_int, dz_avg, j, Rho_bot, h_bot, k_bot)
   type(ocean_grid_type),    intent(in)  :: G    !< The ocean's grid structure
   type(verticalGrid_type),  intent(in)  :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),    intent(in)  :: US   !< A dimensional unit scaling type
@@ -482,7 +514,7 @@ subroutine find_rho_bottom(G, GV, US, tv, h, dz, pres_int, dz_avg, j, Rho_bot, h
   ! Local variables
   real :: hb(SZI_(G))         ! Running sum of the thickness in the bottom boundary layer [H ~> m or kg m-2]
   real :: SpV_h_bot(SZI_(G))  ! Running sum of the specific volume times thickness in the bottom
-                              ! boundary layer [R-1 H ~> m4 kg-1 or m]
+                              ! boundary layer [H R-1 ~> m4 kg-1 or m]
   real :: dz_bbl_rem(SZI_(G)) ! Vertical extent of the boundary layer that has yet to be accounted
                               ! for [Z ~> m]
   real :: h_bbl_frac(SZI_(G)) ! Thickness of the fractional layer that makes up the top of the
@@ -638,7 +670,249 @@ subroutine find_rho_bottom(G, GV, US, tv, h, dz, pres_int, dz_avg, j, Rho_bot, h
     enddo
   endif
 
-end subroutine find_rho_bottom
+end subroutine find_rho_bottom_1d
+
+
+!> Finds the near-bottom density over a range of j rows.
+subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, jsb, jeb, &
+                              nii, njj, Rho_bot, h_bot, k_bot)
+
+  integer,                  intent(in)  :: isb   !< Starting i-index of columns to work on
+  integer,                  intent(in)  :: ieb   !< Ending i-index of columns to work on
+  integer,                  intent(in)  :: jsb   !< Starting j-index of rows to work on
+  integer,                  intent(in)  :: jeb   !< Ending j-index of rows to work on
+  integer,                  intent(in)  :: nii !< Size of the i-block [nondim].
+  integer,                  intent(in)  :: njj !< Size of the j-block [nondim].
+  type(ocean_grid_type),    intent(in)  :: G    !< The ocean's grid structure
+  type(verticalGrid_type),  intent(in)  :: GV   !< The ocean's vertical grid structure
+  type(unit_scale_type),    intent(in)  :: US   !< A dimensional unit scaling type
+  type(thermo_var_ptrs),    intent(in)  :: tv   !< Structure containing pointers to any available
+                                                !! thermodynamic fields.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                            intent(in)  :: h    !< Layer thicknesses [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                            intent(in)  :: dz   !< Height change across layers [Z ~> m]
+  real, dimension(nii,njj,SZK_(GV)+1), &
+                            intent(in)  :: pres_int !< Pressure at each interface [R L2 T-2 ~> Pa]
+  real, dimension(nii,njj), &
+                            intent(in)  :: dz_avg !< The vertical distance over which to
+                                                !! average [Z ~> m]
+  real, dimension(nii,njj), &
+                            intent(out) :: Rho_bot !< Near-bottom density [R ~> kg m-3].
+  real, dimension(nii,njj), &
+                            intent(out) :: h_bot !< Bottom boundary layer thickness
+                                                !! [H ~> m or kg m-2]
+  integer, dimension(nii,njj), &
+                            intent(out) :: k_bot !< Bottom boundary layer top layer index
+  ! Local variables
+  real :: hb(nii,njj)         ! Running sum of the thickness in the bottom boundary
+                                      ! layer [H ~> m or kg m-2]
+  real :: SpV_h_bot(nii,njj)  ! Running sum of the specific volume times thickness in
+                                      ! the bottom boundary layer [H R-1 ~> m4 kg-1 or m]
+  real :: dz_bbl_rem(nii,njj) ! Vertical extent of the boundary layer that has yet to
+                                      ! be accounted for [Z ~> m]
+  real :: h_bbl_frac(nii,njj) ! Thickness of the fractional layer that makes up the
+                                      ! top of the boundary layer [H ~> m or kg m-2]
+  real :: T_bbl(nii,njj)      ! Temperature of the fractional layer that makes up the
+                                      ! top of the boundary layer [C ~> degC]
+  real :: S_bbl(nii,njj)      ! Salinity of the fractional layer that makes up the
+                                      ! top of the boundary layer [S ~> ppt]
+  real :: P_bbl(nii,njj)      ! Pressure the top of the boundary layer [R L2 T-2 ~> Pa]
+  real :: dp(nii,njj)         ! Pressure change across the fractional layer that makes
+                                      ! up the top of the boundary layer [R L2 T-2 ~> Pa]
+  real :: SpV_bbl(nii,njj)    ! In situ specific volume of the fractional layer that
+                                      ! makes up the top of the boundary layer [R-1 ~> m3 kg-1]
+  real :: frac_in                     ! The fraction of a layer that is within the bottom
+                                      ! boundary layer [nondim]
+  logical :: do_i(nii,njj)    ! True for columns still within the boundary layer
+  logical :: do_any                   ! True if any column is still within the boundary layer
+  logical :: use_EOS
+  integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
+  integer :: i, j, k, nz, ii, jj, iie, jje
+
+  nz = GV%ke
+  iie = ieb-isb+1 ; jje = jeb-jsb+1
+
+  use_EOS = associated(tv%T) .and. associated(tv%S) .and. associated(tv%eqn_of_state)
+
+  !$omp target enter data &
+  !$omp   map(alloc: hb, SpV_h_bot, dz_bbl_rem, h_bbl_frac, T_bbl, S_bbl, P_bbl, dp, SpV_bbl, do_i)
+
+  if (GV%Boussinesq .or. GV%semi_Boussinesq .or. .not.allocated(tv%SpV_avg)) then
+    do concurrent (jj=1:jje, ii=1:iie)
+      rho_bot(ii,jj) = GV%Rho0
+    enddo
+
+    ! Obtain bottom boundary layer thickness and index of top layer
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
+      hb(ii,jj) = 0.0 ; h_bot(ii,jj) = 0.0 ; k_bot(ii,jj) = nz
+      dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
+      do_i(ii,jj) = .true.
+      if (G%mask2dT(i,j) <= 0.0) then
+        h_bbl_frac(ii,jj) = 0.0
+        do_i(ii,jj) = .false.
+      endif
+    enddo
+
+    !$omp target
+    do k=nz,1,-1
+#ifndef __NVCOMPILER_OPENMP_GPU
+      do_any = .false.
+#endif
+      !$omp loop collapse(2) private(i,j)
+      do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        if (do_i(ii,jj)) then
+        if (dz(i,j,k) < dz_bbl_rem(ii,jj)) then
+          ! This layer is fully within the averaging depth.
+          dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
+          hb(ii,jj) = hb(ii,jj) + h(i,j,k)
+          k_bot(ii,jj) = k
+#ifndef __NVCOMPILER_OPENMP_GPU
+          do_any = .true.
+#endif
+        else
+          if (dz(i,j,k) > 0.0) then
+            frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
+            if (frac_in >= 0.5) k_bot(ii,jj) = k ! update bbl top index if >= 50% of layer
+          else
+            frac_in = 0.0
+          endif
+          h_bbl_frac(ii,jj) = frac_in * h(i,j,k)
+          dz_bbl_rem(ii,jj) = 0.0
+          do_i(ii,jj) = .false.
+        endif
+        endif
+      enddo ; enddo
+#ifndef __NVCOMPILER_OPENMP_GPU
+      if (.not.do_any) exit
+#endif
+    enddo
+    !$omp end target
+    do concurrent (jj=1:jje, ii=1:iie, do_i(ii,jj))
+      ! The nominal bottom boundary layer is thicker than the water column, but layer 1 is
+      ! already included in the averages.  These values are set so that the call to find
+      ! the layer-average specific volume will behave sensibly.
+      h_bbl_frac(ii,jj) = 0.0
+    enddo
+
+    do concurrent (jj=1:jje, ii=1:iie)
+      if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
+      h_bot(ii,jj) = hb(ii,jj) + h_bbl_frac(ii,jj)
+    enddo
+
+  else
+    ! Check that SpV_avg has been set.
+    if (tv%valid_SpV_halo < 0) call MOM_error(FATAL, &
+        "find_rho_bottom called in fully non-Boussinesq mode with invalid values of SpV_avg.")
+
+    ! Set the bottom density to the inverse of the in situ specific volume averaged over the
+    ! specified distance, with care taken to avoid having compressibility lead to an imprint
+    ! of the layer thicknesses on this density.
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
+      hb(ii,jj) = 0.0 ; SpV_h_bot(ii,jj) = 0.0 ; h_bot(ii,jj) = 0.0 ; k_bot(ii,jj) = nz
+      dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
+      do_i(ii,jj) = .true.
+      if (G%mask2dT(i,j) <= 0.0) then
+        ! Set acceptable values for calling the equation of state over land.
+        T_bbl(ii,jj) = 0.0 ; S_bbl(ii,jj) = 0.0 ; dp(ii,jj) = 0.0 ; P_bbl(ii,jj) = 0.0
+        SpV_bbl(ii,jj) = 1.0 ! This value is arbitrary, provided it is non-zero.
+        h_bbl_frac(ii,jj) = 0.0
+        do_i(ii,jj) = .false.
+      endif
+    enddo
+
+    !$omp target
+    do k=nz,1,-1
+#ifndef __NVCOMPILER_OPENMP_GPU
+      do_any = .false.
+#endif
+      !$omp loop collapse(2) private(i,j)
+      do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        if (do_i(ii,jj)) then
+        if (dz(i,j,k) < dz_bbl_rem(ii,jj)) then
+          ! This layer is fully within the averaging depth.
+          SpV_h_bot(ii,jj) = SpV_h_bot(ii,jj) + h(i,j,k) * tv%SpV_avg(i,j,k)
+          dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
+          hb(ii,jj) = hb(ii,jj) + h(i,j,k)
+          k_bot(ii,jj) = k
+#ifndef __NVCOMPILER_OPENMP_GPU
+          do_any = .true.
+#endif
+        else
+          if (dz(i,j,k) > 0.0) then
+            frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
+            if (frac_in >= 0.5) k_bot(ii,jj) = k ! update bbl top index if >= 50% of layer
+          else
+            frac_in = 0.0
+          endif
+          if (use_EOS) then
+            ! Store the properties of this layer to determine the average
+            ! specific volume of the portion that is within the BBL.
+            T_bbl(ii,jj) = tv%T(i,j,k) ; S_bbl(ii,jj) = tv%S(i,j,k)
+            dp(ii,jj) = frac_in * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
+            P_bbl(ii,jj) = pres_int(ii,jj,K) + (1.0-frac_in) * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
+          else
+            SpV_bbl(ii,jj) = tv%SpV_avg(i,j,k)
+          endif
+          h_bbl_frac(ii,jj) = frac_in * h(i,j,k)
+          dz_bbl_rem(ii,jj) = 0.0
+          do_i(ii,jj) = .false.
+        endif
+        endif
+      enddo ; enddo
+#ifndef __NVCOMPILER_OPENMP_GPU
+      if (.not.do_any) exit
+#endif
+    enddo
+    !$omp end target
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
+      if (do_i(ii,jj)) then
+      ! The nominal bottom boundary layer is thicker than the water column, but layer 1 is
+      ! already included in the averages.  These values are set so that the call to find
+      ! the layer-average specific volume will behave sensibly.
+      if (use_EOS) then
+        T_bbl(ii,jj) = tv%T(i,j,1) ; S_bbl(ii,jj) = tv%S(i,j,1)
+        dp(ii,jj) = 0.0
+        P_bbl(ii,jj) = pres_int(ii,jj,1)
+      else
+        SpV_bbl(ii,jj) = tv%SpV_avg(i,j,1)
+      endif
+      h_bbl_frac(ii,jj) = 0.0
+      endif
+    enddo
+
+    if (use_EOS) then
+      !$omp target update from(T_bbl, S_bbl, P_bbl, dp, SpV_bbl)
+      ! Find the average specific volume of the fractional layer atop the BBL.
+      EOSdom(1) = 1
+      EOSdom(2) = iie
+      do j=jsb,jeb
+        jj = j-jsb+1
+        call average_specific_vol(T_bbl(:,jj), S_bbl(:,jj), P_bbl(:,jj), dp(:,jj), &
+                                  SpV_bbl(:,jj), tv%eqn_of_state, EOSdom)
+      enddo
+      !$omp target update to(SpV_bbl)
+    endif
+
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
+      if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
+      rho_bot(ii,jj) = G%mask2dT(i,j) * (hb(ii,jj) + h_bbl_frac(ii,jj)) / &
+                     (SpV_h_bot(ii,jj) + h_bbl_frac(ii,jj)*SpV_bbl(ii,jj))
+      h_bot(ii,jj) = hb(ii,jj) + h_bbl_frac(ii,jj)
+    enddo
+  endif
+
+  !$omp target exit data &
+    !$omp   map(release: hb, SpV_h_bot, dz_bbl_rem, h_bbl_frac, T_bbl, S_bbl, P_bbl, dp, &
+    !$omp     SpV_bbl, do_i)
+
+end subroutine find_rho_bottom_2d
 
 
 !> Converts thickness from geometric height units to thickness units, perhaps via an
@@ -854,7 +1128,7 @@ end subroutine dz_to_thickness_simple
 !> Converts layer thicknesses in thickness units to the vertical distance between edges in height
 !! units, perhaps by multiplication by the precomputed layer-mean specific volume stored in an
 !! array in the thermo_var_ptrs type when in non-Boussinesq mode.
-subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size)
+subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, is, ie, js, je, halo_size, do_offload)
   type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
   type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
   type(unit_scale_type),   intent(in)    :: US !< A dimensional unit scaling type
@@ -866,14 +1140,38 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size)
                            intent(inout) :: dz !< Geometric layer thicknesses in height units [Z ~> m]
                                                !! This is essentially intent out, but declared as intent
                                                !! inout to preserve any initialized values in halo points.
+  integer,       optional, intent(in)    :: is !< Starting i-index to work on.
+  integer,       optional, intent(in)    :: ie !< Ending i-index to work on.
+  integer,       optional, intent(in)    :: js !< Starting j-index to work on.
+  integer,       optional, intent(in)    :: je !< Ending j-index to work on.
   integer,       optional, intent(in)    :: halo_size !< Width of halo within which to
                                                !! calculate thicknesses
+  logical,       optional, intent(in)    :: do_offload !< If .true., only uses data calculates dz
+                                               !! on GPU (default .false.)
   ! Local variables
   character(len=128) :: mesg    ! A string for error messages
-  integer :: i, j, k, is, ie, js, je, halo, nz
+  integer :: i, j, k, isv, iev, jsv, jev, halo, nz
+  logical :: use_doconcurrent
+
+  ! guard to allow turning off/on do concurrent
+  use_doconcurrent = .false.
+  if (present(do_offload)) use_doconcurrent = do_offload
 
   halo = 0 ; if (present(halo_size)) halo = max(0,halo_size)
-  is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo ; nz = GV%ke
+  nz = GV%ke
+
+  if (present(is) .or. present(ie) .or. present(js) .or. present(je)) then
+    if (.not.(present(is) .and. present(ie) .and. present(js) .and. present(je))) &
+      call MOM_error(FATAL, "thickness_to_dz called with an incomplete set of loop bounds.")
+    isv = is ; iev = ie ; jsv = js ; jev = je
+  else
+    isv = G%isc-halo ; iev = G%iec+halo ; jsv = G%jsc-halo ; jev = G%jec+halo
+  endif
+
+  if ((isv<G%isd) .or. (iev>G%ied) .or. (jsv<G%jsd) .or. (jev>G%jed)) &
+    call MOM_error(FATAL,"thickness_to_dz called with an overly large halo_size or loop bounds.")
+
+  halo = max(halo, G%isc-isv, iev-G%iec, G%jsc-jsv, jev-G%jec, 0)
 
   if ((.not.GV%Boussinesq) .and. allocated(tv%SpV_avg))  then
     if ((allocated(tv%SpV_avg)) .and. (tv%valid_SpV_halo < halo)) then
@@ -885,17 +1183,102 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size)
       endif
       call MOM_error(FATAL, "thickness_to_dz called in fully non-Boussinesq mode with "//trim(mesg))
     endif
-
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
-    enddo ; enddo ; enddo
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, j=jsv:jev, i=isv:iev)
+        dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo
+    else
+      do k=1,nz ; do j=jsv,jev ; do i=isv,iev
+        dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo ; enddo ; enddo
+    endif
   else
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      dz(i,j,k) = GV%H_to_Z * h(i,j,k)
-    enddo ; enddo ; enddo
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, j=jsv:jev, i=isv:iev)
+        dz(i,j,k) = GV%H_to_Z * h(i,j,k)
+      enddo
+    else
+      do k=1,nz ; do j=jsv,jev ; do i=isv,iev
+        dz(i,j,k) = GV%H_to_Z * h(i,j,k)
+      enddo ; enddo ; enddo
+    endif
   endif
 
 end subroutine thickness_to_dz_3d
+
+!> Converts layer thicknesses in thickness units to the vertical distance between edges in height
+!! units over a single block of a blocked i-j loop, perhaps by multiplication by the
+!! precomputed layer-mean specific volume stored in an array in the thermo_var_ptrs type when in
+!! non-Boussinesq mode.
+subroutine thickness_to_dz_block(h, tv, dz, G, GV, US, niB, njB, i_lo, i_hi, j_lo, j_hi, do_offload)
+  type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
+  type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
+  type(unit_scale_type),   intent(in)    :: US !< A dimensional unit scaling type
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(in)    :: h  !< Input thicknesses in thickness units [H ~> m or kg m-2].
+  type(thermo_var_ptrs),   intent(in)    :: tv !< A structure pointing to various
+                                               !! thermodynamic variables
+  integer,                 intent(in)    :: niB !< The i-size of the block-local dz array.
+  integer,                 intent(in)    :: njB !< The j-size of the block-local dz array.
+  real, dimension(niB,njB,SZK_(GV)), &
+                           intent(inout) :: dz !< Block-local geometric layer thicknesses in height
+                                               !! units [Z ~> m], indexed starting at (1,1,1).
+                                               !! This is essentially intent out, but declared as intent
+                                               !! inout to preserve any initialized values in unfilled points.
+  integer,                 intent(in)    :: i_lo !< The global lower i-bound of the block to work over.
+  integer,                 intent(in)    :: i_hi !< The global upper i-bound of the block to work over.
+  integer,                 intent(in)    :: j_lo !< The global lower j-bound of the block to work over.
+  integer,                 intent(in)    :: j_hi !< The global upper j-bound of the block to work over.
+  logical,       optional, intent(in)    :: do_offload !< If .true., only uses data calculates dz
+                                               !! on GPU (default .false.)
+  ! Local variables
+  integer :: i, j, k, ii, jj, iie, jje, nz
+  integer :: max_halo
+  character(len=128) :: mesg    ! A string for error messages
+  logical :: use_doconcurrent
+
+  ! guard to allow turning off/on do concurrent
+  use_doconcurrent = .false.
+  if (present(do_offload)) use_doconcurrent = do_offload
+
+  nz = GV%ke ; iie = i_hi - i_lo + 1 ; jje = j_hi - j_lo + 1
+  ! Since this routine does not recieve info about halo size, calculate biggest
+  ! halo to ensure we do not access out-of-bounds elements when indexing SpV_avg.
+  max_halo = max( G%isc-i_lo, i_hi-G%iec, G%jsc-j_lo, j_hi-G%jec )
+
+  if ((.not.GV%Boussinesq) .and. allocated(tv%SpV_avg))  then
+    if (tv%valid_SpV_halo < max_halo) then
+      if (tv%valid_SpV_halo < 0) then
+        mesg = "invalid values of SpV_avg."
+      else
+        write(mesg, '("insufficiently large SpV_avg halos of width ", i2, " but ", i2," is needed.")') &
+                     tv%valid_SpV_halo, max_halo
+      endif
+      call MOM_error(FATAL, "thickness_to_dz_block called in fully non-Boussinesq mode with "//trim(mesg))
+    endif
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+        dz(ii,jj,k) = GV%H_to_RZ * h(i_lo+ii-1,j_lo+jj-1,k) * tv%SpV_avg(i_lo+ii-1,j_lo+jj-1,k)
+      enddo
+    else
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        i = i_lo+ii-1 ; j = j_lo+jj-1
+        dz(ii,jj,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo ; enddo ; enddo
+    endif
+  else
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+        dz(ii,jj,k) = GV%H_to_Z * h(i_lo+ii-1,j_lo+jj-1,k)
+      enddo
+    else
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        dz(ii,jj,k) = GV%H_to_Z * h(i_lo+ii-1,j_lo+jj-1,k)
+      enddo ; enddo ; enddo
+    endif
+  endif
+
+end subroutine thickness_to_dz_block
 
 
 !> Converts a vertical i- / k- slice of layer thicknesses in thickness units to the vertical

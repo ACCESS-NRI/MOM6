@@ -34,7 +34,7 @@ use MOM_cap_fms_coupler_bcs,   only: coupler_bcs_get_cmeps_name
 use MOM_error_handler,         only: MOM_error, FATAL
 
 ! By default make data private
-implicit none; private
+implicit none ; private
 
 ! Public member functions
 public :: mom_set_geomtype
@@ -268,7 +268,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrain', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrain, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen precipitation (hsnow)
@@ -277,7 +277,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hsnow', isc, iec, jsc, jec, &
          ice_ocean_boundary%hsnow, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from liquid runoff (hrofl)
@@ -286,7 +286,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofl', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofl, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen runoff (hrofi)
@@ -295,7 +295,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofi', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofi, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from liquid glc runoff (hrofl_glc)
@@ -304,7 +304,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofl_glc', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofl_glc, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from frozen glc runoff (hrofi_glc)
@@ -313,7 +313,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hrofi_glc', isc, iec, jsc, jec, &
          ice_ocean_boundary%hrofi_glc, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
   !----
   ! enthalpy from evaporation (hevap)
   !----
@@ -321,7 +321,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
     call state_getimport(importState, 'Foxx_hevap', isc, iec, jsc, jec, &
          ice_ocean_boundary%hevap, areacor=med2mod_areacor, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !----
   ! enthalpy from condensation (hcond)
@@ -410,7 +410,7 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
           areacor=med2mod_areacor, do_sum=.true., esmf_ind=esmf_ind, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
     enddo
-  end if
+  endif
 
   !----
   ! dust flux from sea ice
@@ -564,9 +564,9 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
         do i = isc, iec
           ig = i + ocean_grid%isc - isc
           !rotate
-          if(set_missing_stks_to_zero) then
+          if (set_missing_stks_to_zero) then
             do ib = 1, nsc
-              if((abs(stkx(i,j,ib)-9.99E20_ESMF_KIND_R8) <= 0.01_ESMF_KIND_R8)) then
+              if ((abs(stkx(i,j,ib)-9.99E20_ESMF_KIND_R8) <= 0.01_ESMF_KIND_R8)) then
                 ice_ocean_boundary%ustkb(i,j,ib) = 0.0
                 ice_ocean_boundary%vstkb(i,j,ib) = 0.0
               else

@@ -9,6 +9,7 @@ module MOM_cap_mod
 use field_manager_mod,        only: field_manager_init, field_manager_end
 use MOM_domains,              only: get_domain_extent
 use MOM_io,                   only: stdout, io_infra_end
+use MOM_io,                   only: insert_ensemble_appendix
 use mpp_domains_mod,          only: mpp_get_compute_domains
 use mpp_domains_mod,          only: mpp_get_ntile_count, mpp_get_pelist, mpp_get_global_domain
 use mpp_domains_mod,          only: mpp_get_domain_npes
@@ -29,6 +30,7 @@ use MOM_ocean_model_nuopc,    only: ocean_model_restart, ocean_public_type, ocea
 use MOM_ocean_model_nuopc,    only: ocean_model_init_sfc
 use MOM_ocean_model_nuopc,    only: ocean_model_init, update_ocean_model, ocean_model_end
 use MOM_ocean_model_nuopc,    only: get_ocean_grid, get_eps_omesh, query_ocean_state
+use MOM_ocean_model_nuopc,    only: stoch_restart_needed
 use MOM_ocean_model_nuopc,    only: get_ocean_mask
 use MOM_cap_time,             only: AlarmInit
 use MOM_cap_methods,          only: mom_import, mom_export, mom_set_geomtype, mod2med_areacor
@@ -111,7 +113,7 @@ use shr_is_restart_fh_mod, only : init_is_restart_fh, is_restart_fh, is_restart_
 #endif
 use mom_cap_profiling, only: cap_profiling_init, cap_profiling
 
-implicit none; private
+implicit none ; private
 
 public SetServices
 public SetVM
@@ -439,7 +441,7 @@ subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
   if (isPresent .and. isSet) then
      if (trim(value) .eq. '.true.') restart_eor = .true.
-  end if
+  endif
 
   if (localPet == 0) call cap_profiling("mom", "InitializeP0", "E")
 
@@ -515,7 +517,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
 
   if (localPet == 0) call cap_profiling("mom", "InitializeAdvertise", "B")
 
-  if(write_runtimelog) timeiads = MPI_Wtime()
+  if (write_runtimelog) timeiads = MPI_Wtime()
 
   call ESMF_LogWrite(subname//' enter', ESMF_LOGMSG_INFO)
 
@@ -580,7 +582,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
 
       if (cesm_coupled) then
         ! Multiinstance logfile name needs a correction
-        if(len_trim(inst_suffix) > 0) then
+        if (len_trim(inst_suffix) > 0) then
           n = index(logfile, '.')
           logfile = logfile(1:n-1)//trim(inst_suffix)//logfile(n:)
         endif
@@ -671,7 +673,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     if (is_root_pe()) then
         write(stdout,*) 'ice_ncat = ', Ice_ocean_boundary%ice_ncat
     endif
-  end if
+  endif
 
   if (is_root_pe()) then
     write(stdout,*) subname//'start time: y,m,d-',year,month,day,'h,m,s=',hour,minute,second
@@ -971,7 +973,7 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     call NUOPC_Advertise(exportState, standardName=fldsFrOcn(n)%stdname, name=fldsFrOcn(n)%shortname, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
   enddo
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeiads
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeiads
 
   if (localPet == 0) call cap_profiling("mom", "InitializeAdvertise", "E")
 
@@ -1071,7 +1073,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
 
   if (localPet == 0) call cap_profiling("mom", "InitializeRealize", "B")
 
-  if(write_runtimelog) timeirls = MPI_Wtime()
+  if (write_runtimelog) timeirls = MPI_Wtime()
 
   call shr_log_setLogUnit (stdout)
 
@@ -1280,7 +1282,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     do n = 1,numOwnedElements
       lonMesh(n) = ownedElemCoords(2*n-1)
       latMesh(n) = ownedElemCoords(2*n)
-    end do
+    enddo
 
     elemMaskArray = ESMF_ArrayCreate(Distgrid, maskMesh, rc=rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -1299,8 +1301,8 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         mask(n) = omask(i,j)
         lon(n)  = ocean_grid%geolonT(ig,jg)
         lat(n)  = ocean_grid%geolatT(ig,jg)
-      end do
-    end do
+      enddo
+    enddo
     deallocate(omask)
 
     eps_omesh = get_eps_omesh(ocean_state)
@@ -1327,7 +1329,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
         write(err_msg, frmt)n,maskMesh(n),mask(n)
         call MOM_error(FATAL, err_msg)
       endif
-    end do
+    enddo
 
     ! realize the import and export fields using the mesh
     call MOM_RealizeFields(importState, fldsToOcn_num, fldsToOcn, "Ocn import", &
@@ -1372,8 +1374,8 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
           mod2med_areacor(k) = model_areas(k) / mesh_areas(k)
           med2mod_areacor(k) = mesh_areas(k) / model_areas(k)
         endif
-      end do
-    end do
+      enddo
+    enddo
     deallocate(mesh_areas)
     deallocate(model_areas)
 
@@ -1654,7 +1656,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   if (use_cdeps_inline) then
      call mom_inline_init(gcomp, clock, eMesh, localPet, rc=rc)
      if (ChkErr(rc,__LINE__,u_FILE_u)) return
-  end if
+  endif
 
   !---------------------------------
   ! write out diagnostics
@@ -1665,7 +1667,7 @@ subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
   !if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   timere = 0.
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeirls
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timeirls
 
   if (localPet == 0) call cap_profiling("mom", "InitializeRealize", "E")
 
@@ -1702,7 +1704,7 @@ subroutine DataInitialize(gcomp, rc)
 
   if (localPet == 0) call cap_profiling("mom", "DataInitialize", "B")
 
-  if(write_runtimelog) timedis = MPI_Wtime()
+  if (write_runtimelog) timedis = MPI_Wtime()
 
   ! query the Component for its clock, importState and exportState
   call ESMF_GridCompGet(gcomp, clock=clock, importState=importState, exportState=exportState, rc=rc)
@@ -1764,7 +1766,7 @@ subroutine DataInitialize(gcomp, rc)
     enddo
   endif
 
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timedis
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timedis
 
   if (localPet == 0) call cap_profiling("mom", "DataInitialize", "E")
 
@@ -1809,7 +1811,7 @@ subroutine ModelAdvance(gcomp, rc)
   character(240)                         :: msgString
   character(ESMF_MAXSTR)                 :: casename
   integer                                :: iostat
-  integer                                :: writeunit
+  integer                                :: rpointer_unit
   type(ESMF_VM)                          :: vm
   integer                                :: n
   character(240)                         :: import_timestr, export_timestr
@@ -1828,10 +1830,10 @@ subroutine ModelAdvance(gcomp, rc)
 
   if (localPet == 0) call cap_profiling("mom", "ModelAdvance", "B")
 
-  if(profile_memory) call ESMF_VMLogMemInfo("Entering MOM Model_ADVANCE: ")
-  if(write_runtimelog) then
+  if (profile_memory) call ESMF_VMLogMemInfo("Entering MOM Model_ADVANCE: ")
+  if (write_runtimelog) then
      timers = MPI_Wtime()
-     if(timere>0. .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time since last time step ',timers-timere
+     if (timere>0. .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time since last time step ',timers-timere
   endif
 
   call shr_log_setLogUnit (stdout)
@@ -1961,7 +1963,7 @@ subroutine ModelAdvance(gcomp, rc)
     if (use_cdeps_inline) then
       call mom_inline_run(clock, ocean_public, ocean_grid, ice_ocean_boundary, dbug, rc=rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    end if
+    endif
 
     !---------------
     ! Update MOM6
@@ -2006,7 +2008,7 @@ subroutine ModelAdvance(gcomp, rc)
       ! turn off the alarm
       call ESMF_AlarmRingerOff(restart_alarm, rc=rc )
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    end if
+    endif
 
     write_restart_eor = .false.
     if (restart_eor) then
@@ -2016,8 +2018,8 @@ subroutine ModelAdvance(gcomp, rc)
         ! turn off the alarm
         call ESMF_AlarmRingerOff(stop_alarm, rc=rc )
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      end if
-    end if
+      endif
+    endif
 
 #ifndef CESMCOUPLED
     call is_restart_fh(clock, restartfh_info, write_restartfh)
@@ -2044,25 +2046,40 @@ subroutine ModelAdvance(gcomp, rc)
           rpointer_filename = trim(rpointer_filename//timestamp)
         endif
 
-        write(restartname,'(A,".mom6.r",A)') &
-             trim(casename), timestamp
+        write(restartname,'(A,".mom6.r",A)') trim(casename), timestamp
+        write(stoch_restartname,'(A,".mom6.r_stoch",A,".nc")')  trim(casename), timestamp
+
+        call insert_ensemble_appendix(stoch_restartname, ".mom6")
+
         call ESMF_LogWrite("MOM_cap: Writing restart :  "//trim(restartname), ESMF_LOGMSG_INFO)
         ! write restart file(s)
-        call ocean_model_restart(ocean_state, restartname=restartname, num_rest_files=num_rest_files, &
-                                 coupler_bc_restartname=coupler_bc_restartname, &
-                                 num_coupler_bc_rest_files=num_coupler_bc_rest_files)
+        call ocean_model_restart(ocean_state, restartname=restartname, &
+                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files, &
+                coupler_bc_restartname=coupler_bc_restartname, &
+                num_coupler_bc_rest_files=num_coupler_bc_rest_files)
         if (localPet == 0) then
            ! Write name of restart file in the rpointer file - this is currently hard-coded for the ocean
-          open(newunit=writeunit, file=rpointer_filename, form='formatted', status='unknown', iostat=iostat)
+          open(newunit=rpointer_unit, file=rpointer_filename, form='formatted', status='unknown', iostat=iostat)
           if (iostat /= 0) then
             call ESMF_LogSetError(ESMF_RC_FILE_OPEN, &
                  msg=subname//' ERROR opening '//rpointer_filename, line=__LINE__, file=u_FILE_u, rcToReturn=rc)
             return
           endif
-          call write_rpointer_filenames(writeunit, restartname, num_rest_files, inst_suffix)
-          if (num_coupler_bc_rest_files > 0) &
-            call write_rpointer_filenames(writeunit, coupler_bc_restartname, num_coupler_bc_rest_files, inst_suffix)
-          close(writeunit)
+
+          ! The ensemble appendix is inserted into the restart file names when they are written, so
+          ! insert it into the names recorded in the pointer file in the same way.
+          call insert_ensemble_appendix(restartname, ".mom6")
+          call write_rpointer_filenames(rpointer_unit, restartname, num_rest_files)
+          if (num_coupler_bc_rest_files > 0) then
+            call insert_ensemble_appendix(coupler_bc_restartname, ".mom6")
+            call write_rpointer_filenames(rpointer_unit, coupler_bc_restartname, num_coupler_bc_rest_files)
+          endif
+
+          if (stoch_restart_needed(ocean_state)) then
+            write(rpointer_unit,'(a)') trim(stoch_restartname)
+          endif
+
+          close(rpointer_unit)
         endif
       else  ! not cesm_coupled
         write(restartname,'(i4.4,2(i2.2),A,3(i2.2),A)') year, month, day,".", hour, minute, seconds, &
@@ -2073,7 +2090,7 @@ subroutine ModelAdvance(gcomp, rc)
 
         ! write restart file(s)
         call ocean_model_restart(ocean_state, restartname=restartname, &
-                                stoch_restartname=stoch_restartname, num_rest_files=num_rest_files)
+                                stoch_restartname='RESTART/'//stoch_restartname, num_rest_files=num_rest_files)
 
         call outputlog_restart(clock, num_rest_files, rc=rc)
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2109,12 +2126,12 @@ subroutine ModelAdvance(gcomp, rc)
     enddo
   endif
 
-  if(write_runtimelog) then
+  if (write_runtimelog) then
     timere = MPI_Wtime()
-    if(is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', timere-timers
+    if (is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', timere-timers
   endif
 
-  if(profile_memory) call ESMF_VMLogMemInfo("Leaving MOM Model_ADVANCE: ")
+  if (profile_memory) call ESMF_VMLogMemInfo("Leaving MOM Model_ADVANCE: ")
 
   if (localPet == 0) call cap_profiling("mom", "ModelAdvance", "E")
 
@@ -2129,6 +2146,7 @@ subroutine ModelSetRunClock(gcomp, rc)
   type(ESMF_Clock)         :: mclock, dclock
   type(ESMF_Time)          :: mcurrtime, dcurrtime
   type(ESMF_Time)          :: mstoptime, dstoptime
+  type(ESMF_Time)          :: mstoptime_prev ! model stop time before it is updated by this routine
   type(ESMF_TimeInterval)  :: mtimestep, dtimestep
   character(len=128)       :: mtimestring, dtimestring
   character(len=256)       :: cvalue
@@ -2156,7 +2174,8 @@ subroutine ModelSetRunClock(gcomp, rc)
                      stopTime=dstoptime, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-  call ESMF_ClockGet(mclock, currTime=mcurrtime, timeStep=mtimestep, rc=rc)
+  call ESMF_ClockGet(mclock, currTime=mcurrtime, timeStep=mtimestep, &
+                     stopTime=mstoptime_prev, rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
   !--------------------------------
@@ -2280,12 +2299,21 @@ subroutine ModelSetRunClock(gcomp, rc)
     endif
 
     ! create a 1-shot alarm at the driver stop time
-    stop_alarm = ESMF_AlarmCreate(mclock, ringtime=dstopTime, name = "stop_alarm", rc=rc)
-    call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    if (cesm_coupled) then
+      stop_alarm = ESMF_AlarmCreate(mclock, ringtime=mstoptime_prev, name = "stop_alarm", rc=rc)
+      call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
+      if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-    call ESMF_TimeGet(dstoptime, timestring=timestr, rc=rc)
-    call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+      call ESMF_TimeGet(mstoptime_prev, timestring=timestr, rc=rc)
+      call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+    else
+      stop_alarm = ESMF_AlarmCreate(mclock, ringtime=dstopTime, name = "stop_alarm", rc=rc)
+      call ESMF_LogWrite(subname//" Create Stop alarm", ESMF_LOGMSG_INFO)
+      if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+      call ESMF_TimeGet(dstoptime, timestring=timestr, rc=rc)
+      call ESMF_LogWrite("Stop Alarm will ring at : "//trim(timestr), ESMF_LOGMSG_INFO)
+    endif
 
     call outputlog_init(gcomp, mclock, rc)
     if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2337,7 +2365,7 @@ subroutine ocean_model_finalize(gcomp, rc)
     write(stdout,*) 'MOM: --- finalize called ---'
   endif
   rc = ESMF_SUCCESS
-  if(write_runtimelog) timefs = MPI_Wtime()
+  if (write_runtimelog) timefs = MPI_Wtime()
 
   call ESMF_GridCompGetInternalState(gcomp, ocean_internalstate, rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
@@ -2374,7 +2402,7 @@ subroutine ocean_model_finalize(gcomp, rc)
   call outputlog_run(clock, .true., rc=rc)
   if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
-  if(write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timefs
+  if (write_runtimelog .and. is_root_pe()) write(stdout,*) 'In ',trim(subname),' time ', MPI_Wtime()-timefs
 
   if (localPet == 0) call cap_profiling("mom", "ocean_model_finalize", "E")
 

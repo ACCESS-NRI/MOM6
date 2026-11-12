@@ -571,11 +571,11 @@ function simplifyWhiteSpace(string)
   character(len=len(string)+16)   :: simplifyWhiteSpace
 
   ! Local variables
-  integer :: i,j
+  integer :: i, j
   logical :: nonBlank = .false., insideString = .false.
   character(len=1) :: quoteChar=" "
 
-  nonBlank  = .false.; insideString = .false. ! NOTE: For some reason this line is needed??
+  nonBlank  = .false. ; insideString = .false. ! NOTE: For some reason this line is needed??
   i=0
   simplifyWhiteSpace=repeat(" ",len(string)+16)
   do j=1,len_trim(string)
@@ -993,10 +993,12 @@ function max_input_line_length(CS, pf_num) result(max_len)
 
     ! Scan through each line of the file
     do count = 1, CS%param_data(ipf)%num_lines
-      ! line = CS%param_data(ipf)%fln(count)%line
-      last = len_trim(CS%param_data(ipf)%fln(count)%line)
+     ! nvfortran 26.5 at -O2 gives 0 for len_trim() of this line referenced
+     ! directly as CS%param_data(ipf)%fln(count)%line, but not via an associate name.
+     associate(fline => CS%param_data(ipf)%fln(count)%line)
+      last = len_trim(fline)
       last_char = " "
-      if (last > 0) last_char = CS%param_data(ipf)%fln(count)%line(last:last)
+      if (last > 0) last_char = fline(last:last)
       ! Check if line ends in continuation character (either & or \)
       ! Note achar(92) is a backslash
       if (last_char == achar(92) .or. last_char == "&") then
@@ -1017,6 +1019,7 @@ function max_input_line_length(CS, pf_num) result(max_len)
         line_len = last
       endif
       max_len = max(max_len, line_len)
+     end associate
     enddo ! CS%param_data(ipf)%num_lines
   enddo paramfile_loop
 
@@ -1061,7 +1064,7 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
   ! return variables indicating whether this variable is defined and the string
   ! that contains the value of this variable.
   found = .false.
-  oval = 0; ival = 0
+  oval = 0 ; ival = 0
   max_vals = SIZE(value_string)
   do is=1,max_vals ; value_string(is) = " " ; enddo
 
@@ -1102,8 +1105,8 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
       origLine = trim(line) ! Keep original for error messages
 
       ! Check for '#override' at start of line
-      found_override = .false.; found_define = .false.; found_undef = .false.
-      iso = index(line(:last), "#override " )!; if (is > 0) found_override = .true.
+      found_override = .false. ; found_define = .false. ; found_undef = .false.
+      iso = index(line(:last), "#override " )! ; if (is > 0) found_override = .true.
       if (iso>1) call MOM_error(FATAL, "MOM_file_parser : #override was found "// &
                  " but was not the first keyword."// &
                  " Line: '"//trim(line(:last))//"'"//&
@@ -1112,7 +1115,7 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
         found_override = .true.
         if (index(line(:last), "#override define ")==1) found_define = .true.
         if (index(line(:last), "#override undef ")==1) found_undef = .true.
-        line = trim(adjustl(line(iso+10:last))); last = len_trim(line)
+        line = trim(adjustl(line(iso+10:last))) ; last = len_trim(line)
       endif
 
       ! Newer form of parameter block, block%, %block or block%param or
@@ -1164,9 +1167,9 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
 
       ! Detect keywords
       found_equals = .false.
-      isd = index(line(:last), "define" )!; if (isd > 0) found_define = .true.
-      isu = index(line(:last), "undef" )!; if (isu > 0) found_undef = .true.
-      ise = index(line(:last), " = " ); if (ise > 1) found_equals = .true.
+      isd = index(line(:last), "define" )! ; if (isd > 0) found_define = .true.
+      isu = index(line(:last), "undef" )! ; if (isu > 0) found_undef = .true.
+      ise = index(line(:last), " = " ) ; if (ise > 1) found_equals = .true.
       if (index(line(:last), "#define ")==1) found_define = .true.
       if (index(line(:last), "#undef ")==1) found_undef = .true.
 
@@ -1416,7 +1419,7 @@ subroutine log_param_int(CS, modulename, varname, value, desc, units, &
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits=" "; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  myunits = " " ; if (present(units)) write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
     call doc_param(CS%doc, varname, desc, myunits, value, default, &
                    layoutParam=layoutParam, debuggingParam=debuggingParam, like_default=like_default)
@@ -1452,7 +1455,7 @@ subroutine log_param_int_array(CS, modulename, varname, value, desc, &
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits=" "; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  myunits = " " ; if (present(units)) write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
     call doc_param(CS%doc, varname, desc, myunits, value, default, defaults, &
                    layoutParam=layoutParam, debuggingParam=debuggingParam, like_default=like_default)
@@ -1570,7 +1573,7 @@ subroutine log_param_logical(CS, modulename, varname, value, desc, &
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits="Boolean"; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  myunits = "Boolean" ; if (present(units)) write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
     call doc_param(CS%doc, varname, desc, myunits, value, default, &
                    layoutParam=layoutParam, debuggingParam=debuggingParam, like_default=like_default)
@@ -1605,7 +1608,7 @@ subroutine log_param_char(CS, modulename, varname, value, desc, units, &
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits=" "; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  myunits = " " ; if (present(units)) write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
     call doc_param(CS%doc, varname, desc, myunits, value, default, &
                    layoutParam=layoutParam, debuggingParam=debuggingParam, like_default=like_default)

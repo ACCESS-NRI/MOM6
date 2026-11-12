@@ -14,7 +14,7 @@ use MOM_hor_index, only : hor_index_type
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_io, only : file_exists, MOM_read_data, slasher, vardesc, var_desc
 use MOM_restart, only : query_initialized, set_initialized, MOM_restart_CS
-use MOM_time_manager, only : time_type, time_type_to_real
+use MOM_time_manager, only : time_type
 use MOM_tracer_registry, only : register_tracer, tracer_registry_type
 use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut
 use MOM_unit_scaling, only : unit_scale_type
@@ -223,17 +223,29 @@ subroutine nw2_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US
 ! if (.not.associated(CS)) return
 
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !$omp target update from(h_old)
     do m=1,CS%ntr
       do k=1,GV%ke ; do j=G%jsc,G%jec ; do i=G%isc,G%iec
         h_work(i,j,k) = h_old(i,j,k)
       enddo ; enddo ; enddo
+      !$omp target enter data map(to: h_work, CS%tr(:,:,:,m))
+      !$omp target enter data map(to: fluxes)
+      !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+      !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
       call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+      !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+      !$omp target exit data map(release: fluxes)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
+      !$omp target exit data map(delete: h_work)
     enddo
   else
     do m=1,CS%ntr
+      !$omp target enter data map(to: CS%tr(:,:,:,m))
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      !$omp target exit data map(from: CS%tr(:,:,:,m))
     enddo
   endif
 

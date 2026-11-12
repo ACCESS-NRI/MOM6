@@ -18,6 +18,11 @@ target_include_directories(mom6shared PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../config_src/memory/dynamic_symmetric>>
 )
 
+# MOM_exp.F90 includes MOM_exp.h from its own directory.
+target_include_directories(mom6shared PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/framework/intrinsics>
+)
+
 target_sources(mom6shared PRIVATE
   ALE/coord_adapt.F90
   ALE/coord_hycom.F90
@@ -48,6 +53,7 @@ target_sources(mom6shared PRIVATE
   ALE/Recon1d_PLM_CW.F90
   ALE/Recon1d_PLM_CWK.F90
   ALE/Recon1d_PLM_hybgen.F90
+  ALE/Recon1d_PLM_WLS.F90
   ALE/Recon1d_PPM_CW.F90
   ALE/Recon1d_PPM_CWK.F90
   ALE/Recon1d_PPM_H4_2018.F90
@@ -152,6 +158,7 @@ target_sources(mom6shared PRIVATE
   framework/MOM_coms.F90
   framework/MOM_cpu_clock.F90
   framework/MOM_data_override.F90
+  framework/MOM_diag_buffers.F90
   framework/MOM_diag_mediator.F90
   framework/MOM_diag_remap.F90
   framework/MOM_document.F90
@@ -180,6 +187,10 @@ target_sources(mom6shared PRIVATE
   framework/MOM_write_cputime.F90
   framework/posix.F90
   framework/MOM_coupler_types.F90
+  framework/intrinsics/MOM_exp.F90
+  framework/intrinsics/MOM_exp_data_n128.F90
+  framework/intrinsics/MOM_log.F90
+  framework/intrinsics/MOM_log_data_n128.F90
 
   ice_shelf/MOM_ice_shelf_diag_mediator.F90
   ice_shelf/MOM_ice_shelf_dynamics.F90
@@ -214,9 +225,10 @@ target_sources(mom6shared PRIVATE
   parameterizations/lateral/MOM_interface_filter.F90
   parameterizations/lateral/MOM_internal_tides.F90
   parameterizations/lateral/MOM_lateral_mixing_coeffs.F90
-  parameterizations/lateral/MOM_load_love_numbers.F90
+  parameterizations/lateral/MOM_load_Love_numbers.F90
   parameterizations/lateral/MOM_MEKE.F90
   parameterizations/lateral/MOM_MEKE_types.F90
+  parameterizations/lateral/MOM_meso_sfn_ANN.F90
   parameterizations/lateral/MOM_mixed_layer_restrat.F90
   parameterizations/lateral/MOM_spherical_harmonics.F90
   parameterizations/lateral/MOM_streaming_filter.F90
@@ -333,6 +345,7 @@ target_sources(mom6shared PRIVATE
 
   ../config_src/external/stochastic_physics/get_stochy_pattern.F90
   ../config_src/external/stochastic_physics/stochastic_physics.F90
+  ../config_src/external/stochastic_physics/stochy_data_mod.F90
 
   ../config_src/infra/FMS2/MOM_coms_infra.F90
   ../config_src/infra/FMS2/MOM_constants.F90
@@ -352,3 +365,27 @@ target_sources(mom6shared PRIVATE
   ../config_src/external/MARBL/marbl_interface_public_types.F90
   ../config_src/external/MARBL/marbl_logging.F90
 )
+
+# nvfortran 26.5 compile time: with the inliner, which is on by default from -O2,
+# these two files take about 11 min (MOM_hor_bnd_diffusion.F90) and 31 min
+# (MOM_neutral_diffusion.F90) to compile, against about 17 s and 37 s with
+# -Mnoinline.  The compiler spends the time comparing derived types
+# (cblock_eq_dtypes) while it builds its inline library.  Neither file has
+# offload directives or do concurrent loops.  Only for the optimised build types.
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  set_source_files_properties(
+    tracer/MOM_hor_bnd_diffusion.F90
+    tracer/MOM_neutral_diffusion.F90
+    PROPERTIES COMPILE_OPTIONS
+      "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:-Mnoinline>")
+endif()
+
+# Local test: compile these files without vectorisation. Their do concurrent loops
+# otherwise vectorise differently from MOM6 main's plain loops and change the last bit.
+# (Applies to NVHPC only, as -Mnovect is an nvfortran option.)
+if(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
+  set_source_files_properties(
+    parameterizations/vertical/MOM_set_viscosity.F90
+    diagnostics/MOM_sum_output.F90
+    PROPERTIES COMPILE_OPTIONS "-Mnovect")
+endif()
