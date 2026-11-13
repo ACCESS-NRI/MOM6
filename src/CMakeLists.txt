@@ -23,6 +23,11 @@ target_include_directories(mom6shared PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/framework/intrinsics>
 )
 
+if(MOM6_OPENMP_OFFLOAD)
+  # Code that is only valid for the GPU offload build (see MOM_domains.F90)
+  target_compile_definitions(mom6shared PRIVATE MOM6_GPU_OFFLOAD)
+endif()
+
 target_sources(mom6shared PRIVATE
   ALE/coord_adapt.F90
   ALE/coord_hycom.F90

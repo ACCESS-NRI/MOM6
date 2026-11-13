@@ -19,6 +19,13 @@ endif()
 
 target_compile_definitions(mom6lib PRIVATE CESMCOUPLED)
 
+if(MOM6_OPENMP_OFFLOAD)
+  target_compile_definitions(mom6lib PRIVATE MOM6_GPU_OFFLOAD)
+  # The executable that links mom6lib (access3's) is not linked by this project,
+  # so it gets the GPU link flags from the exported target.
+  target_link_options(mom6lib INTERFACE ${MOM6_OFFLOAD_LINK_OPTIONS})
+endif()
+
 target_sources(mom6lib PRIVATE
   mom_cap_time.F90
   mom_surface_forcing_nuopc.F90
