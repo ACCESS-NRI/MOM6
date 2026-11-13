@@ -60,7 +60,7 @@ implicit none ; private
 
 public diag_remap_ctrl
 public diag_remap_init, diag_remap_end, diag_remap_update, diag_remap_do_remap
-public diag_remap_configure_axes, diag_remap_axes_configured
+public diag_remap_configure_axes, diag_remap_axes_configured, diag_remap_grid_uses_TS
 public diag_remap_calc_hmask
 public diag_remap_get_axes_info, diag_remap_set_active
 public diag_remap_diag_registration_closed
@@ -260,6 +260,18 @@ function diag_remap_axes_configured(remap_cs)
   diag_remap_axes_configured = remap_cs%configured
 
 end function
+
+!> Returns true if the target grid of this coordinate depends on the temperatures and salinities
+!! that are passed to diag_remap_update, and not just on the thicknesses.
+function diag_remap_grid_uses_TS(remap_cs)
+  type(diag_remap_ctrl), intent(in) :: remap_cs !< Diagnostic coordinate control structure
+  logical :: diag_remap_grid_uses_TS
+
+  ! Only the z* and sigma coordinates are known not to depend on the temperatures and salinities.
+  diag_remap_grid_uses_TS = .not.((remap_cs%vertical_coord == coordinateMode('ZSTAR')) .or. &
+                                  (remap_cs%vertical_coord == coordinateMode('SIGMA')))
+
+end function diag_remap_grid_uses_TS
 
 !> Build/update target vertical grids for diagnostic remapping.
 !! \note The target grids need to be updated whenever sea surface

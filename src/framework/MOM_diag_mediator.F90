@@ -6,6 +6,7 @@
 !! interfaces with additional diagnostic capabilies.
 module MOM_diag_mediator
 
+use, intrinsic :: iso_fortran_env, only : int64
 use MOM_checksums,        only : chksum0, zchksum
 use MOM_checksums,        only : hchksum, uchksum, vchksum, Bchksum
 use MOM_coms,             only : PE_here
@@ -22,8 +23,9 @@ use MOM_diag_remap,       only : vertically_reintegrate_diag_field, vertically_i
 use MOM_diag_remap,       only : horizontally_average_diag_field, diag_remap_get_axes_info
 use MOM_diag_remap,       only : diag_remap_configure_axes, diag_remap_axes_configured
 use MOM_diag_remap,       only : diag_remap_diag_registration_closed, diag_remap_set_active
+use MOM_diag_remap,       only : diag_remap_grid_uses_TS
 use MOM_EOS,              only : EOS_type
-use MOM_error_handler,    only : MOM_error, FATAL, WARNING, is_root_pe, assert, callTree_showQuery
+use MOM_error_handler,    only : MOM_error, MOM_mesg, FATAL, WARNING, is_root_pe, assert, callTree_showQuery
 use MOM_error_handler,    only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,      only : get_param, log_version, param_file_type
 use MOM_grid,             only : ocean_grid_type
@@ -237,6 +239,27 @@ type diagcs_dsamp
   !>@}
 end type diagcs_dsamp
 
+!> A copy of the model state from which the target grids of the diagnostic vertical coordinates are
+!! calculated.  These grids have to be recalculated whenever the thicknesses change, which happens
+!! several times in each time step, but they can be expensive to calculate and are often replaced
+!! before any diagnostic uses them.  So diag_update_remap_grids only stores the state that the grids
+!! depend on, and each grid is calculated from the stored state immediately before it is first used.
+!! This gives exactly the same grid as calculating it when the state was stored.
+type, private :: diag_grid_inputs
+  logical, dimension(:), allocatable :: pending !< For each diagnostic vertical coordinate, true if
+                                  !! its target grid has not yet been calculated from this state
+  real, dimension(:,:,:), allocatable :: h  !< Layer thicknesses [H ~> m or kg m-2], which are only
+                                  !! stored if a coordinate that is in use depends on them
+  real, dimension(:,:,:), allocatable :: dz !< Layer vertical extents [Z ~> m], which are only
+                                  !! stored if a coordinate that is in use depends on them
+  real, dimension(:,:,:), allocatable :: T  !< Layer temperatures [C ~> degC], which are only
+                                  !! stored if a coordinate that is in use depends on them
+  real, dimension(:,:,:), allocatable :: S  !< Layer salinities [S ~> ppt], which are only
+                                  !! stored if a coordinate that is in use depends on them
+  integer(kind=int64) :: n_requested = 0  !< The number of times that a target grid had to be recalculated
+  integer(kind=int64) :: n_calculated = 0 !< The number of times that a target grid was calculated
+end type diag_grid_inputs
+
 !> The following data type a list of diagnostic fields an their variants,
 !! as well as variables that control the handling of model output.
 type, public :: diag_ctrl
@@ -302,8 +325,10 @@ type, public :: diag_ctrl
 
   !> Number of diagnostic vertical coordinates (remapped)
   integer :: num_diag_coords
-  !> Control structure for each possible coordinate
-  type(diag_remap_ctrl), dimension(:), allocatable :: diag_remap_cs
+  !> Control structure for each possible coordinate.  This is a pointer so that the target grids
+  !! of a coordinate can be calculated when they are first used, in routines in which the
+  !! diag_ctrl type is intent(in).
+  type(diag_remap_ctrl), dimension(:), pointer :: diag_remap_cs => NULL()
   type(diag_grid_storage) :: diag_grid_temp !< Stores the remapped diagnostic grid
   logical :: diag_grid_overridden = .false. !< True if the diagnostic grids have been overriden
 
@@ -340,6 +365,13 @@ type, public :: diag_ctrl
 
   real, dimension(:,:,:), allocatable :: h_begin !< Layer thicknesses at the beginning of the timestep used
                                                  !! for remapping of extensive variables [H ~> m or kg m-2]
+
+  !> The state from which the target grids for intensive diagnostics are calculated when they are
+  !! first used.  This is a pointer for the same reason as diag_remap_cs.
+  type(diag_grid_inputs), pointer :: grid_inputs => NULL()
+  !> The state at the beginning of the timestep, from which the target grids for extensive
+  !! diagnostics are calculated when they are first used.
+  type(diag_grid_inputs), pointer :: grid_inputs_ext => NULL()
 
 end type diag_ctrl
 
@@ -790,6 +822,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       axes => diag_cs%remap_axesTL(c)
       nk = axes%nz
       allocate( axes%mask3d(G%isd:G%ied,G%jsd:G%jed,nk), source=0. )
+      call calc_pending_diag_grids(diag_cs, c, intensive=.true., extensive=.false.)
       call diag_remap_calc_hmask(diag_cs%diag_remap_cs(c), G, axes%mask3d)
 
       h_axes => diag_cs%remap_axesTL(c) ! Use the h-point masks to generate the u-, v- and q- masks
@@ -1612,14 +1645,19 @@ subroutine post_data_3d(diag_field_id, field, diag_cs, is_static, mask, alt_h)
   if (diag_cs%show_call_tree) &
     call callTree_enter("post_data_3d("//trim(diag_cs%diags(diag_field_id)%debug_str)//")")
 
-  ! Find out whether there are any z-based diagnostics
+  ! Find out whether there are any z-based diagnostics, and calculate any target grids that are
+  ! about to be used but have not been calculated since the state that they depend on last changed.
   diag => diag_cs%diags(diag_field_id)
   dz_diag_needed = .false. ; dz_begin_needed = .false.
   do while (associated(diag))
     if (diag%v_extensive .and. .not.diag%axes%is_native) then
+      call calc_pending_diag_grids(diag_cs, diag%axes%vertical_coordinate_number, &
+                                   intensive=.false., extensive=.true.)
       if (diag_cs%diag_remap_cs(diag%axes%vertical_coordinate_number)%Z_based_coord) &
         dz_begin_needed = .true.
     elseif (diag%axes%needs_remapping .or. diag%axes%needs_interpolating) then
+      call calc_pending_diag_grids(diag_cs, diag%axes%vertical_coordinate_number, &
+                                   intensive=.true., extensive=.false.)
       if (diag_cs%diag_remap_cs(diag%axes%vertical_coordinate_number)%Z_based_coord) &
         dz_diag_needed = .true.
     endif
@@ -2057,6 +2095,7 @@ subroutine post_xy_average(diag_cs, diag, field)
     nz = size(field, 3)
     coord = diag%axes%vertical_coordinate_number
     remap_nz = diag_cs%diag_remap_cs(coord)%nz
+    call calc_pending_diag_grids(diag_cs, coord, intensive=.true., extensive=.false.)
 
     call assert(diag_cs%diag_remap_cs(coord)%initialized, &
                 'post_xy_average: remap_cs not initialized.')
@@ -3430,6 +3469,11 @@ subroutine diag_mediator_init(G, GV, US, nz, param_file, diag_cs, doc_file_dir)
   diag_cs%tv => null()
 
   allocate(diag_cs%h_begin(G%isd:G%ied,G%jsd:G%jed,nz))
+  ! Set up the storage for the state that the target grids of the diagnostic coordinates depend on.
+  ! The arrays that hold this state are allocated when they are first needed.
+  allocate(diag_cs%grid_inputs, diag_cs%grid_inputs_ext)
+  allocate(diag_cs%grid_inputs%pending(diag_cs%num_diag_coords), source=.false.)
+  allocate(diag_cs%grid_inputs_ext%pending(diag_cs%num_diag_coords), source=.false.)
 #if defined(DEBUG) || defined(__DO_SAFETY_CHECKS__)
   allocate(diag_cs%h_old(G%isd:G%ied,G%jsd:G%jed,nz))
   diag_cs%h_old(:,:,:) = 0.0
@@ -3627,28 +3671,13 @@ subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensiv
     call thickness_to_dz(h_diag, diag_cs%tv, dz_diag, diag_cs%G, diag_cs%GV, diag_cs%US, halo_size=1)
   endif
 
-  if (update_intensive_local) then
-    do m=1, diag_cs%num_diag_coords
-      if (diag_cs%diag_remap_cs(m)%Z_based_coord) then
-        call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, dz_diag, T_diag, S_diag, &
-                               diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h)
-      else
-        call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, h_diag, T_diag, S_diag, &
-                               diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h)
-      endif
-    enddo
-  endif
+  ! Store the state that the target grids depend on.  Each grid is only calculated from this stored
+  ! state, by calc_pending_diag_grids, when it is first used, because it may be replaced before then.
+  if (update_intensive_local) &
+    call store_diag_grid_inputs(diag_cs%grid_inputs, diag_cs, h_diag, dz_diag, T_diag, S_diag)
   if (update_extensive_local) then
     diag_cs%h_begin(:,:,:) = diag_cs%h(:,:,:)
-    do m=1, diag_cs%num_diag_coords
-      if (diag_cs%diag_remap_cs(m)%Z_based_coord) then
-        call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, dz_diag, T_diag, S_diag, &
-                               diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h_extensive)
-      else
-        call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, h_diag, T_diag, S_diag, &
-                               diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h_extensive)
-      endif
-    enddo
+    call store_diag_grid_inputs(diag_cs%grid_inputs_ext, diag_cs, h_diag, dz_diag, T_diag, S_diag)
   endif
 
 #if defined(DEBUG) || defined(__DO_SAFETY_CHECKS__)
@@ -3659,9 +3688,141 @@ subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensiv
 
   if (id_clock_diag_grid_updates>0) call cpu_clock_end(id_clock_diag_grid_updates)
 
+  ! The remapping for a coordinate is set up when its target grid is first calculated, and other
+  ! routines check that this has been done, so in that case the grid is calculated straight away.
+  do m=1, diag_cs%num_diag_coords
+    if (diag_cs%diag_remap_cs(m)%configured .and. .not.diag_cs%diag_remap_cs(m)%initialized) &
+      call calc_pending_diag_grids(diag_cs, m, update_intensive_local, update_extensive_local)
+  enddo
+
   if (diag_cs%show_call_tree) call callTree_leave("diag_update_remap_grids()")
 
 end subroutine diag_update_remap_grids
+
+!> Store a copy of the state from which the target grids of the diagnostic vertical coordinates are
+!! calculated, and record that these grids have to be recalculated before they are next used.
+subroutine store_diag_grid_inputs(inputs, diag_cs, h, dz, T, S)
+  type(diag_grid_inputs), intent(inout) :: inputs  !< The stored state and the status of the grids
+  type(diag_ctrl),        intent(in)    :: diag_cs !< Diagnostics control structure
+  real, dimension(:,:,:), pointer       :: h  !< Layer thicknesses [H ~> m or kg m-2]
+  real, dimension(:,:,:), intent(in)    :: dz !< Layer vertical extents [Z ~> m], which only have to
+                                              !! be set if a coordinate that is in use is based on them
+  real, dimension(:,:,:), pointer       :: T  !< Layer temperatures [C ~> degC]
+  real, dimension(:,:,:), pointer       :: S  !< Layer salinities [S ~> ppt]
+
+  ! Local variables
+  logical :: h_needed, dz_needed, TS_needed ! True if a coordinate that is in use depends on these fields
+  integer :: isd, ied, jsd, jed, nz, m
+
+  ! Find out which fields the target grids of the coordinates that are in use depend on.
+  h_needed = .false. ; dz_needed = .false. ; TS_needed = .false.
+  do m=1, diag_cs%num_diag_coords
+    inputs%pending(m) = diag_cs%diag_remap_cs(m)%configured
+    if (inputs%pending(m)) then
+      inputs%n_requested = inputs%n_requested + 1
+      if (diag_cs%diag_remap_cs(m)%Z_based_coord) then
+        dz_needed = .true.
+      else
+        h_needed = .true.
+      endif
+      if (diag_remap_grid_uses_TS(diag_cs%diag_remap_cs(m))) TS_needed = .true.
+    endif
+  enddo
+
+  ! Store the fields that are needed, and release the storage for any that no longer are, which
+  ! can happen once it is known which coordinates the diagnostics that were requested use.
+  isd = diag_cs%G%isd ; ied = diag_cs%G%ied ; jsd = diag_cs%G%jsd ; jed = diag_cs%G%jed
+  nz = diag_cs%GV%ke
+  if (h_needed) then
+    if (.not.allocated(inputs%h)) allocate(inputs%h(isd:ied,jsd:jed,nz))
+    inputs%h(:,:,:) = h(:,:,:)
+  elseif (allocated(inputs%h)) then
+    deallocate(inputs%h)
+  endif
+  if (dz_needed) then
+    if (.not.allocated(inputs%dz)) allocate(inputs%dz(isd:ied,jsd:jed,nz))
+    inputs%dz(:,:,:) = dz(:,:,:)
+  elseif (allocated(inputs%dz)) then
+    deallocate(inputs%dz)
+  endif
+  if (TS_needed) then
+    if (associated(T)) then
+      if (.not.allocated(inputs%T)) allocate(inputs%T(isd:ied,jsd:jed,nz))
+      inputs%T(:,:,:) = T(:,:,:)
+    endif
+    if (associated(S)) then
+      if (.not.allocated(inputs%S)) allocate(inputs%S(isd:ied,jsd:jed,nz))
+      inputs%S(:,:,:) = S(:,:,:)
+    endif
+  else
+    if (allocated(inputs%T)) deallocate(inputs%T)
+    if (allocated(inputs%S)) deallocate(inputs%S)
+  endif
+
+end subroutine store_diag_grid_inputs
+
+!> Calculate the target grids of a diagnostic vertical coordinate that have not been calculated since
+!! the state that they depend on was last stored by diag_update_remap_grids.  This has to be called
+!! before the target grids of a coordinate are used.  Note that diag_cs can be intent(in) because the
+!! target grids and the stored state are accessed via pointers.
+subroutine calc_pending_diag_grids(diag_cs, m, intensive, extensive)
+  type(diag_ctrl), intent(in) :: diag_cs   !< Diagnostics control structure
+  integer,         intent(in) :: m         !< The index of the diagnostic vertical coordinate
+  logical,         intent(in) :: intensive !< If true, the grid for intensive diagnostics will be used
+  logical,         intent(in) :: extensive !< If true, the grid for extensive diagnostics will be used
+
+  ! Coordinates that are not in use do not have target grids.
+  if (.not.diag_cs%diag_remap_cs(m)%configured) return
+
+  if (intensive .and. diag_cs%grid_inputs%pending(m)) &
+    call calc_diag_grid(diag_cs, m, diag_cs%grid_inputs, extensive=.false.)
+  if (extensive .and. diag_cs%grid_inputs_ext%pending(m)) &
+    call calc_diag_grid(diag_cs, m, diag_cs%grid_inputs_ext, extensive=.true.)
+
+end subroutine calc_pending_diag_grids
+
+!> Calculate a target grid of a diagnostic vertical coordinate from the stored state.
+subroutine calc_diag_grid(diag_cs, m, inputs, extensive)
+  type(diag_ctrl),                intent(in)    :: diag_cs !< Diagnostics control structure
+  integer,                        intent(in)    :: m       !< The index of the diagnostic vertical coordinate
+  type(diag_grid_inputs), target, intent(inout) :: inputs  !< The stored state that the grid depends on
+  logical,                        intent(in)    :: extensive !< If true, calculate the grid for extensive
+                                                           !! diagnostics, otherwise that for intensive diagnostics
+
+  ! Local variables
+  real, dimension(:,:,:), pointer :: h ! The stored thicknesses [H ~> m or kg m-2] or vertical
+                                       ! extents [Z ~> m], depending on the coordinate
+  real, dimension(:,:,:), pointer :: T ! The stored temperatures [C ~> degC], or a placeholder
+  real, dimension(:,:,:), pointer :: S ! The stored salinities [S ~> ppt], or a placeholder
+
+  if (id_clock_diag_grid_updates>0) call cpu_clock_begin(id_clock_diag_grid_updates)
+
+  if (diag_cs%diag_remap_cs(m)%Z_based_coord) then
+    h => inputs%dz
+  else
+    h => inputs%h
+  endif
+  if (diag_remap_grid_uses_TS(diag_cs%diag_remap_cs(m))) then
+    T => inputs%T ; S => inputs%S
+  else
+    ! This coordinate does not use the temperatures and salinities, so they may not have been
+    ! stored, and the thicknesses stand in for them in the argument list.
+    T => h ; S => h
+  endif
+
+  if (extensive) then
+    call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, h, T, S, &
+                           diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h_extensive)
+  else
+    call diag_remap_update(diag_cs%diag_remap_cs(m), diag_cs%G, diag_cs%GV, diag_cs%US, h, T, S, &
+                           diag_cs%eqn_of_state, diag_cs%diag_remap_cs(m)%h)
+  endif
+  inputs%pending(m) = .false.
+  inputs%n_calculated = inputs%n_calculated + 1
+
+  if (id_clock_diag_grid_updates>0) call cpu_clock_end(id_clock_diag_grid_updates)
+
+end subroutine calc_diag_grid
 
 !> Sets up the 2d and 3d masks for native diagnostics
 subroutine diag_masks_set(G, nz, diag_cs)
@@ -3736,6 +3897,7 @@ subroutine diag_mediator_end(time, diag_CS, end_diag_manager)
 
   ! Local variables
   type(diag_type), pointer :: diag, next_diag
+  character(len=160) :: mesg ! A message about the number of target grids that were calculated
   integer :: i, dl
 
   if (diag_CS%available_diag_doc_unit > -1) then
@@ -3758,9 +3920,18 @@ subroutine diag_mediator_end(time, diag_CS, end_diag_manager)
 
   deallocate(diag_cs%diags)
 
+  if (associated(diag_cs%grid_inputs) .and. associated(diag_cs%grid_inputs_ext)) then
+    write(mesg, '(I0," of the ",I0," target grids requested for diagnostic coordinates were calculated.")') &
+        diag_cs%grid_inputs%n_calculated + diag_cs%grid_inputs_ext%n_calculated, &
+        diag_cs%grid_inputs%n_requested + diag_cs%grid_inputs_ext%n_requested
+    call MOM_mesg("diag_mediator_end: "//trim(mesg), 5)
+    deallocate(diag_cs%grid_inputs, diag_cs%grid_inputs_ext)
+  endif
+
   do i=1, diag_cs%num_diag_coords
     call diag_remap_end(diag_cs%diag_remap_cs(i))
   enddo
+  if (associated(diag_cs%diag_remap_cs)) deallocate(diag_cs%diag_remap_cs)
 
   call diag_grid_storage_end(diag_cs%diag_grid_temp)
   if (associated(diag_cs%mask3dTL))  deallocate(diag_cs%mask3dTL)
@@ -4043,8 +4214,10 @@ subroutine diag_copy_diag_to_storage(grid_storage, h_state, diag)
 
   grid_storage%h_state(:,:,:) = h_state(:,:,:)
   do m = 1,grid_storage%num_diag_coords
-    if (diag%diag_remap_cs(m)%nz > 0) &
+    if (diag%diag_remap_cs(m)%nz > 0) then
+      call calc_pending_diag_grids(diag, m, intensive=.true., extensive=.false.)
       grid_storage%diag_grids(m)%h(:,:,:) = diag%diag_remap_cs(m)%h(:,:,:)
+    endif
   enddo
 
 end subroutine diag_copy_diag_to_storage
@@ -4061,8 +4234,11 @@ subroutine diag_copy_storage_to_diag(diag, grid_storage)
 
   diag%diag_grid_overridden = .true.
   do m = 1,grid_storage%num_diag_coords
-    if (diag%diag_remap_cs(m)%nz > 0) &
+    if (diag%diag_remap_cs(m)%nz > 0) then
+      ! The stored grid replaces the grid that would have been calculated from the stored state.
+      diag%grid_inputs%pending(m) = .false.
       diag%diag_remap_cs(m)%h(:,:,:) = grid_storage%diag_grids(m)%h(:,:,:)
+    endif
   enddo
 
 end subroutine diag_copy_storage_to_diag
@@ -4077,8 +4253,10 @@ subroutine diag_save_grids(diag)
   if (diag%num_diag_coords < 1) return
 
   do m = 1,diag%num_diag_coords
-    if (diag%diag_remap_cs(m)%nz > 0) &
+    if (diag%diag_remap_cs(m)%nz > 0) then
+      call calc_pending_diag_grids(diag, m, intensive=.true., extensive=.false.)
       diag%diag_grid_temp%diag_grids(m)%h(:,:,:) = diag%diag_remap_cs(m)%h(:,:,:)
+    endif
   enddo
 
 end subroutine diag_save_grids
@@ -4094,8 +4272,11 @@ subroutine diag_restore_grids(diag)
 
   diag%diag_grid_overridden = .false.
   do m = 1,diag%num_diag_coords
-    if (diag%diag_remap_cs(m)%nz > 0) &
+    if (diag%diag_remap_cs(m)%nz > 0) then
+      ! The saved grid replaces the grid that would have been calculated from the stored state.
+      diag%grid_inputs%pending(m) = .false.
       diag%diag_remap_cs(m)%h(:,:,:) = diag%diag_grid_temp%diag_grids(m)%h(:,:,:)
+    endif
   enddo
 
 end subroutine diag_restore_grids
