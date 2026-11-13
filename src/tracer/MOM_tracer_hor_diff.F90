@@ -594,6 +594,16 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
       call neutral_diffusion(G, GV,  h, Coef_x, Coef_y, I_numitts*dt, Reg, US, CS%neutral_diffusion_CSp)
     enddo ! itt
 
+    ! neutral_diffusion runs on the host and changes the tracers and their diagnostic diffusive fluxes
+    ! there, but they are copied back from the device below, so the device copies must get these values.
+    !$ do m = 1, Reg%ntr
+      !$omp target update to(Reg%Tr(m)%t)
+      !$omp target update to(Reg%Tr(m)%df_x) if(associated(Reg%Tr(m)%df_x))
+      !$omp target update to(Reg%Tr(m)%df_y) if(associated(Reg%Tr(m)%df_y))
+      !$omp target update to(Reg%Tr(m)%df2d_x) if(associated(Reg%Tr(m)%df2d_x))
+      !$omp target update to(Reg%Tr(m)%df2d_y) if(associated(Reg%Tr(m)%df2d_y))
+    !$ enddo
+
   else    ! following if not using neutral diffusion, but instead along-surface diffusion
 
     if (CS%show_call_tree) call callTree_waypoint("Calculating horizontal diffusion (tracer_hordiff)")
