@@ -802,6 +802,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                         ! streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: Sfn_unlim_u(niblock,njblock,SZK_(GV)+1) ! Volume streamfunction for u-points [Z L2 T-1 ~> m3 s-1]
   real :: Sfn_unlim_v(niblock,njblock,SZK_(GV)+1)  ! Volume streamfunction for v-points [Z L2 T-1 ~> m3 s-1]
+  real :: c2_dz_col(SZK_(GV)+1) ! A column of c2_dz_u or c2_dz_v, local to each iteration [L2 Z-1 T-2 ~> m s-2]
+  real :: dzN2_col(SZK_(GV)+1)  ! A column of dzN2_u or dzN2_v, local to each iteration [L2 Z-1 T-2 ~> m s-2]
+  real :: Sfn_col(SZK_(GV)+1)   ! A column of Sfn_unlim_u or Sfn_unlim_v, local to each iteration
+                                ! [Z L2 T-1 ~> m3 s-1]
   real :: slope2_Ratio_u(niblock,njblock,SZK_(GV)+1) ! The ratio of the slope squared to slope_max squared [nondim]
   real :: slope2_Ratio_v(niblock,njblock,SZK_(GV)+1)  ! The ratio of the slope squared to slope_max squared [nondim]
   real :: Sfn_in_h      ! The overturning streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] (note that
@@ -1212,14 +1216,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do concurrent (jj=1:jje, II=1:IIe) DO_LOCALITY(local(I,j))
+      ! The columns are copied into arrays that are local to each iteration, so that streamfn_solver
+      ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
+      do concurrent (jj=1:jje, II=1:IIe) DO_LOCALITY(local(I,j,c2_dz_col,dzN2_col,Sfn_col))
         j = jsb + jj - 1 ; I = IsbB + II - 1
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
             Sfn_unlim_u(II,jj,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(II,jj,K)
           enddo
-          ! unsure if this works on GPU due to non-contiguous memory access
-          call streamfn_solver(nz, c2_dz_u(II,jj,:), dzN2_u(II,jj,:), Sfn_unlim_u(II,jj,:))
+          do k=1,nz
+            c2_dz_col(k) = c2_dz_u(II,jj,k)
+          enddo
+          do K=1,nz+1
+            dzN2_col(K) = dzN2_u(II,jj,K) ; Sfn_col(K) = Sfn_unlim_u(II,jj,K)
+          enddo
+          call streamfn_solver(nz, c2_dz_col, dzN2_col, Sfn_col)
+          do K=1,nz+1
+            Sfn_unlim_u(II,jj,K) = Sfn_col(K)
+          enddo
         else
           do K=2,nz
             Sfn_unlim_u(II,jj,K) = 0.
@@ -1572,13 +1586,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,J))
+      ! The columns are copied into arrays that are local to each iteration, so that streamfn_solver
+      ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
+      do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,J,c2_dz_col,dzN2_col,Sfn_col))
         J = JsbB + JJ - 1 ; i = isb + ii - 1
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
             Sfn_unlim_v(ii,JJ,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(ii,JJ,K)
           enddo
-          call streamfn_solver(nz, c2_dz_v(ii,JJ,:), dzN2_v(ii,JJ,:), Sfn_unlim_v(ii,JJ,:))
+          do k=1,nz
+            c2_dz_col(k) = c2_dz_v(ii,JJ,k)
+          enddo
+          do K=1,nz+1
+            dzN2_col(K) = dzN2_v(ii,JJ,K) ; Sfn_col(K) = Sfn_unlim_v(ii,JJ,K)
+          enddo
+          call streamfn_solver(nz, c2_dz_col, dzN2_col, Sfn_col)
+          do K=1,nz+1
+            Sfn_unlim_v(ii,JJ,K) = Sfn_col(K)
+          enddo
         else
           do K=2,nz
             Sfn_unlim_v(ii,JJ,K) = 0.
