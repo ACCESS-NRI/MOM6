@@ -4719,6 +4719,10 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   if (allocated(sfc_state%melt_potential)) then
     ! leaving unported due to calculate_TFreeze
+    ! The host loop below reads h, which is only copied to the host at the end of a step when the
+    ! state is synchronized, but this routine is called after every step.  The temperature and
+    ! salinity are current on the host, and h_ML is only set on the host.
+    !$omp target update from(h)
     !$omp target update from(sfc_state%melt_potential)
     !$OMP parallel do default(shared) private(depth_ml, dh, T_freeze, depth, pres, delT)
     do j=js,je
