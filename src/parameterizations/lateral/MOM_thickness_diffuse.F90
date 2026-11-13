@@ -805,6 +805,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                         ! streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: Sfn_unlim_u(niblock,njblock,SZK_(GV)+1) ! Volume streamfunction for u-points [Z L2 T-1 ~> m3 s-1]
   real :: Sfn_unlim_v(niblock,njblock,SZK_(GV)+1)  ! Volume streamfunction for v-points [Z L2 T-1 ~> m3 s-1]
+  real :: c2_dz_col(SZK_(GV)+1) ! A column of c2_dz_u or c2_dz_v, local to each iteration [L2 Z-1 T-2 ~> m s-2]
+  real :: dzN2_col(SZK_(GV)+1)  ! A column of dzN2_u or dzN2_v, local to each iteration [L2 Z-1 T-2 ~> m s-2]
+  real :: Sfn_col(SZK_(GV)+1)   ! A column of Sfn_unlim_u or Sfn_unlim_v, local to each iteration
+                                ! [Z L2 T-1 ~> m3 s-1]
   real :: slope2_Ratio_u(niblock,njblock,SZK_(GV)+1) ! The ratio of the slope squared to slope_max squared [nondim]
   real :: slope2_Ratio_v(niblock,njblock,SZK_(GV)+1)  ! The ratio of the slope squared to slope_max squared [nondim]
   real :: Sfn_in_h      ! The overturning streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] (note that
@@ -890,9 +894,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   !$omp target enter data &
   !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
-  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, c2_dz_u, &
   !$omp     drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, T_u, S_u, &
-  !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
+  !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, c2_dz_v, &
   !$omp     drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, drdkDe_v) &
   !$omp   map(to: tv, tv%T, tv%S, meke)
   !$omp target enter data if(associated(tv%p_surf)) map(to: tv%p_surf)
@@ -1215,20 +1219,32 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do concurrent (jj=1:jje, II=1:IIe) DO_LOCALITY(local(I,j))
+      ! The columns are copied into arrays that are private to each iteration, so that streamfn_solver
+      ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
+      ! This is an OpenMP loop because do concurrent can not have local arrays with run-time sizes.
+      !$omp target teams loop collapse(2) private(I, j, k, c2_dz_col, dzN2_col, Sfn_col)
+      do jj=1,jje ; do II=1,IIe
         j = jsb + jj - 1 ; I = IsbB + II - 1
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
             Sfn_unlim_u(II,jj,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(II,jj,K)
           enddo
-          ! unsure if this works on GPU due to non-contiguous memory access
-          call streamfn_solver(nz, c2_dz_u(II,jj,:), dzN2_u(II,jj,:), Sfn_unlim_u(II,jj,:))
+          do k=1,nz
+            c2_dz_col(k) = c2_dz_u(II,jj,k)
+          enddo
+          do K=1,nz+1
+            dzN2_col(K) = dzN2_u(II,jj,K) ; Sfn_col(K) = Sfn_unlim_u(II,jj,K)
+          enddo
+          call streamfn_solver(nz, c2_dz_col, dzN2_col, Sfn_col)
+          do K=1,nz+1
+            Sfn_unlim_u(II,jj,K) = Sfn_col(K)
+          enddo
         else
           do K=2,nz
             Sfn_unlim_u(II,jj,K) = 0.
           enddo
         endif
-      enddo
+      enddo ; enddo
     endif
     do concurrent (jj=1:jje) DO_LOCALITY(local(j))
       j = jsb + jj - 1
@@ -1575,19 +1591,32 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,J))
+      ! The columns are copied into arrays that are private to each iteration, so that streamfn_solver
+      ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
+      ! This is an OpenMP loop because do concurrent can not have local arrays with run-time sizes.
+      !$omp target teams loop collapse(2) private(i, J, k, c2_dz_col, dzN2_col, Sfn_col)
+      do JJ=1,JJe ; do ii=1,iie
         J = JsbB + JJ - 1 ; i = isb + ii - 1
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
             Sfn_unlim_v(ii,JJ,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(ii,JJ,K)
           enddo
-          call streamfn_solver(nz, c2_dz_v(ii,JJ,:), dzN2_v(ii,JJ,:), Sfn_unlim_v(ii,JJ,:))
+          do k=1,nz
+            c2_dz_col(k) = c2_dz_v(ii,JJ,k)
+          enddo
+          do K=1,nz+1
+            dzN2_col(K) = dzN2_v(ii,JJ,K) ; Sfn_col(K) = Sfn_unlim_v(ii,JJ,K)
+          enddo
+          call streamfn_solver(nz, c2_dz_col, dzN2_col, Sfn_col)
+          do K=1,nz+1
+            Sfn_unlim_v(ii,JJ,K) = Sfn_col(K)
+          enddo
         else
           do K=2,nz
             Sfn_unlim_v(ii,JJ,K) = 0.
           enddo
         endif
-      enddo
+      enddo ; enddo
     endif
 
     do concurrent (JJ=1:JJe) DO_LOCALITY(local(J))
@@ -1837,8 +1866,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$omp target exit data &
   !$omp   map(release: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
   !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, &
-  !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, &
-  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
+  !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, c2_dz_u, &
+  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, c2_dz_v, &
   !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
   !$omp     drdkDe_v, tv, tv%T, tv%S, meke)
   !$omp target exit data if(associated(tv%p_surf)) map(release: tv%p_surf)
@@ -1849,20 +1878,26 @@ end subroutine thickness_diffuse_full
 !> Tridiagonal solver for streamfunction at interfaces
 pure subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   integer,               intent(in)    :: nk   !< Number of layers
-  real, dimension(nk),   intent(in)    :: c2_h !< Wave speed squared over thickness in layers, rescaled to
-                                               !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
+  real, dimension(nk),   intent(inout) :: c2_h !< Wave speed squared over thickness in layers, rescaled to
+                                               !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2].  On exit, c2_h(2:nk)
+                                               !! holds the dependence of the final streamfunction on the
+                                               !! values below it [nondim], and c2_h(1) is unchanged.
   real, dimension(nk+1), intent(in)    :: hN2  !< Thickness times N2 at interfaces times rescaling factors
                                                !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
   real, dimension(nk+1), intent(inout) :: sfn  !< Streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] or arbitrary units
                                                !! On entry, equals diffusivity times slope.
                                                !! On exit, equals the streamfunction.
   ! Local variables
-  real :: c1(nk)  ! The dependence of the final streamfunction on the values below [nondim]
+  real :: c1_km1  ! The dependence of the final streamfunction on the values below layer k-1 [nondim]
   real :: d1      ! The complement of c1(k) (i.e., 1 - c1(k)) [nondim]
   real :: b_denom ! A term in the denominator of beta [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
   real :: beta    ! The normalization for the pivot [Z2 T2 H-1 L-2 ~> s2 m-1 or m2 s2 kg-1]
   integer :: k
   !$omp declare target
+
+  ! The dependence of the final streamfunction on the values below layer k, c1(k), is stored in c2_h(k),
+  ! once c2_h(k) is no longer needed, instead of in an automatic array of size nk, which a thread on a GPU
+  ! would allocate on the device heap in every call.
 
   sfn(1) = 0.
   b_denom = hN2(2) + c2_h(1)
@@ -1870,16 +1905,17 @@ pure subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   d1 = beta * b_denom
   sfn(2) = ( beta * hN2(2) )*sfn(2)
   do K=3,nk
-    c1(k-1) = beta * c2_h(k-1)
+    c1_km1 = beta * c2_h(k-1)
     b_denom = hN2(K) + d1*c2_h(k-1)
     beta = 1.0 / (b_denom + c2_h(k))
     d1 = beta * b_denom
     sfn(K) = beta * (hN2(K)*sfn(K) + c2_h(k-1)*sfn(K-1))
+    c2_h(k-1) = c1_km1
   enddo
-  c1(nk) = beta * c2_h(nk)
+  c2_h(nk) = beta * c2_h(nk)
   sfn(nk+1) = 0.
   do K=nk,2,-1
-    sfn(K) = sfn(K) + c1(k)*sfn(K+1)
+    sfn(K) = sfn(K) + c2_h(k)*sfn(K+1)
   enddo
 
 end subroutine streamfn_solver
