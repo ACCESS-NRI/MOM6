@@ -120,7 +120,11 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
     # order and hence the answers. GPU device code was unaffected either
     # way in that test, but keep these ordered after -O for safety on the
     # host side regardless.
-    set(_mom6_offload_flags "-mp=gpu -stdpar=gpu -acc=gpu ${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
+    # -Mnofma and -mno-fma only apply to the host code ("-Mnonv-fma: disable NVIDIA generation of FMA
+    # instructions on the CPU"): the GPU code is controlled by -gpu=[no]fma, whose default at -O1 and above
+    # is to fuse multiply-adds.  Without -gpu=nofma, expressions such as a*b + c*d are rounded differently
+    # on the device from the host (the reference), e.g. in the wave speed and the equation of state.
+    set(_mom6_offload_flags "-mp=gpu -stdpar=gpu -acc=gpu ${_mom6_offload_gpu} -Mnofma -Mnovect -mno-fma -gpu=nofma -Minline=name:flux_elem,name:flux_elem_OBC,name:ratio_max")
     set(CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_Fortran_FLAGS_RELEASE} ${_mom6_offload_flags}")
     set(CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG} ${_mom6_offload_flags}")
     set(CMAKE_Fortran_FLAGS_RELWITHDEBINFO "${CMAKE_Fortran_FLAGS_RELWITHDEBINFO} ${_mom6_offload_flags}")
