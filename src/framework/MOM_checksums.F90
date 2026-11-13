@@ -207,11 +207,16 @@ subroutine zchksum(array, mesg, scale, logunit, unscale)
   integer :: bc0
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, dimension(:) :: array_dev ! Copy of the device data of array [A ~> a]
+  real, allocatable, dimension(:) :: array_host ! Copy of the host data of array [A ~> a]
 #endif
 
 #ifdef MOM6_GPU_OFFLOAD
   ! Checksum the data on the GPU, if there is any, rather than the host copy
   if (device_copy(array, array_dev, mesg, logunit)) then
+    ! The host copy is checksummed too, for every array on the GPU (the checksums involve all PEs)
+    allocate(array_host, source=array)
+    call zchksum(array_host, 'HOST-COPY '//mesg, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
     call zchksum(array_dev, mesg, scale=scale, logunit=logunit, unscale=unscale)
     return
   endif
@@ -410,6 +415,9 @@ subroutine chksum_pair_h_3d(mesg, arrayA, arrayB, HI, haloshift, omit_corners, &
 end subroutine chksum_pair_h_3d
 
 !> Checksums a 2d array staggered at tracer points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_h_2d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logunit, unscale)
   type(hor_index_type), target, intent(in) :: HI_m         !< Horizontal index bounds of the model grid
   real, dimension(HI_m%isd:,HI_m%jsd:), target, intent(in) :: array_m !< Field array on the model grid in
@@ -432,6 +440,7 @@ subroutine chksum_h_2d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logu
   real, pointer :: array(:,:)           ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:)  ! Subarray used to compute hash [a]
@@ -445,6 +454,19 @@ subroutine chksum_h_2d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logu
   logical :: do_corners
   integer :: turns                      ! Quarter turns from input to model grid
 
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_h_2d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -719,6 +741,9 @@ subroutine chksum_pair_B_3d(mesg, arrayA, arrayB, HI, haloshift, symmetric, &
 end subroutine chksum_pair_B_3d
 
 !> Checksums a 2d array staggered at corner points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_B_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type), target, intent(in) :: HI_m     !< A horizontal index type
@@ -745,6 +770,7 @@ subroutine chksum_B_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:)           ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:)  ! Subarray used to compute hash [a]
@@ -757,6 +783,19 @@ subroutine chksum_B_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_B_2d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -1044,6 +1083,9 @@ subroutine chksum_uv_3d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
 end subroutine chksum_uv_3d
 
 !> Checksums a 2d array staggered at C-grid u points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_u_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type),  target,   intent(in) :: HI_m      !< A horizontal index type
@@ -1069,6 +1111,7 @@ subroutine chksum_u_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:)           ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:)  ! Subarray used to compute hash [a]
@@ -1081,6 +1124,19 @@ subroutine chksum_u_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_u_2d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -1256,6 +1312,9 @@ subroutine chksum_u_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
 end subroutine chksum_u_2d
 
 !> Checksums a 2d array staggered at C-grid v points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_v_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type),  target,   intent(in) :: HI_m      !< A horizontal index type
@@ -1281,6 +1340,7 @@ subroutine chksum_v_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:)           ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:)  ! Subarray used to compute hash [a]
@@ -1293,6 +1353,19 @@ subroutine chksum_v_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_v_2d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -1468,6 +1541,9 @@ subroutine chksum_v_2d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
 end subroutine chksum_v_2d
 
 !> Checksums a 3d array staggered at tracer points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_h_3d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logunit, unscale)
   type(hor_index_type),    target,   intent(in) :: HI_m !< A horizontal index type
   real, dimension(HI_m%isd:,HI_m%jsd:,:), target, intent(in) :: array_m !< The array to be checksummed in
@@ -1490,6 +1566,7 @@ subroutine chksum_h_3d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logu
   real, pointer :: array(:,:,:)         ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:,:)  ! Subarray used to compute hash [a]
@@ -1502,6 +1579,19 @@ subroutine chksum_h_3d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logu
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_h_3d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -1649,6 +1739,9 @@ subroutine chksum_h_3d(array_m, mesg, HI_m, haloshift, omit_corners, scale, logu
 end subroutine chksum_h_3d
 
 !> Checksums a 3d array staggered at corner points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_B_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type),     target,   intent(in) :: HI_m !< A horizontal index type
@@ -1674,6 +1767,7 @@ subroutine chksum_B_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:,:)         ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:,:)  ! Subarray used to compute hash [a]
@@ -1686,6 +1780,19 @@ subroutine chksum_B_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_B_3d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -1853,6 +1960,9 @@ subroutine chksum_B_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
 end subroutine chksum_B_3d
 
 !> Checksums a 3d array staggered at C-grid u points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_u_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type),    target,   intent(in) :: HI_m !< A horizontal index type
@@ -1878,6 +1988,7 @@ subroutine chksum_u_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:,:)         ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:,:)  ! Subarray used to compute hash [a]
@@ -1890,6 +2001,19 @@ subroutine chksum_u_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_u_3d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -2065,6 +2189,9 @@ subroutine chksum_u_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
 end subroutine chksum_u_3d
 
 !> Checksums a 3d array staggered at C-grid v points.
+#ifdef MOM6_GPU_OFFLOAD
+recursive &
+#endif
 subroutine chksum_v_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, &
                        scale, logunit, unscale)
   type(hor_index_type),    target,   intent(in) :: HI_m      !< A horizontal index type
@@ -2090,6 +2217,7 @@ subroutine chksum_v_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real, pointer :: array(:,:,:)         ! Field array on the input grid [A ~> a]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, target :: array_dev(:,:,:) ! Copy of the device data of array_m [A ~> a]
+  real, allocatable :: array_host(:,:,:) ! Copy of the host data of array_m [A ~> a]
 #endif
   real, allocatable, dimension(:,:,:) :: rescaled_array ! The array with scaling undone [a]
   real, allocatable :: hash_array(:,:,:)  ! Subarray used to compute hash [a]
@@ -2102,6 +2230,19 @@ subroutine chksum_v_3d(array_m, mesg, HI_m, haloshift, symmetric, omit_corners, 
   real :: aMean, aMin, aMax  ! Array mean, global minimum and global maximum [a]
   logical :: do_corners, sym, sym_stats
   integer :: turns                      ! Quarter turns from input to model grid
+
+#ifdef MOM6_GPU_OFFLOAD
+  ! If the array is on the GPU, also checksum its host copy, as a copy that is not on the GPU,
+  ! under a label that starts with HOST-COPY.  The device data is checksummed below.
+  ! This is done for every array that is on the GPU, not only when the copies differ, because
+  ! the checksums involve all PEs.
+  if (acc_is_present(array_m)) then
+    allocate(array_host, source=array_m)
+    call chksum_v_3d(array_m=array_host, mesg='HOST-COPY '//mesg, HI_m=HI_m, haloshift=haloshift, &
+        symmetric=symmetric, omit_corners=omit_corners, scale=scale, logunit=logunit, unscale=unscale)
+    deallocate(array_host)
+  endif
+#endif
 
   ! Rotate array to the input grid
   turns = HI_m%turns
@@ -2301,11 +2442,16 @@ subroutine chksum1d(array, mesg, start_i, end_i, compare_PEs, logunit)
   integer :: nPEs     ! Total number of processsors
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, dimension(:) :: array_dev ! Copy of the device data of array [A ~> a]
+  real, allocatable, dimension(:) :: array_host ! Copy of the host data of array [A ~> a]
 #endif
 
 #ifdef MOM6_GPU_OFFLOAD
   ! Checksum the data on the GPU, if there is any, rather than the host copy
   if (device_copy(array, array_dev, mesg, logunit)) then
+    ! The host copy is checksummed too, for every array on the GPU (the checksums involve all PEs)
+    allocate(array_host, source=array)
+    call chksum1d(array_host, 'HOST-COPY '//mesg, start_i, end_i, compare_PEs, logunit)
+    deallocate(array_host)
     call chksum1d(array_dev, mesg, start_i, end_i, compare_PEs, logunit)
     return
   endif
@@ -2368,11 +2514,16 @@ subroutine chksum2d(array, mesg, logunit)
   real :: sum  ! The global sum of the array [A]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, dimension(:,:) :: array_dev ! Copy of the device data of array [A ~> a]
+  real, allocatable, dimension(:,:) :: array_host ! Copy of the host data of array [A ~> a]
 #endif
 
 #ifdef MOM6_GPU_OFFLOAD
   ! Checksum the data on the GPU, if there is any, rather than the host copy
   if (device_copy(array, array_dev, mesg, logunit)) then
+    ! The host copy is checksummed too, for every array on the GPU (the checksums involve all PEs)
+    allocate(array_host, source=array)
+    call chksum2d(array_host, 'HOST-COPY '//mesg, logunit)
+    deallocate(array_host)
     call chksum2d(array_dev, mesg, logunit)
     return
   endif
@@ -2413,11 +2564,16 @@ subroutine chksum3d(array, mesg, logunit)
   real :: sum  ! The global sum of the array [A]
 #ifdef MOM6_GPU_OFFLOAD
   real, allocatable, dimension(:,:,:) :: array_dev ! Copy of the device data of array [A ~> a]
+  real, allocatable, dimension(:,:,:) :: array_host ! Copy of the host data of array [A ~> a]
 #endif
 
 #ifdef MOM6_GPU_OFFLOAD
   ! Checksum the data on the GPU, if there is any, rather than the host copy
   if (device_copy(array, array_dev, mesg, logunit)) then
+    ! The host copy is checksummed too, for every array on the GPU (the checksums involve all PEs)
+    allocate(array_host, source=array)
+    call chksum3d(array_host, 'HOST-COPY '//mesg, logunit)
+    deallocate(array_host)
     call chksum3d(array_dev, mesg, logunit)
     return
   endif
