@@ -481,6 +481,10 @@ subroutine opacity_from_chl(optics, sw_total, sw_vis_dir, sw_vis_dif, sw_nir_dir
     end select
   enddo
 
+  ! This routine runs on the host, but absorbRemainingSW uses optics%opacity_band and optics%sw_pen_band
+  ! on the device, where they are only allocated, so copy the host values there.
+  !$omp target update to(optics%opacity_band, optics%sw_pen_band)
+
 end subroutine opacity_from_chl
 
 !> This sets the blue-wavelength opacity according to the scheme proposed by
