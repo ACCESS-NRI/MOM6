@@ -69,7 +69,7 @@ implicit none ; private
 #endif
 
 public btcalc, bt_mass_source, btstep, barotropic_init, barotropic_end
-public register_barotropic_restarts, set_dtbt, barotropic_get_tav
+public register_barotropic_restarts, set_dtbt, barotropic_get_tav, barotropic_restart_to_host
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -6717,6 +6717,15 @@ subroutine barotropic_get_tav(CS, ubtav, vbtav, G, US)
   enddo ; enddo
 
 end subroutine barotropic_get_tav
+
+!> Copy the barotropic restart variables, which are set on the device, to the host copies, which
+!! are what is written to the restart file.
+subroutine barotropic_restart_to_host(CS)
+  type(barotropic_CS), intent(inout) :: CS    !< Barotropic control structure
+
+  ! ubtav and vbtav are only set on the device (see btstep), and the host arrays are not used otherwise.
+  !$omp target update from(CS%ubtav, CS%vbtav)
+end subroutine barotropic_restart_to_host
 
 
 !> Clean up the barotropic control structure.

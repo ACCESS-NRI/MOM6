@@ -83,7 +83,7 @@ use MOM_dynamics_unsplit,      only : MOM_dyn_unsplit_CS
 use MOM_dynamics_split_RK2,    only : step_MOM_dyn_split_RK2, register_restarts_dyn_split_RK2
 use MOM_dynamics_split_RK2,    only : initialize_dyn_split_RK2, end_dyn_split_RK2
 use MOM_dynamics_split_RK2,    only : MOM_dyn_split_RK2_CS, remap_dyn_split_rk2_aux_vars
-use MOM_dynamics_split_RK2,    only : init_dyn_split_RK2_diabatic
+use MOM_dynamics_split_RK2,    only : init_dyn_split_RK2_diabatic, dyn_split_RK2_restart_to_host
 use MOM_dynamics_split_RK2b,   only : step_MOM_dyn_split_RK2b, register_restarts_dyn_split_RK2b
 use MOM_dynamics_split_RK2b,   only : initialize_dyn_split_RK2b, end_dyn_split_RK2b
 use MOM_dynamics_split_RK2b,   only : MOM_dyn_split_RK2b_CS, remap_dyn_split_RK2b_aux_vars
@@ -115,6 +115,7 @@ use MOM_MEKE,                  only : MEKE_alloc_register_restart, step_forward_
 use MOM_MEKE,                  only : MEKE_CS, MEKE_init, MEKE_end
 use MOM_MEKE_types,            only : MEKE_type
 use MOM_mixed_layer_restrat,   only : mixedlayer_restrat, mixedlayer_restrat_init, mixedlayer_restrat_CS
+use MOM_mixed_layer_restrat,   only : mixedlayer_restrat_restart_to_host
 use MOM_mixed_layer_restrat,   only : mixedlayer_restrat_register_restarts
 use MOM_obsolete_diagnostics,  only : register_obsolete_diagnostics
 use MOM_open_boundary,         only : ocean_OBC_type, open_boundary_end
@@ -706,7 +707,21 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call set_derived_forcing_fields(forces, fluxes, G, US, GV%Rho0)
     endif
   endif
-  !$omp target enter data map(to: forces, forces%taux, forces%tauy, forces%ustar)
+  ! Map the mechanical forces that the device regions in the routines called from here read, with their
+  ! current values on the host.  They are released at the end of this routine, so that the next call
+  ! (the forces are set again by the driver for each coupling step) maps them again.
+  ! taux, tauy: btstep, vertvisc, set_viscous_ML; ustar, tau_mag: find_ustar, called by several routines;
+  ! rigidity_ice_[uv]: the dynamic surface pressure in btstep; frac_shelf_[uv]: vertvisc_coef, set_viscous_ML.
+  ! The surface pressure is mapped by the routines that read it, and around the halo update below.
+  !$omp target enter data map(to: forces)
+  !$omp target enter data map(to: forces%taux) if (associated(forces%taux))
+  !$omp target enter data map(to: forces%tauy) if (associated(forces%tauy))
+  !$omp target enter data map(to: forces%ustar) if (associated(forces%ustar))
+  !$omp target enter data map(to: forces%tau_mag) if (associated(forces%tau_mag))
+  !$omp target enter data map(to: forces%rigidity_ice_u) if (associated(forces%rigidity_ice_u))
+  !$omp target enter data map(to: forces%rigidity_ice_v) if (associated(forces%rigidity_ice_v))
+  !$omp target enter data map(to: forces%frac_shelf_u) if (associated(forces%frac_shelf_u))
+  !$omp target enter data map(to: forces%frac_shelf_v) if (associated(forces%frac_shelf_v))
 
   ! This will be replaced later with the pressures from forces or fluxes if they are available.
   if (associated(CS%tv%p_surf)) CS%tv%p_surf(:,:) = 0.0
@@ -776,7 +791,17 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     if (nonblocking_p_surf_update) then
       call start_group_pass(pass_tau_ustar_psurf, G%Domain)
     else
+      ! The halo update is done on the device (omp_offload), and its tripolar fold is done there without
+      ! any map clauses, so all of the fields in the group must be on the device, including p_surf.
+      !$omp target enter data map(to: forces%p_surf) if (associated(forces%p_surf))
       call do_group_pass(pass_tau_ustar_psurf, G%Domain, omp_offload=.true.)
+      ! Only the device copies have the new halos, but the host copies are used when these fields are
+      ! mapped again (the next call, or by the routines that map p_surf), and by the host code.
+      !$omp target update from(forces%taux) if (associated(forces%taux))
+      !$omp target update from(forces%tauy) if (associated(forces%tauy))
+      !$omp target update from(forces%ustar) if (associated(forces%ustar))
+      !$omp target update from(forces%tau_mag) if (associated(forces%tau_mag))
+      !$omp target exit data map(from: forces%p_surf) if (associated(forces%p_surf))
     endif
     call cpu_clock_end(id_clock_pass)
 
@@ -1171,12 +1196,19 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call HA_accum('ssh', ssh, Time_local, G, CS%HA_CSp)
     endif
 
+    ! adjust_ssh_for_p_atm is done on the host, but ave_ssh_ibc was just set on the device, and
+    ! extract_surface_state sets sea_lev from the device copy.  So the host copy is brought up to
+    ! date first, and the adjusted values are copied back (tv%T and p_atm are current on the host).
     if (do_dyn) then
+      !$omp target update from(CS%ave_ssh_ibc) if (associated(forces%p_surf_SSH))
       call adjust_ssh_for_p_atm(CS%tv, G, GV, US, CS%ave_ssh_ibc, forces%p_surf_SSH, &
                                 CS%calc_rho_for_sea_lev)
+      !$omp target update to(CS%ave_ssh_ibc) if (associated(forces%p_surf_SSH))
     elseif (do_thermo) then
+      !$omp target update from(CS%ave_ssh_ibc) if (associated(fluxes%p_surf_SSH))
       call adjust_ssh_for_p_atm(CS%tv, G, GV, US, CS%ave_ssh_ibc, fluxes%p_surf_SSH, &
                                 CS%calc_rho_for_sea_lev)
+      !$omp target update to(CS%ave_ssh_ibc) if (associated(fluxes%p_surf_SSH))
     endif
     !$omp target exit data map(delete: ssh)
   endif
@@ -1256,6 +1288,17 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
                       dt_forcing=real_to_time(time_interval, unscale=US%T_to_s) )
   endif
   call cpu_clock_end(id_clock_other)
+
+  ! Release the device copies of the forces (they are not changed on the device).
+  !$omp target exit data map(release: forces%frac_shelf_v) if (associated(forces%frac_shelf_v))
+  !$omp target exit data map(release: forces%frac_shelf_u) if (associated(forces%frac_shelf_u))
+  !$omp target exit data map(release: forces%rigidity_ice_v) if (associated(forces%rigidity_ice_v))
+  !$omp target exit data map(release: forces%rigidity_ice_u) if (associated(forces%rigidity_ice_u))
+  !$omp target exit data map(release: forces%tau_mag) if (associated(forces%tau_mag))
+  !$omp target exit data map(release: forces%ustar) if (associated(forces%ustar))
+  !$omp target exit data map(release: forces%tauy) if (associated(forces%tauy))
+  !$omp target exit data map(release: forces%taux) if (associated(forces%taux))
+  !$omp target exit data map(release: forces)
 
   ! De-rotate fluxes and copy back to the input, since they can be changed.
   if (CS%rotate_index) then
@@ -3367,7 +3410,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   CS%n_dyn_steps_in_adv = 0
 
   allocate(CS%ADp)
-  !$omp target enter data map(alloc: CS%ADp)
+  !$omp target enter data map(to: CS%ADp)
 
   if (debug_truncations) then
     allocate(CS%u_prev(IsdB:IedB,jsd:jed,nz), source=0.0)
@@ -3822,6 +3865,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (associated(CS%tv%p_surf)) call pass_var(CS%tv%p_surf, G%Domain, halo=dynamics_stencil)
   call cpu_clock_end(id_clock_pass_init)
 
+  !   The state variables are final on the host here, whether they were read from a restart file or
+  ! initialized above, so copy them to the device, where they were mapped before they were set.
+  ! Otherwise a run from a restart file kept the device's initial u, v and h until the end of the
+  ! initialization (a new run updates h on the device below, before finding ave_ssh_ibc), and
+  ! extract_surface_state, which is called before that, copied those device values of h to the host.
+  !$omp target update to(CS%u, CS%v, CS%h)
+
   ! Update derived thermodynamic quantities.
   if (allocated(CS%tv%SpV_avg)) then
     call calc_derived_thermo(CS%tv, CS%h, G, GV, US, halo=dynamics_stencil, debug=CS%debug)
@@ -4159,6 +4209,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     !$omp target update from(CS%ave_ssh_ibc)
     call set_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)
   endif
+  ! ave_ssh_ibc was mapped before the restart file was read: copy the host values to the device.
+  !$omp target update to(CS%ave_ssh_ibc)
   if (CS%split) deallocate(eta)
 
   CS%nstep_tot = 0
@@ -4742,6 +4794,10 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   if (allocated(sfc_state%melt_potential)) then
     ! leaving unported due to calculate_TFreeze
+    ! The host loop below reads h, which is only copied to the host at the end of a step when the
+    ! state is synchronized, but this routine is called after every step.  The temperature and
+    ! salinity are current on the host, and h_ML is only set on the host.
+    !$omp target update from(h)
     !$omp target update from(sfc_state%melt_potential)
     !$OMP parallel do default(shared) private(depth_ml, dh, T_freeze, depth, pres, delT)
     do j=js,je
@@ -5090,6 +5146,16 @@ subroutine save_MOM_restart(CS, directory, time, G, time_stamped, filename, &
   showCallTree = callTree_showQuery()
 
   call cpu_clock_begin(id_clock_ocean) ; call cpu_clock_begin(id_clock_save_restart)
+
+  ! The restart file is written from the host copies of the restart variables.  Temp, Salt, h, u, v and
+  ! frazil are current on the host at the end of a step (step_MOM, the diabatic driver, the tracer
+  ! advection), and the visc, MEKE and p_surf_EOS arrays are only set on the host.  The ones below
+  ! are set on the device, so they are copied here (not at every step, as the host copies are not
+  ! otherwise used, apart from diagnostics that update them).
+  !$omp target update from(CS%ave_ssh_ibc)
+  if (CS%split .and. .not.CS%use_alt_split) call dyn_split_RK2_restart_to_host(CS%dyn_split_RK2_CSp)
+  if (CS%mixedlayer_restrat) call mixedlayer_restrat_restart_to_host(CS%mixedlayer_restrat_CSp)
+
   if (showCallTree) call callTree_waypoint("About to call save_restart (step_MOM)")
   call save_restart(directory, time, G, CS%restart_CS, &
       time_stamped=time_stamped, filename=filename, GV=GV, &

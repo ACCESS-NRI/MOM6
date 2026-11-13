@@ -310,6 +310,8 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
   ! that this defines to exist already.
   call coupler_bcs_init(OS%coupler_bcs_CSp)
 
+  ! As in the solo driver, the control structure is mapped to the GPU before it is initialized.
+  !$omp target enter data map(alloc: OS%MOM_CSp)
   call initialize_MOM(OS%Time, Time_init, param_file, OS%dirs, OS%MOM_CSp, &
                       Time_in, offline_tracer_mode=OS%offline_tracer_mode, &
                       input_restart_file=input_restart_file, &
@@ -432,6 +434,8 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
                                 use_meltpot=use_melt_pot, use_iceshelves=OS%use_ice_shelf, &
                                 use_MARBL_tracers=OS%use_MARBL)
   endif
+  ! The surface state is allocated here, so extract_surface_state does not map it to the GPU.
+  call map_surface_state_to_device(OS%sfc_state)
 
   call surface_forcing_init(Time_in, OS%grid, OS%US, param_file, OS%diag, &
                             OS%forcing_CSp, OS%restore_salinity, OS%restore_temp, OS%use_waves)
@@ -471,6 +475,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
                                 Ocean_sfc%axes(1:2), Time_in)
 
     call extract_surface_state(OS%MOM_CSp, OS%sfc_state)
+    call update_surface_state_on_host(OS%sfc_state)
 
     if (OS%use_ice_shelf .and. allocated(OS%sfc_state%frazil)) &
       call adjust_ice_sheet_frazil(OS%sfc_state, OS%fluxes, OS%Ice_shelf_CSp)
@@ -481,6 +486,7 @@ subroutine ocean_model_init(Ocean_sfc, OS, Time_init, Time_in, input_restart_fil
   endif
 
   call extract_surface_state(OS%MOM_CSp, OS%sfc_state)
+  call update_surface_state_on_host(OS%sfc_state)
 
   if (OS%use_ice_shelf .and. allocated(OS%sfc_state%frazil)) &
     call adjust_ice_sheet_frazil(OS%sfc_state, OS%fluxes, OS%Ice_shelf_CSp)
@@ -747,6 +753,11 @@ subroutine update_ocean_model(Ice_ocean_boundary, OS, Ocean_sfc, &
     enddo
   endif
 
+  ! Every call to step_MOM ends with extract_surface_state, which sets the surface state on the GPU.
+  ! The host copy is used below (forcing_diagnostics, adjust_ice_sheet_frazil, convert_state_to_ocean_type)
+  ! and by the next call to convert_IOB_to_fluxes (salinity restoring).
+  call update_surface_state_on_host(OS%sfc_state)
+
   OS%Time = Master_time + Ocean_coupling_time_step
   OS%nstep = OS%nstep + 1
 
@@ -870,9 +881,80 @@ subroutine ocean_model_end(Ocean_sfc, Ocean_state, Time, write_restart)
   if (write_restart) call ocean_model_save_restart(Ocean_state, Time)
   call diag_mediator_end(Time, Ocean_state%diag, end_diag_manager=.true.)
   call MOM_end(Ocean_state%MOM_CSp)
+  !$omp target exit data map(delete: Ocean_state%MOM_CSp)
+  call unmap_surface_state_from_device(Ocean_state%sfc_state)
   if (Ocean_state%use_ice_shelf) call ice_shelf_end(Ocean_state%Ice_shelf_CSp)
   call coupler_bcs_end(Ocean_state%coupler_bcs_CSp)
 end subroutine ocean_model_end
+
+!> Map the arrays of the surface state to the GPU, with the values they have on the host.
+!! This is the mapping that extract_surface_state does for a surface state that it allocates itself.
+subroutine map_surface_state_to_device(sfc_state)
+  type(surface), intent(inout) :: sfc_state !< The surface state, whose arrays have been allocated
+
+  !$omp target enter data map(to: sfc_state)
+  !$omp target enter data if(allocated(sfc_state%sea_lev)) map(to: sfc_state%sea_lev)
+  !$omp target enter data if(allocated(sfc_state%Hml)) map(to: sfc_state%Hml)
+  !$omp target enter data if(allocated(sfc_state%u)) map(to: sfc_state%u)
+  !$omp target enter data if(allocated(sfc_state%v)) map(to: sfc_state%v)
+  !$omp target enter data if(allocated(sfc_state%SSS)) map(to: sfc_state%SSS)
+  !$omp target enter data if(allocated(sfc_state%SST)) map(to: sfc_state%SST)
+  !$omp target enter data if(allocated(sfc_state%sfc_density)) map(to: sfc_state%sfc_density)
+  !$omp target enter data if(allocated(sfc_state%frazil)) map(to: sfc_state%frazil)
+  !$omp target enter data if(allocated(sfc_state%melt_potential)) map(to: sfc_state%melt_potential)
+  !$omp target enter data if(allocated(sfc_state%ocean_mass)) map(to: sfc_state%ocean_mass)
+  !$omp target enter data if(allocated(sfc_state%ocean_heat)) map(to: sfc_state%ocean_heat)
+  !$omp target enter data if(allocated(sfc_state%ocean_salt)) map(to: sfc_state%ocean_salt)
+  !$omp target enter data if(allocated(sfc_state%taux_shelf)) map(to: sfc_state%taux_shelf)
+  !$omp target enter data if(allocated(sfc_state%tauy_shelf)) map(to: sfc_state%tauy_shelf)
+  !$omp target enter data if(allocated(sfc_state%fco2)) map(to: sfc_state%fco2)
+end subroutine map_surface_state_to_device
+
+!> Make the host copy of the surface state current after extract_surface_state, which sets it on
+!! the GPU.  The host copy is used by this cap (convert_state_to_ocean_type, which exports it to the
+!! mediator), by the salinity and temperature restoring in mom_surface_forcing_nuopc, by
+!! forcing_diagnostics and by the ice shelf frazil adjustment.
+subroutine update_surface_state_on_host(sfc_state)
+  type(surface), intent(inout) :: sfc_state !< The surface state
+
+  ! melt_potential is not here: extract_surface_state sets it on the host, and then updates the GPU.
+  ! fco2 is not here: it is only set on the host (by the MARBL tracers), never on the GPU.
+  !$omp target update if(allocated(sfc_state%sea_lev)) from(sfc_state%sea_lev)
+  !$omp target update if(allocated(sfc_state%Hml)) from(sfc_state%Hml)
+  !$omp target update if(allocated(sfc_state%u)) from(sfc_state%u)
+  !$omp target update if(allocated(sfc_state%v)) from(sfc_state%v)
+  !$omp target update if(allocated(sfc_state%SSS)) from(sfc_state%SSS)
+  !$omp target update if(allocated(sfc_state%SST)) from(sfc_state%SST)
+  !$omp target update if(allocated(sfc_state%sfc_density)) from(sfc_state%sfc_density)
+  !$omp target update if(allocated(sfc_state%frazil)) from(sfc_state%frazil)
+  !$omp target update if(allocated(sfc_state%ocean_mass)) from(sfc_state%ocean_mass)
+  !$omp target update if(allocated(sfc_state%ocean_heat)) from(sfc_state%ocean_heat)
+  !$omp target update if(allocated(sfc_state%ocean_salt)) from(sfc_state%ocean_salt)
+  !$omp target update if(allocated(sfc_state%taux_shelf)) from(sfc_state%taux_shelf)
+  !$omp target update if(allocated(sfc_state%tauy_shelf)) from(sfc_state%tauy_shelf)
+end subroutine update_surface_state_on_host
+
+!> Remove the arrays of the surface state from the GPU, without copying them back.
+subroutine unmap_surface_state_from_device(sfc_state)
+  type(surface), intent(inout) :: sfc_state !< The surface state
+
+  !$omp target exit data if(allocated(sfc_state%sea_lev)) map(delete: sfc_state%sea_lev)
+  !$omp target exit data if(allocated(sfc_state%Hml)) map(delete: sfc_state%Hml)
+  !$omp target exit data if(allocated(sfc_state%u)) map(delete: sfc_state%u)
+  !$omp target exit data if(allocated(sfc_state%v)) map(delete: sfc_state%v)
+  !$omp target exit data if(allocated(sfc_state%SSS)) map(delete: sfc_state%SSS)
+  !$omp target exit data if(allocated(sfc_state%SST)) map(delete: sfc_state%SST)
+  !$omp target exit data if(allocated(sfc_state%sfc_density)) map(delete: sfc_state%sfc_density)
+  !$omp target exit data if(allocated(sfc_state%frazil)) map(delete: sfc_state%frazil)
+  !$omp target exit data if(allocated(sfc_state%melt_potential)) map(delete: sfc_state%melt_potential)
+  !$omp target exit data if(allocated(sfc_state%ocean_mass)) map(delete: sfc_state%ocean_mass)
+  !$omp target exit data if(allocated(sfc_state%ocean_heat)) map(delete: sfc_state%ocean_heat)
+  !$omp target exit data if(allocated(sfc_state%ocean_salt)) map(delete: sfc_state%ocean_salt)
+  !$omp target exit data if(allocated(sfc_state%taux_shelf)) map(delete: sfc_state%taux_shelf)
+  !$omp target exit data if(allocated(sfc_state%tauy_shelf)) map(delete: sfc_state%tauy_shelf)
+  !$omp target exit data if(allocated(sfc_state%fco2)) map(delete: sfc_state%fco2)
+  !$omp target exit data map(delete: sfc_state)
+end subroutine unmap_surface_state_from_device
 
 !> ocean_model_save_restart causes restart files associated with the ocean to be
 !! written out.
@@ -1096,6 +1178,7 @@ subroutine ocean_model_init_sfc(OS, Ocean_sfc)
                           (/is,is,ie,ie/), (/js,js,je,je/), as_needed=.true.)
 
   call extract_surface_state(OS%MOM_CSp, OS%sfc_state)
+  call update_surface_state_on_host(OS%sfc_state)
 
   if (OS%use_ice_shelf .and. allocated(OS%sfc_state%frazil)) &
     call adjust_ice_sheet_frazil(OS%sfc_state, OS%fluxes, OS%Ice_shelf_CSp)
