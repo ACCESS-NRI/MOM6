@@ -347,6 +347,11 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     enddo ; enddo ; enddo
   endif
 
+  ! The structure functions used on the device (the others are only used on the host) were just set
+  ! on the host, where their sources, ebt_struct and sqg_struct, are.
+  !$omp target update to(CS%khth_struct) if (allocated(CS%khth_struct))
+  !$omp target update to(CS%kdgl90_struct) if (allocated(CS%kdgl90_struct))
+
   ! Calculate and store the ratio between deformation radius and grid-spacing
   ! at h-points [nondim].
   if (CS%calculate_rd_dx) then
@@ -2189,6 +2194,8 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
 
   if (CS%khth_use_ebt_struct .or. CS%khth_use_sqg_struct) then
     allocate(CS%khth_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
+    ! thickness_diffuse reads it on the device; it is set on the host in calc_resoln_function.
+    !$omp target enter data map(to: CS%khth_struct)
     CS%id_khth_struct = register_diag_field('ocean_model', 'khth_struct', diag%axesTl, Time, &
             'Vertical structure of thickness diffusivity', 'nondim')
   endif
@@ -2201,6 +2208,8 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
 
   if (CS%kdgl90_use_ebt_struct .or. CS%kdgl90_use_sqg_struct) then
     allocate(CS%kdgl90_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
+    ! find_coupling_coef_gl90 reads it on the device; it is set on the host in calc_resoln_function.
+    !$omp target enter data map(to: CS%kdgl90_struct)
     CS%id_kdgl90_struct = register_diag_field('ocean_model', 'kdgl90_struct', diag%axesTl, Time, &
             'Vertical structure of GL90 diffusivity', 'nondim')
   endif
@@ -2393,6 +2402,8 @@ subroutine VarMix_end(CS)
   !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v) &
   !$omp&   if (allocated(CS%Res_fn_h))
   !$omp target exit data map(delete: CS%SN_u, CS%SN_v) if (allocated(CS%SN_u))
+  !$omp target exit data map(delete: CS%khth_struct) if (allocated(CS%khth_struct))
+  !$omp target exit data map(delete: CS%kdgl90_struct) if (allocated(CS%kdgl90_struct))
 
   !$omp target exit data map(delete: CS%f2_dx2_h, CS%beta_dx2_h) if (allocated(CS%f2_dx2_h))
   !$omp target exit data map(delete: CS%f2_dx2_q, CS%beta_dx2_q, &
