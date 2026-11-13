@@ -753,7 +753,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
-  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  do j=js,je ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
@@ -1232,8 +1232,8 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   real :: b_denom_1
     ! The first term in the denominator of b1 [H ~> m or kg m-2].
 
-  integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
-  is = G%isc ; ie = G%iec
+  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remnant): "// &
@@ -1243,7 +1243,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
-  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  do j=js,je ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 

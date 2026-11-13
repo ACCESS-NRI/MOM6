@@ -1552,7 +1552,7 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                            intent(inout) :: Q_b  !< Scalar at the bottom edge of each layer [A]
   ! Local variables
-  integer :: i, j, k
+  integer :: i, j, k, is, ie, js, je
   real :: slp_km1    ! Tracer slope times the cell width in layer k-1 [A]
   real :: slp_k      ! Tracer slope times the cell width in layer k [A]
   real :: slp_kp1    ! Tracer slope times the cell width in layer k+1 [A]
@@ -1566,6 +1566,7 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
   else
     h_neglect = GV%kg_m2_to_H*1.0e-30
   endif
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
 #ifdef __NVCOMPILER_OPENMP_GPU
   ! saw a bug on V100s running into illegal memory accesses, bind(parallel, teams) is used here
@@ -1578,7 +1579,7 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
 #else
   !$omp target teams loop collapse(2) private(slp_km1, slp_k, slp_kp1, mslp, k)
 #endif
-  do j = G%jsc-1,G%jec+1 ; do i = G%isc-1,G%iec+1
+  do j = js-1,je+1 ; do i = is-1,ie+1
     ! The slopes in layers k-1, k and k+1 are kept in scalars, rather than in an array of the slopes
     ! in a column, which on a GPU is a private array of run-time size that nvfortran allocates in
     ! device memory for every thread that it might launch (several GB for large domains).  The
