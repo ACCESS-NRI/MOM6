@@ -586,7 +586,11 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Double-diffusion (old method)
     if (CS%double_diffusion) then
-      !$omp target update from(Kd_lay_2d)
+      ! double_diffusion runs on the host.  T_f and S_f are set on the device (vert_fill_TS) and are only
+      ! allocated on the host, as is Kd_lay_2d, which is increased below.  The host copy of h is current
+      ! (diabatic copies it to the device before this) and the host copy of tv%p_surf is the source of the
+      ! device copy.
+      !$omp target update from(Kd_lay_2d, T_f, S_f)
       call double_diffusion(tv, h, T_f, S_f, isb, ieb, jsb, jeb, nii, njj, G, GV, US, CS, KT_extra, KS_extra)
       ! One of Kd_extra_T and Kd_extra_S is always 0. Kd_extra_S is positive for salt fingering.
       ! Kd_extra_T is positive for double diffusive convection.
