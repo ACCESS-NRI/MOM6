@@ -42,7 +42,7 @@ use MOM_time_manager,      only : operator(-), operator(>), operator(*), operato
 use MOM_ALE,                   only : ALE_CS, ALE_remap_velocities
 use MOM_barotropic,            only : barotropic_init, btstep, btcalc, bt_mass_source
 use MOM_barotropic,            only : register_barotropic_restarts, set_dtbt, barotropic_CS
-use MOM_barotropic,            only : barotropic_end
+use MOM_barotropic,            only : barotropic_end, barotropic_restart_to_host
 use MOM_boundary_update,       only : update_OBC_data, update_OBC_CS
 use MOM_continuity,            only : continuity, continuity_CS
 use MOM_continuity,            only : continuity_init, continuity_stencil
@@ -286,6 +286,7 @@ public initialize_dyn_split_RK2
 public remap_dyn_split_RK2_aux_vars
 public init_dyn_split_RK2_diabatic
 public end_dyn_split_RK2
+public dyn_split_RK2_restart_to_host
 
 !>@{ CPU time clock IDs
 integer :: id_clock_Cor, id_clock_pres, id_clock_vertvisc
@@ -1321,6 +1322,18 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (showCallTree) call callTree_leave("step_MOM_dyn_split_RK2()")
 
 end subroutine step_MOM_dyn_split_RK2
+
+!> Copy the restart variables of the split-explicit time stepping scheme, which are set on the device,
+!! to the host copies, which are what is written to the restart file.
+subroutine dyn_split_RK2_restart_to_host(CS)
+  type(MOM_dyn_split_RK2_CS), intent(inout) :: CS  !< module control structure
+
+  ! These arrays are only set on the device (in step_MOM_dyn_split_RK2, apart from copies for debugging),
+  ! and the host arrays are not used otherwise.
+  !$omp target update from(CS%eta, CS%u_av, CS%v_av, CS%diffu, CS%diffv)
+  !$omp target update from(CS%CAu_pred, CS%CAv_pred) if (CS%store_CAu)
+  call barotropic_restart_to_host(CS%barotropic_CSp)
+end subroutine dyn_split_RK2_restart_to_host
 
 !> This subroutine sets up any auxiliary restart variables that are specific
 !! to the split-explicit time stepping scheme.  All variables registered here should

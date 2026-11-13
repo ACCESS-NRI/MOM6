@@ -83,7 +83,7 @@ use MOM_dynamics_unsplit,      only : MOM_dyn_unsplit_CS
 use MOM_dynamics_split_RK2,    only : step_MOM_dyn_split_RK2, register_restarts_dyn_split_RK2
 use MOM_dynamics_split_RK2,    only : initialize_dyn_split_RK2, end_dyn_split_RK2
 use MOM_dynamics_split_RK2,    only : MOM_dyn_split_RK2_CS, remap_dyn_split_rk2_aux_vars
-use MOM_dynamics_split_RK2,    only : init_dyn_split_RK2_diabatic
+use MOM_dynamics_split_RK2,    only : init_dyn_split_RK2_diabatic, dyn_split_RK2_restart_to_host
 use MOM_dynamics_split_RK2b,   only : step_MOM_dyn_split_RK2b, register_restarts_dyn_split_RK2b
 use MOM_dynamics_split_RK2b,   only : initialize_dyn_split_RK2b, end_dyn_split_RK2b
 use MOM_dynamics_split_RK2b,   only : MOM_dyn_split_RK2b_CS, remap_dyn_split_RK2b_aux_vars
@@ -115,6 +115,7 @@ use MOM_MEKE,                  only : MEKE_alloc_register_restart, step_forward_
 use MOM_MEKE,                  only : MEKE_CS, MEKE_init, MEKE_end
 use MOM_MEKE_types,            only : MEKE_type
 use MOM_mixed_layer_restrat,   only : mixedlayer_restrat, mixedlayer_restrat_init, mixedlayer_restrat_CS
+use MOM_mixed_layer_restrat,   only : mixedlayer_restrat_restart_to_host
 use MOM_mixed_layer_restrat,   only : mixedlayer_restrat_register_restarts
 use MOM_obsolete_diagnostics,  only : register_obsolete_diagnostics
 use MOM_open_boundary,         only : ocean_OBC_type, open_boundary_end
@@ -5065,6 +5066,16 @@ subroutine save_MOM_restart(CS, directory, time, G, time_stamped, filename, &
   showCallTree = callTree_showQuery()
 
   call cpu_clock_begin(id_clock_ocean) ; call cpu_clock_begin(id_clock_save_restart)
+
+  ! The restart file is written from the host copies of the restart variables.  Temp, Salt, h, u, v and
+  ! frazil are current on the host at the end of a step (step_MOM, the diabatic driver, the tracer
+  ! advection), and the visc, MEKE and p_surf_EOS arrays are only set on the host.  The ones below
+  ! are set on the device, so they are copied here (not at every step, as the host copies are not
+  ! otherwise used, apart from diagnostics that update them).
+  !$omp target update from(CS%ave_ssh_ibc)
+  if (CS%split .and. .not.CS%use_alt_split) call dyn_split_RK2_restart_to_host(CS%dyn_split_RK2_CSp)
+  if (CS%mixedlayer_restrat) call mixedlayer_restrat_restart_to_host(CS%mixedlayer_restrat_CSp)
+
   if (showCallTree) call callTree_waypoint("About to call save_restart (step_MOM)")
   call save_restart(directory, time, G, CS%restart_CS, &
       time_stamped=time_stamped, filename=filename, GV=GV, &

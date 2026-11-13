@@ -46,6 +46,7 @@ integer, parameter :: default_niblock = 0 !< Default i block size for the mixed 
 public mixedlayer_restrat
 public mixedlayer_restrat_init
 public mixedlayer_restrat_register_restarts
+public mixedlayer_restrat_restart_to_host
 public mixedlayer_restrat_unit_tests
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
@@ -2205,6 +2206,15 @@ logical function mixedlayer_restrat_init(Time, G, GV, US, param_file, diag, CS, 
   !$omp   if(CS%use_Bodner)
 
 end function mixedlayer_restrat_init
+
+!> Copy the restart variables of the Bodner et al. scheme, which are set on the device, to the host
+!! copies, which are what is written to the restart file.
+subroutine mixedlayer_restrat_restart_to_host(CS)
+  type(mixedlayer_restrat_CS), intent(inout) :: CS !< Module control structure
+
+  ! These arrays are only set on the device (mixedlayer_restrat_Bodner), apart from copies for debugging.
+  !$omp target update from(CS%MLD_filtered, CS%MLD_filtered_slow, CS%wpup_filtered) if (CS%use_Bodner)
+end subroutine mixedlayer_restrat_restart_to_host
 
 !> Allocate and register fields in the mixed layer restratification structure for restarts
 subroutine mixedlayer_restrat_register_restarts(HI, GV, US, param_file, CS, restart_CS)
