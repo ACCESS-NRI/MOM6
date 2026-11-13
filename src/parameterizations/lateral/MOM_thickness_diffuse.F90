@@ -891,9 +891,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   !$omp target enter data &
   !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
-  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, c2_dz_u, &
   !$omp     drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, T_u, S_u, &
-  !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
+  !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, c2_dz_v, &
   !$omp     drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, drdkDe_v) &
   !$omp   map(to: tv, tv%T, tv%S, meke)
   !$omp target enter data if(associated(tv%p_surf)) map(to: tv%p_surf)
@@ -1216,9 +1216,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      ! The columns are copied into arrays that are local to each iteration, so that streamfn_solver
+      ! The columns are copied into arrays that are private to each iteration, so that streamfn_solver
       ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
-      do concurrent (jj=1:jje, II=1:IIe) DO_LOCALITY(local(I,j,c2_dz_col,dzN2_col,Sfn_col))
+      ! This is an OpenMP loop because do concurrent can not have local arrays with run-time sizes.
+      !$omp target teams loop collapse(2) private(I, j, k, c2_dz_col, dzN2_col, Sfn_col)
+      do jj=1,jje ; do II=1,IIe
         j = jsb + jj - 1 ; I = IsbB + II - 1
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
@@ -1239,7 +1241,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             Sfn_unlim_u(II,jj,K) = 0.
           enddo
         endif
-      enddo
+      enddo ; enddo
     endif
     do concurrent (jj=1:jje) DO_LOCALITY(local(j))
       j = jsb + jj - 1
@@ -1586,9 +1588,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      ! The columns are copied into arrays that are local to each iteration, so that streamfn_solver
+      ! The columns are copied into arrays that are private to each iteration, so that streamfn_solver
       ! is not passed strided array sections, which need temporary copies (on the device heap on a GPU).
-      do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,J,c2_dz_col,dzN2_col,Sfn_col))
+      ! This is an OpenMP loop because do concurrent can not have local arrays with run-time sizes.
+      !$omp target teams loop collapse(2) private(i, J, k, c2_dz_col, dzN2_col, Sfn_col)
+      do JJ=1,JJe ; do ii=1,iie
         J = JsbB + JJ - 1 ; i = isb + ii - 1
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
@@ -1609,7 +1613,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             Sfn_unlim_v(ii,JJ,K) = 0.
           enddo
         endif
-      enddo
+      enddo ; enddo
     endif
 
     do concurrent (JJ=1:JJe) DO_LOCALITY(local(J))
@@ -1859,8 +1863,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$omp target exit data &
   !$omp   map(release: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
   !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, &
-  !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, &
-  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
+  !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, c2_dz_u, &
+  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, c2_dz_v, &
   !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
   !$omp     drdkDe_v, tv, tv%T, tv%S, meke)
   !$omp target exit data if(associated(tv%p_surf)) map(release: tv%p_surf)
