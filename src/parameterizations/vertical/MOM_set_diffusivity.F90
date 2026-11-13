@@ -1115,6 +1115,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
     do concurrent (jj=1:jje, ii=1:iie)
       kb(ii,jj) = -1 ! kb should not be used by any code in non-layered mode -AJA
     enddo
+    !$omp target exit data map(release: htot, mFkb, p_ref, Rcv_kmb, p_0, do_i, ds_dsp1, dsp1_ds, &
+    !$omp   rho_0, maxEnt)
     return
   endif
 
