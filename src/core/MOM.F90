@@ -1191,12 +1191,19 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call HA_accum('ssh', ssh, Time_local, G, CS%HA_CSp)
     endif
 
+    ! adjust_ssh_for_p_atm is done on the host, but ave_ssh_ibc was just set on the device, and
+    ! extract_surface_state sets sea_lev from the device copy.  So the host copy is brought up to
+    ! date first, and the adjusted values are copied back (tv%T and p_atm are current on the host).
     if (do_dyn) then
+      !$omp target update from(CS%ave_ssh_ibc) if (associated(forces%p_surf_SSH))
       call adjust_ssh_for_p_atm(CS%tv, G, GV, US, CS%ave_ssh_ibc, forces%p_surf_SSH, &
                                 CS%calc_rho_for_sea_lev)
+      !$omp target update to(CS%ave_ssh_ibc) if (associated(forces%p_surf_SSH))
     elseif (do_thermo) then
+      !$omp target update from(CS%ave_ssh_ibc) if (associated(fluxes%p_surf_SSH))
       call adjust_ssh_for_p_atm(CS%tv, G, GV, US, CS%ave_ssh_ibc, fluxes%p_surf_SSH, &
                                 CS%calc_rho_for_sea_lev)
+      !$omp target update to(CS%ave_ssh_ibc) if (associated(fluxes%p_surf_SSH))
     endif
     !$omp target exit data map(delete: ssh)
   endif
