@@ -702,7 +702,21 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call set_derived_forcing_fields(forces, fluxes, G, US, GV%Rho0)
     endif
   endif
-  !$omp target enter data map(to: forces, forces%taux, forces%tauy, forces%ustar)
+  ! Map the mechanical forces that the device regions in the routines called from here read, with their
+  ! current values on the host.  They are released at the end of this routine, so that the next call
+  ! (the forces are set again by the driver for each coupling step) maps them again.
+  ! taux, tauy: btstep, vertvisc, set_viscous_ML; ustar, tau_mag: find_ustar, called by several routines;
+  ! rigidity_ice_[uv]: the dynamic surface pressure in btstep; frac_shelf_[uv]: vertvisc_coef, set_viscous_ML.
+  ! The surface pressure is mapped by the routines that read it, and around the halo update below.
+  !$omp target enter data map(to: forces)
+  !$omp target enter data map(to: forces%taux) if (associated(forces%taux))
+  !$omp target enter data map(to: forces%tauy) if (associated(forces%tauy))
+  !$omp target enter data map(to: forces%ustar) if (associated(forces%ustar))
+  !$omp target enter data map(to: forces%tau_mag) if (associated(forces%tau_mag))
+  !$omp target enter data map(to: forces%rigidity_ice_u) if (associated(forces%rigidity_ice_u))
+  !$omp target enter data map(to: forces%rigidity_ice_v) if (associated(forces%rigidity_ice_v))
+  !$omp target enter data map(to: forces%frac_shelf_u) if (associated(forces%frac_shelf_u))
+  !$omp target enter data map(to: forces%frac_shelf_v) if (associated(forces%frac_shelf_v))
 
   ! This will be replaced later with the pressures from forces or fluxes if they are available.
   if (associated(CS%tv%p_surf)) CS%tv%p_surf(:,:) = 0.0
@@ -772,7 +786,17 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     if (nonblocking_p_surf_update) then
       call start_group_pass(pass_tau_ustar_psurf, G%Domain)
     else
+      ! The halo update is done on the device (omp_offload), and its tripolar fold is done there without
+      ! any map clauses, so all of the fields in the group must be on the device, including p_surf.
+      !$omp target enter data map(to: forces%p_surf) if (associated(forces%p_surf))
       call do_group_pass(pass_tau_ustar_psurf, G%Domain, omp_offload=.true.)
+      ! Only the device copies have the new halos, but the host copies are used when these fields are
+      ! mapped again (the next call, or by the routines that map p_surf), and by the host code.
+      !$omp target update from(forces%taux) if (associated(forces%taux))
+      !$omp target update from(forces%tauy) if (associated(forces%tauy))
+      !$omp target update from(forces%ustar) if (associated(forces%ustar))
+      !$omp target update from(forces%tau_mag) if (associated(forces%tau_mag))
+      !$omp target exit data map(from: forces%p_surf) if (associated(forces%p_surf))
     endif
     call cpu_clock_end(id_clock_pass)
 
@@ -1252,6 +1276,17 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
                       dt_forcing=real_to_time(time_interval, unscale=US%T_to_s) )
   endif
   call cpu_clock_end(id_clock_other)
+
+  ! Release the device copies of the forces (they are not changed on the device).
+  !$omp target exit data map(release: forces%frac_shelf_v) if (associated(forces%frac_shelf_v))
+  !$omp target exit data map(release: forces%frac_shelf_u) if (associated(forces%frac_shelf_u))
+  !$omp target exit data map(release: forces%rigidity_ice_v) if (associated(forces%rigidity_ice_v))
+  !$omp target exit data map(release: forces%rigidity_ice_u) if (associated(forces%rigidity_ice_u))
+  !$omp target exit data map(release: forces%tau_mag) if (associated(forces%tau_mag))
+  !$omp target exit data map(release: forces%ustar) if (associated(forces%ustar))
+  !$omp target exit data map(release: forces%tauy) if (associated(forces%tauy))
+  !$omp target exit data map(release: forces%taux) if (associated(forces%taux))
+  !$omp target exit data map(release: forces)
 
   ! De-rotate fluxes and copy back to the input, since they can be changed.
   if (CS%rotate_index) then
