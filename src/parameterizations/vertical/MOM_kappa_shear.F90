@@ -136,7 +136,7 @@ end type Kappa_shear_CS
 !! column routines declare local arrays with this extent, rather than with the
 !! active vertical extent, to avoid runtime-sized device automatic allocations.
 !! Checked against GV%ke in kappa_shear_init.
-integer, parameter :: fixed_col_extent = 128
+integer, parameter :: fixed_col_extent = 75
 
 ! TODO: Generalize this condition to support other GPU compilers.
 #ifdef __NVCOMPILER_OPENMP_GPU
