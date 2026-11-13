@@ -305,6 +305,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                            ! horizontal area of a velocity cell [Z ~> m].
   real :: L(SZK_(GV)+1)    ! The fraction of the full cell width that is open at
                            ! the depth of each interface [nondim].
+  real, allocatable :: L_chan(:,:,:) ! L for every velocity point for the current m, which is found on
+                           ! the host [nondim].
   ! The next 9 variables are only used for debugging.
   real :: L_trig(SZK_(GV)+1) ! The fraction of the full cell width that is open at
                            ! the depth of each interface from trigonometric expressions [nondim].
@@ -508,6 +510,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
   !$omp   dz_at_vel)
+  if (CS%Channel_drag) then
+    allocate(L_chan(G%isdB:G%iedB,G%jsdB:G%jedB,nz+1))
+    !$omp target enter data map(alloc: L_chan)
+  endif
 
   do m=1,2
     if (m==1) then
@@ -808,6 +814,94 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, EOSdom)
     endif
 
+    ! Find the fraction of the full cell width that is open at each interface for channel drag.  This
+    ! uses trigonometric functions (find_L_open_concave_trigonometric) and a real power (find_L_open_convex,
+    ! unless SET_VISC_ANSWER_DATE >= 20260704), which are not bit-identical on the CPU and the GPU, so it
+    ! is done on the host.  Its inputs dz_vel, do_i, D_u and D_v are set on the device (D_u and D_v are
+    ! only changed on the host at OBC points, above, and then copied to the device), and the result is
+    ! copied to the device for the loop below.
+    if (CS%Channel_drag) then
+      !$omp target update from(dz_vel, do_i, D_u, D_v)
+      do j=jstart,jeq ; do i=is,ie ; if (do_i(i,j)) then
+        vol_below(nz+1) = 0.0
+        do K=nz,1,-1
+          vol_below(K) = vol_below(K+1) + dz_vel(i,j,k)
+        enddo
+
+        ! Find the bathymetry at adjacent points relative to the shelf break.  For now this
+        ! shelf break depth is set with a global constant, but it could vary in space.
+        if (m==1) then
+          D_vel = D_u(I,j) - CS%channel_break_depth
+          D_vel_p = G%mask2dCu(I,j+1) * (D_u(I,j+1) - CS%channel_break_depth)
+          D_vel_m = G%mask2dCu(I,j-1) * (D_u(I,j-1) - CS%channel_break_depth)
+        else
+          D_vel = D_v(i,J) - CS%channel_break_depth
+          D_vel_p = G%mask2dCv(i+1,J) * (D_v(i+1,J) - CS%channel_break_depth)
+          D_vel_m = G%mask2dCv(i-1,J) * (D_v(i-1,J) - CS%channel_break_depth)
+        endif
+        ! This profile uses a harmonic mean bottom depth below some reference value to
+        ! roughly mimic the topographic shape at and beneath a continental shelf break.
+        ! Above this a simple arithmetic mean is used.
+        if ((D_vel > 0.0) .and. (D_vel_p > 0.0)) then
+          Dp = 2.0 * D_vel * D_vel_p / (D_vel + D_vel_p)
+        else  ! This is above the shelf-break, noting that D is positive downward.
+          Dp = 0.5 * (min(D_vel, 0.0) + min(D_vel_p, 0.0))
+        endif
+        if ((D_vel > 0.0) .and. (D_vel_m > 0.0)) then
+          Dm = 2.0 * D_vel * D_vel_m / (D_vel + D_vel_m)
+        else  ! This is above the shelf-break, noting that D is positive downward.
+          Dm = 0.5 * (min(D_vel, 0.0) + min(D_vel_m, 0.0))
+        endif
+        if (Dm > Dp) then ; tmp = Dp ; Dp = Dm ; Dm = tmp ; endif
+        crv = 3.0*(Dp + Dm - 2.0*D_vel)
+        slope = Dp - Dm
+
+        ! If the curvature is small enough, there is no reason not to assume
+        ! a uniformly sloping or flat bottom.
+        if (abs(crv) < 1e-2*(slope + CS%BBL_thick_min)) crv = 0.0
+
+        ! Determine the normalized open length (L) at each interface.
+        if (crv == 0.0) then
+          call find_L_open_uniform_slope(vol_below, Dp, Dm, L, GV)
+        elseif (crv > 0.0) then
+          if (CS%concave_trigonometric_L) then
+            call find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, GV)
+          else
+            call find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
+            if (CS%debug) then
+              ! The tests in this block reveal that the iterative and trigonometric solutions are
+              ! mathematically equivalent, but in some cases the iterative solution is consistent
+              ! at roundoff, but that the trigonmetric solutions have errors that can be several
+              ! orders of magnitude larger in some cases.
+              call find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L_trig, GV)
+              call test_L_open_concave(vol_below, D_vel, Dp, Dm, L_trig, vol_err_trig, GV)
+              call test_L_open_concave(vol_below, D_vel, Dp, Dm, L, vol_err_iter, GV)
+              max_dL_trig_itt = 0.0 ; max_norm_err_trig = 0.0 ; max_norm_err_iter = 0.0
+              norm_err_trig(:) = 0.0 ; norm_err_iter(:) = 0.0
+              do K=1,nz+1
+                dL_trig_itt(K) = L_trig(K) - L(K)
+                if (abs(dL_trig_itt(K)) > abs(max_dL_trig_itt)) max_dL_trig_itt = dL_trig_itt(K)
+                norm_err_trig(K) = vol_err_trig(K) / (vol_below(K) + dz_neglect)
+                norm_err_iter(K) = vol_err_iter(K) / (vol_below(K) + dz_neglect)
+                if (abs(norm_err_trig(K)) > abs(max_norm_err_trig)) max_norm_err_trig = norm_err_trig(K)
+                if (abs(norm_err_iter(K)) > abs(max_norm_err_iter)) max_norm_err_iter = norm_err_iter(K)
+              enddo
+              if (abs(max_dL_trig_itt) > 1.0e-13) &
+                K = nz+1   ! This is here only to use as a break point for a debugger.
+              if (abs(max_norm_err_trig) > 1.0e-13) &
+                K = nz+1   ! This is here only to use as a break point for a debugger.
+              if (abs(max_norm_err_iter) > 1.0e-13) &
+                K = nz+1   ! This is here only to use as a break point for a debugger.
+            endif
+          endif
+        else ! crv < 0.0
+          call find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
+        endif ! end of crv<0 cases.
+        do K=1,nz+1 ; L_chan(i,j,K) = L(K) ; enddo
+      endif ; enddo ; enddo
+      !$omp target update to(L_chan)
+    endif
+
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
     !    ( f h / Cn u* )^2 + ( N h / Ci u* ) = 1
     ! where Cn=0.5 and Ci=20 (constants suggested by Zilitinkevich and Mironov, 1996).
@@ -1000,75 +1094,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           vol_below(K) = vol_below(K+1) + dz_vel(i,j,k)
         enddo
 
-        ! Find the bathymetry at adjacent points relative to the shelf break.  For now this
-        ! shelf break depth is set with a global constant, but it could vary in space.
-        if (m==1) then
-          D_vel = D_u(I,j) - CS%channel_break_depth
-          D_vel_p = G%mask2dCu(I,j+1) * (D_u(I,j+1) - CS%channel_break_depth)
-          D_vel_m = G%mask2dCu(I,j-1) * (D_u(I,j-1) - CS%channel_break_depth)
-        else
-          D_vel = D_v(i,J) - CS%channel_break_depth
-          D_vel_p = G%mask2dCv(i+1,J) * (D_v(i+1,J) - CS%channel_break_depth)
-          D_vel_m = G%mask2dCv(i-1,J) * (D_v(i-1,J) - CS%channel_break_depth)
-        endif
-        ! This profile uses a harmonic mean bottom depth below some reference value to
-        ! roughly mimic the topographic shape at and beneath a continental shelf break.
-        ! Above this a simple arithmetic mean is used.
-        if ((D_vel > 0.0) .and. (D_vel_p > 0.0)) then
-          Dp = 2.0 * D_vel * D_vel_p / (D_vel + D_vel_p)
-        else  ! This is above the shelf-break, noting that D is positive downward.
-          Dp = 0.5 * (min(D_vel, 0.0) + min(D_vel_p, 0.0))
-        endif
-        if ((D_vel > 0.0) .and. (D_vel_m > 0.0)) then
-          Dm = 2.0 * D_vel * D_vel_m / (D_vel + D_vel_m)
-        else  ! This is above the shelf-break, noting that D is positive downward.
-          Dm = 0.5 * (min(D_vel, 0.0) + min(D_vel_m, 0.0))
-        endif
-        if (Dm > Dp) then ; tmp = Dp ; Dp = Dm ; Dm = tmp ; endif
-        crv = 3.0*(Dp + Dm - 2.0*D_vel)
-        slope = Dp - Dm
-
-        ! If the curvature is small enough, there is no reason not to assume
-        ! a uniformly sloping or flat bottom.
-        if (abs(crv) < 1e-2*(slope + CS%BBL_thick_min)) crv = 0.0
-
-        ! Determine the normalized open length (L) at each interface.
-        if (crv == 0.0) then
-          call find_L_open_uniform_slope(vol_below, Dp, Dm, L, GV)
-        elseif (crv > 0.0) then
-          if (CS%concave_trigonometric_L) then
-            call find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, GV)
-          else
-            call find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
-            if (CS%debug) then
-              ! The tests in this block reveal that the iterative and trigonometric solutions are
-              ! mathematically equivalent, but in some cases the iterative solution is consistent
-              ! at roundoff, but that the trigonmetric solutions have errors that can be several
-              ! orders of magnitude larger in some cases.
-              call find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L_trig, GV)
-              call test_L_open_concave(vol_below, D_vel, Dp, Dm, L_trig, vol_err_trig, GV)
-              call test_L_open_concave(vol_below, D_vel, Dp, Dm, L, vol_err_iter, GV)
-              max_dL_trig_itt = 0.0 ; max_norm_err_trig = 0.0 ; max_norm_err_iter = 0.0
-              norm_err_trig(:) = 0.0 ; norm_err_iter(:) = 0.0
-              do K=1,nz+1
-                dL_trig_itt(K) = L_trig(K) - L(K)
-                if (abs(dL_trig_itt(K)) > abs(max_dL_trig_itt)) max_dL_trig_itt = dL_trig_itt(K)
-                norm_err_trig(K) = vol_err_trig(K) / (vol_below(K) + dz_neglect)
-                norm_err_iter(K) = vol_err_iter(K) / (vol_below(K) + dz_neglect)
-                if (abs(norm_err_trig(K)) > abs(max_norm_err_trig)) max_norm_err_trig = norm_err_trig(K)
-                if (abs(norm_err_iter(K)) > abs(max_norm_err_iter)) max_norm_err_iter = norm_err_iter(K)
-              enddo
-              if (abs(max_dL_trig_itt) > 1.0e-13) &
-                K = nz+1   ! This is here only to use as a break point for a debugger.
-              if (abs(max_norm_err_trig) > 1.0e-13) &
-                K = nz+1   ! This is here only to use as a break point for a debugger.
-              if (abs(max_norm_err_iter) > 1.0e-13) &
-                K = nz+1   ! This is here only to use as a break point for a debugger.
-            endif
-          endif
-        else ! crv < 0.0
-          call find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
-        endif ! end of crv<0 cases.
+        ! L was found on the host, before this loop, because of the trigonometric functions and the
+        ! real power that it uses for some bottom shapes.
+        do K=1,nz+1 ; L(K) = L_chan(i,j,K) ; enddo
 
         ! Determine the Rayleigh drag contributions.
 
@@ -1209,6 +1237,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       endif
     endif ; enddo ; enddo ! end of i & j loops
   enddo ! end of m loop
+
+  if (CS%Channel_drag) then
+    !$omp target exit data map(delete: L_chan)
+    deallocate(L_chan)
+  endif
 
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &

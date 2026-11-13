@@ -788,7 +788,13 @@ pure real function mu(sigma, dh)
   ! -0.5    < sigma           : dd(sigma)=1      (upper half of mixed layer)
   ! -1.0+dh < sigma < -0.5    : dd(sigma)=cubic  (lower half +dh of mixed layer)
   !           sigma < -1.0+dh : dd(sigma)=0      (below mixed layer + dh)
-  dd = (max(1. - xp**2 * (3. - 2.*xp), 0.))**(1. + 2.*dh)
+  if (dh == 0.) then
+    ! The power below is exactly 1 when dh = 0, so it is skipped: on the GPU, x**1. differs from x
+    ! in the last bit for some arguments, while the host returns x exactly.
+    dd = max(1. - xp**2 * (3. - 2.*xp), 0.)
+  else
+    dd = (max(1. - xp**2 * (3. - 2.*xp), 0.))**(1. + 2.*dh)
+  endif
 
   ! -0.5    < sigma           : bottop(sigma)=0  (upper half of mixed layer)
   !           sigma < -0.5    : bottop(sigma)=1  (below upper half)
@@ -1016,6 +1022,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   enddo
 
   ! Estimate w'u' at h-points, with a floor to avoid division by zero later.
+  !   All variants of this estimate are evaluated on the host: nvfortran computes the integer power
+  ! U_star_2d**3 on the host with a library routine that is more precise than the repeated
+  ! multiplication it uses on the GPU, so the two differ in the last bit.  U_star_2d was set on the
+  ! device by find_ustar, while bflux and BLD are host arrays that were only copied to the device.
+  ! The host copy of U_star_2d is also used for the lf_bodner diagnostic below.
+  !$omp target update from(U_star_2d)
   if (allocated(tv%SpV_avg) .and. .not.(GV%Boussinesq .or. GV%semi_Boussinesq)) then
     do j=js-1,je+1 ; do i=is-1,ie+1
       ! This expression differs by a factor of 1. / (Rho_0 * SpV_avg) compared with the other
@@ -1032,7 +1044,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
                 ! bflux (such as SpV_avg**-2/3 combining with other terms in bflux to give the thermal
                 ! expansion coefficient) and because the specific volume does vary within the mixed layer.
     enddo ; enddo
-    !$omp target update to(wpup)
   elseif (CS%answer_date < 20240201) then
     Z3_T3_to_m3_s3 = (US%Z_to_m * US%s_to_T)**3
     m2_s2_to_Z2_T2 = (US%m_to_Z * US%T_to_s)**2
@@ -1042,14 +1053,14 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       wpup(i,j) = max(m2_s2_to_Z2_T2 * (Z3_T3_to_m3_s3 * ( CS%mstar * u_star3 + CS%nstar * w_star3 ) )**two_thirds, &
           CS%min_wstar2) * US%Z_to_L * GV%Z_to_H ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
     enddo ; enddo
-    !$omp target update to(wpup)
   else
-    do concurrent (j=js-1:je+1, i=is-1:ie+1) DO_LOCALITY(local(w_star3))
+    do j=js-1,je+1 ; do i=is-1,ie+1
       w_star3 = max(0., -bflux(i,j)) * BLD(i,j)    ! In [Z3 T-3 ~> m3 s-3]
       wpup(i,j) = max( (cuberoot(CS%mstar * U_star_2d(i,j)**3 + CS%nstar * w_star3))**2, CS%min_wstar2 ) &
           * US%Z_to_L * GV%Z_to_H ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
-    enddo
+    enddo ; enddo
   endif
+  !$omp target update to(wpup)
 
   ! We filter w'u' with the same time scales used for "little h"
   do concurrent (j=js-1:je+1, i=is-1:ie+1)

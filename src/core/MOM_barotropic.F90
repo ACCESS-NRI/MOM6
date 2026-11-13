@@ -1613,18 +1613,22 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
          ((nstep * av_rem_v(i,J)) / (1.0 + (nstep-1)*av_rem_v(i,J)))
     enddo
   else
-    ! `av_rem**Instep` lowers to `exp(Instep*log(av_rem))` which is not bit-identical
-    ! CPU <-> GPU when offloaded by stdpar. Use deterministic Newton nth_root instead.
-    do concurrent (j=js:je, I=is-1:ie)
+    ! av_rem**Instep has a real exponent, which is a call to pow that is not bit-identical between the
+    ! CPU and the GPU, so these loops run on the host.  av_rem_[uv] was set on the device above, and
+    ! bt_rem_[uv] is only set at its computational points here, so the device values of the rest are
+    ! brought to the host and the whole arrays are copied back.
+    !$omp target update from(av_rem_u, av_rem_v, bt_rem_u, bt_rem_v)
+    do j=js,je ; do I=is-1,ie
       bt_rem_u(I,j) = 0.0
       if (G%mask2dCu(I,j) * av_rem_u(I,j) > 0.0) &
-        bt_rem_u(I,j) = G%mask2dCu(I,j) * (av_rem_u(I,j)**Instep) !nth_root(av_rem_u(I,j), nstep)
-    enddo
-    do concurrent (J=js-1:je, i=is:ie)
+        bt_rem_u(I,j) = G%mask2dCu(I,j) * (av_rem_u(I,j)**Instep)
+    enddo ; enddo
+    do J=js-1,je ; do i=is,ie
       bt_rem_v(i,J) = 0.0
       if (G%mask2dCv(i,J) * av_rem_v(i,J) > 0.0) &
-        bt_rem_v(i,J) = G%mask2dCv(i,J) * (av_rem_v(i,J)**Instep) !nth_root(av_rem_v(i,J), nstep)
-    enddo
+        bt_rem_v(i,J) = G%mask2dCv(i,J) * (av_rem_v(i,J)**Instep)
+    enddo ; enddo
+    !$omp target update to(bt_rem_u, bt_rem_v)
   endif
 
   if (CS%linear_wave_drag) then
