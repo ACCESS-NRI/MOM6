@@ -1875,20 +1875,26 @@ end subroutine thickness_diffuse_full
 !> Tridiagonal solver for streamfunction at interfaces
 pure subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   integer,               intent(in)    :: nk   !< Number of layers
-  real, dimension(nk),   intent(in)    :: c2_h !< Wave speed squared over thickness in layers, rescaled to
-                                               !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
+  real, dimension(nk),   intent(inout) :: c2_h !< Wave speed squared over thickness in layers, rescaled to
+                                               !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2].  On exit, c2_h(2:nk)
+                                               !! holds the dependence of the final streamfunction on the
+                                               !! values below it [nondim], and c2_h(1) is unchanged.
   real, dimension(nk+1), intent(in)    :: hN2  !< Thickness times N2 at interfaces times rescaling factors
                                                !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
   real, dimension(nk+1), intent(inout) :: sfn  !< Streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] or arbitrary units
                                                !! On entry, equals diffusivity times slope.
                                                !! On exit, equals the streamfunction.
   ! Local variables
-  real :: c1(nk)  ! The dependence of the final streamfunction on the values below [nondim]
+  real :: c1_km1  ! The dependence of the final streamfunction on the values below layer k-1 [nondim]
   real :: d1      ! The complement of c1(k) (i.e., 1 - c1(k)) [nondim]
   real :: b_denom ! A term in the denominator of beta [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
   real :: beta    ! The normalization for the pivot [Z2 T2 H-1 L-2 ~> s2 m-1 or m2 s2 kg-1]
   integer :: k
   !$omp declare target
+
+  ! The dependence of the final streamfunction on the values below layer k, c1(k), is stored in c2_h(k),
+  ! once c2_h(k) is no longer needed, instead of in an automatic array of size nk, which a thread on a GPU
+  ! would allocate on the device heap in every call.
 
   sfn(1) = 0.
   b_denom = hN2(2) + c2_h(1)
@@ -1896,16 +1902,17 @@ pure subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   d1 = beta * b_denom
   sfn(2) = ( beta * hN2(2) )*sfn(2)
   do K=3,nk
-    c1(k-1) = beta * c2_h(k-1)
+    c1_km1 = beta * c2_h(k-1)
     b_denom = hN2(K) + d1*c2_h(k-1)
     beta = 1.0 / (b_denom + c2_h(k))
     d1 = beta * b_denom
     sfn(K) = beta * (hN2(K)*sfn(K) + c2_h(k-1)*sfn(K-1))
+    c2_h(k-1) = c1_km1
   enddo
-  c1(nk) = beta * c2_h(nk)
+  c2_h(nk) = beta * c2_h(nk)
   sfn(nk+1) = 0.
   do K=nk,2,-1
-    sfn(K) = sfn(K) + c1(k)*sfn(K+1)
+    sfn(K) = sfn(K) + c2_h(k)*sfn(K+1)
   enddo
 
 end subroutine streamfn_solver
