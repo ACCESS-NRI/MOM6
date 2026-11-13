@@ -703,11 +703,16 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Add the Nikurashin and / or tidal bottom-driven mixing
     if (CS%use_tidal_mixing) then
-      !$omp target update from(Kd_lay_2d, Kd_int_2d)
+      ! calculate_tidal_mixing runs on the host.  Its inputs N2_bot, rho_bot, N2_lay, N2_int, TKE_to_Kd and
+      ! maxTKE are set on the device and only allocated on the host, as are the diffusivities that it
+      ! increases and the slow viscosity that the CVMix version of it changes.  dz is copied above.
+      !$omp target update from(Kd_lay_2d, Kd_int_2d, N2_bot, rho_bot, N2_lay, N2_int, TKE_to_Kd, maxTKE)
+      !$omp target update from(visc%Kv_slow) if (associated(visc%Kv_slow))
       call calculate_tidal_mixing(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, rho_bot, N2_lay, N2_int, &
                                   TKE_to_Kd, maxTKE, G, GV, US, CS%tidal_mixing, &
                                   CS%Kd_max, visc%Kv_slow, Kd_lay_2d, Kd_int_2d, VBF)
       !$omp target update to(Kd_lay_2d, Kd_int_2d)
+      !$omp target update to(visc%Kv_slow) if (associated(visc%Kv_slow))
     endif
 
     ! Add diffusivity from internal tides ray tracing
