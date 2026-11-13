@@ -3600,8 +3600,10 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
   !$omp target enter data map(to: visc%Kv_shear_Bu) &
   !$omp   if (associated(visc%Kv_shear_Bu))
 
-  ! These will be used in set_diffusivity, so map them now at initialization.
-  !$omp target enter data map(alloc: visc%Kd_shear) &
+  ! These will be used in set_diffusivity, so map them now at initialization.  Kd_shear is a restart
+  ! variable, and calculate_kappa_shear uses its previous values, so it must have the values that
+  ! were read from the restart file.
+  !$omp target enter data map(to: visc%Kd_shear) &
   !$omp   if (associated(visc%Kd_shear))
   !$omp target enter data map(alloc: visc%TKE_turb) &
   !$omp   if (associated(visc%TKE_turb))

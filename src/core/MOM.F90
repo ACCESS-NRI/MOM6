@@ -4175,6 +4175,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     !$omp target update from(CS%ave_ssh_ibc)
     call set_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)
   endif
+  ! ave_ssh_ibc was mapped before the restart file was read: copy the host values to the device.
+  !$omp target update to(CS%ave_ssh_ibc)
   if (CS%split) deallocate(eta)
 
   CS%nstep_tot = 0

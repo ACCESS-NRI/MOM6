@@ -2043,6 +2043,12 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
       'm s-2', conversion=US%L_T2_to_m_s2)
   if (CS%id_v_BT_accel_visc_rem > 0) call safe_alloc_ptr(CS%ADp%visc_rem_v,isd,ied,JsdB,JedB,nz)
 
+  ! These restart variables were mapped to the device when they were registered, before the restart
+  ! file was read, so the device copies have the initial values (zero).  The host copies are final
+  ! here, whether they were read, or set above, so copy them to the device.
+  !$omp target update to(CS%eta, CS%u_av, CS%v_av, CS%diffu, CS%diffv)
+  !$omp target update to(CS%CAu_pred, CS%CAv_pred) if (CS%store_CAu)
+
   id_clock_Cor        = cpu_clock_id('(Ocean Coriolis & mom advection)', grain=CLOCK_MODULE)
   id_clock_continuity = cpu_clock_id('(Ocean continuity equation)',      grain=CLOCK_MODULE)
   id_clock_pres       = cpu_clock_id('(Ocean pressure force)',           grain=CLOCK_MODULE)
