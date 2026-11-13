@@ -1553,7 +1553,9 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
                            intent(inout) :: Q_b  !< Scalar at the bottom edge of each layer [A]
   ! Local variables
   integer :: i, j, k
-  real :: slp(GV%ke) ! Tracer slope times the cell width [A]
+  real :: slp_km1    ! Tracer slope times the cell width in layer k-1 [A]
+  real :: slp_k      ! Tracer slope times the cell width in layer k [A]
+  real :: slp_kp1    ! Tracer slope times the cell width in layer k+1 [A]
   real :: mslp       ! Monotonized tracer slope times the cell width [A]
   real :: h_neglect  ! Tiny thicknesses used in remapping [H ~> m or kg m-2]
 
@@ -1572,20 +1574,29 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
   ! This gets run with team sizes of 1 because the functions aren't visible at compile time.
   ! It is therefore slow. Can be sped up by either inline (-Minline), or adding
   ! bind(parallel,teams) (an nvhpc extension, but unsupported by other compilers).
-  !$omp target teams loop collapse(2) private(slp, mslp, k) bind(parallel,teams)
+  !$omp target teams loop collapse(2) private(slp_km1, slp_k, slp_kp1, mslp, k) bind(parallel,teams)
 #else
-  !$omp target teams loop collapse(2) private(slp, mslp, k)
+  !$omp target teams loop collapse(2) private(slp_km1, slp_k, slp_kp1, mslp, k)
 #endif
   do j = G%jsc-1,G%jec+1 ; do i = G%isc-1,G%iec+1
-    slp(1) = 0.
+    ! The slopes in layers k-1, k and k+1 are kept in scalars, rather than in an array of the slopes
+    ! in a column, which on a GPU is a private array of run-time size that nvfortran allocates in
+    ! device memory for every thread that it might launch (several GB for large domains).  The
+    ! slopes are found once each, as before: zero in the top and bottom layers, and otherwise
+    ! from PLM_slope_wa.
+    slp_k = 0.
+    slp_kp1 = 0.
+    if (GV%ke > 2) slp_kp1 = PLM_slope_wa(h(i,j,1), h(i,j,2), h(i,j,3), h_neglect, &
+                                          Q(i,j,1), Q(i,j,2), Q(i,j,3))
     do k = 2, GV%ke-1
-      slp(k) = PLM_slope_wa(h(i,j,k-1), h(i,j,k), h(i,j,k+1), h_neglect, &
-                            Q(i,j,k-1), Q(i,j,k), Q(i,j,k+1))
-    enddo
-    slp(GV%ke) = 0.
-
-    do k = 2, GV%ke-1
-      mslp = PLM_monotonized_slope(Q(i,j,k-1), Q(i,j,k), Q(i,j,k+1), slp(k-1), slp(k), slp(k+1))
+      slp_km1 = slp_k ; slp_k = slp_kp1
+      if (k+1 < GV%ke) then
+        slp_kp1 = PLM_slope_wa(h(i,j,k), h(i,j,k+1), h(i,j,k+2), h_neglect, &
+                               Q(i,j,k), Q(i,j,k+1), Q(i,j,k+2))
+      else
+        slp_kp1 = 0.
+      endif
+      mslp = PLM_monotonized_slope(Q(i,j,k-1), Q(i,j,k), Q(i,j,k+1), slp_km1, slp_k, slp_kp1)
       Q_t(i,j,k) = Q(i,j,k) - 0.5 * mslp
       Q_b(i,j,k) = Q(i,j,k) + 0.5 * mslp
     enddo
