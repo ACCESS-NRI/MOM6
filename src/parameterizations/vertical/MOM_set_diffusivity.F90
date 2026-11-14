@@ -461,11 +461,19 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     if (CS%debug) then
       !$omp target update from(u_h, v_h)
       call hchksum_pair("before calc_KS [uv]_h", u_h, v_h, G%HI, unscale=US%L_T_to_m_s)
+      call hchksum(tv%T, "before calc_KS tv%T", G%HI, haloshift=1, unscale=US%C_to_degC)
+      call hchksum(tv%S, "before calc_KS tv%S", G%HI, haloshift=1, unscale=US%S_to_ppt)
+      if (associated(fluxes%p_surf)) &
+        call hchksum(fluxes%p_surf, "before calc_KS p_surf", G%HI, haloshift=1, unscale=US%RL2_T2_to_Pa)
     endif
     call cpu_clock_begin(id_clock_kappaShear)
     if (CS%Vertex_shear) then
       call full_convection(G, GV, US, h, tv, T_f, S_f, fluxes%p_surf, &
                            kappa_dt_fill, CS%full_conv_CS, halo=1)
+      if (CS%debug) then
+        call hchksum(T_f, "after full_convection T_f", G%HI, haloshift=1, unscale=US%C_to_degC)
+        call hchksum(S_f, "after full_convection S_f", G%HI, haloshift=1, unscale=US%S_to_ppt)
+      endif
 
       call calc_kappa_shear_vertex(u, v, h, T_f, S_f, tv, fluxes%p_surf, visc%Kd_shear, &
                                    visc%TKE_turb, visc%Kv_shear_Bu, dt, G, GV, US, CS%kappaShear_CSp)
