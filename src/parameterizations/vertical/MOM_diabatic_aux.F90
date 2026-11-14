@@ -206,7 +206,10 @@ subroutine make_frazil_block(h, tv, G, GV, US, CS, is, ie, js, je, nii, njj, p_s
 
   call cpu_clock_begin(id_clock_frazil)
 
-  !$omp target enter data map(alloc: pressure, T_freeze, fraz_col, S_block, frazil_mask, any_frazil)
+  !   any_frazil is not mapped: it is a host scalar that the reduction below returns to the host.  With
+  ! a device copy, the reduction went into the device copy and the host value stayed .false., so the
+  ! frazil was never formed on the GPU.
+  !$omp target enter data map(alloc: pressure, T_freeze, fraz_col, S_block, frazil_mask)
 
   do jsb=js,je,njj ; do isb=is,ie,nii
     jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
@@ -337,7 +340,7 @@ subroutine make_frazil_block(h, tv, G, GV, US, CS, is, ie, js, je, nii, njj, p_s
 
   tv%frazil_was_reset = .false.
 
-  !$omp target exit data map(delete: pressure, T_freeze, fraz_col, S_block, frazil_mask, any_frazil)
+  !$omp target exit data map(delete: pressure, T_freeze, fraz_col, S_block, frazil_mask)
 
   call cpu_clock_end(id_clock_frazil)
 
