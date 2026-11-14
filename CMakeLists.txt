@@ -132,12 +132,14 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NVHPC")
     set(CMAKE_Fortran_FLAGS_RELWITHDEBINFO "${CMAKE_Fortran_FLAGS_RELWITHDEBINFO} ${_mom6_offload_flags}")
     # -gpu=... must also be passed at link (not just compile), since it selects
     # which GPU runtime/memory-model/compute-capability support gets linked in.
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu ${_mom6_offload_gpu}")
+    # -cudalib=nvtx: the NVTX library of the clock ranges (MOM_cpu_clock_infra.F90).
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mp=gpu ${_mom6_offload_gpu} -cudalib=nvtx")
     # The same link flags for an executable that links MOM6 as a library (the
     # coupled model, which is linked by the access3 package), as the options of
     # the mom6lib target.  SHELL: keeps several -gpu= options from being
     # de-duplicated into one.
-    set(MOM6_OFFLOAD_LINK_OPTIONS -mp=gpu -acc=gpu -stdpar=gpu "SHELL:-gpu=mem:${MOM6_OFFLOAD_MEM_MODEL}")
+    set(MOM6_OFFLOAD_LINK_OPTIONS -mp=gpu -acc=gpu -stdpar=gpu -cudalib=nvtx
+        "SHELL:-gpu=mem:${MOM6_OFFLOAD_MEM_MODEL}")
     if(MOM6_OFFLOAD_CC)
       list(TRANSFORM MOM6_OFFLOAD_CC PREPEND "cc" OUTPUT_VARIABLE _mom6_offload_link_cc)
       list(JOIN _mom6_offload_link_cc "," _mom6_offload_link_cc)
