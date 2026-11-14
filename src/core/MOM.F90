@@ -3840,6 +3840,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (associated(CS%tv%p_surf)) call pass_var(CS%tv%p_surf, G%Domain, halo=dynamics_stencil)
   call cpu_clock_end(id_clock_pass_init)
 
+  !   The state variables are final on the host here, whether they were read from a restart file or
+  ! initialized above, so copy them to the device, where they were mapped before they were set.
+  ! Otherwise a run from a restart file kept the device's initial u, v and h until the end of the
+  ! initialization (a new run updates h on the device below, before finding ave_ssh_ibc), and
+  ! extract_surface_state, which is called before that, copied those device values of h to the host.
+  !$omp target update to(CS%u, CS%v, CS%h)
+
   ! Update derived thermodynamic quantities.
   if (allocated(CS%tv%SpV_avg)) then
     call calc_derived_thermo(CS%tv, CS%h, G, GV, US, halo=dynamics_stencil, debug=CS%debug)
