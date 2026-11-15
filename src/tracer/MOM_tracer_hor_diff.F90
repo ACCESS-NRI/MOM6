@@ -1127,7 +1127,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
   !$omp target enter data map(alloc: deep_wt_Lu, deep_wt_Ru, hP_Lu, hP_Ru, k0a_Lu, k0a_Ru, k0b_Lu, &
   !$omp   k0b_Ru)
   !$omp target enter data map(alloc: nPu)
-!$OMP target teams loop collapse(2) &
+!$OMP target teams distribute parallel do collapse(2) &
 !$OMP                          private(h_demand_L,h_used_L,h_demand_R,h_used_R,     &
 !$OMP                                  kR,kL,nP,rho_pair,kbs_Lp,kbs_Rp,rho_a,rho_b, &
 !$OMP                                  wt_b,left_set,right_set,h_supply_frac_R,     &
@@ -1279,7 +1279,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
 
   !$omp target enter data map(alloc: nPv)
 
-!$OMP target teams loop collapse(2) &
+!$OMP target teams distribute parallel do collapse(2) &
 !$OMP                          private(h_demand_L,h_used_L,h_demand_R,h_used_R,     &
 !$OMP                                  kR,kL,nP,rho_pair,kbs_Lp,kbs_Rp,rho_a,rho_b, &
 !$OMP                                  wt_b,left_set,right_set,h_supply_frac_R,     &
@@ -1448,7 +1448,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
 
       ! collapse(2) is reproducible for CS%answer_date > 20240330 but not <= 20240330.
       ! Do concurrent around j-loop doesn't seem to do the right thing.
-      !$omp target teams loop collapse(2) private(Tr_min_face,Tr_max_face,kLa,kLb,kRa,kRb,      &
+      !$omp target teams distribute parallel do collapse(2) private(Tr_min_face,Tr_max_face,kLa,kLb,kRa,kRb,      &
       !$omp                                       Tr_La,Tr_Lb,Tr_Ra,Tr_Rb,Tr_av_L,wt_b,Tr_av_R, &
       !$omp                                       h_L,h_R,Tr_flux,Tr_adj_vert,wt_a,vol)
       do j=js,je ; do I=is-1,ie ; if (G%mask2dCu(I,j) > 0.0) then
@@ -1609,7 +1609,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
       endif ; enddo ; enddo ! i- & j- loops over zonal faces.
 
       ! this gives wrong result when using do concurrent on NVHPC 25.9
-      !$omp target teams loop collapse(2) private(Tr_min_face,Tr_max_face,kLa,kLb,kRa,kRb,      &
+      !$omp target teams distribute parallel do collapse(2) private(Tr_min_face,Tr_max_face,kLa,kLb,kRa,kRb,      &
       !$omp                                       Tr_La,Tr_Lb,Tr_Ra,Tr_Rb,Tr_av_L,wt_b,Tr_av_R, &
       !$omp                                       h_L,h_R,Tr_flux,Tr_adj_vert,wt_a,vol)
       do J=js-1,je ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.0) then

@@ -2,7 +2,6 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-#include "omp_loop_bind_compat.h"
 #include <MOM_memory.h>
 #include "do_concurrent_compat.h"
 
@@ -387,7 +386,7 @@ subroutine wave_speed(h, tv, G, GV, US, cg1, CS, halo_size, use_ebt_mode, mono_N
       endif
     endif
 
-    !$omp target teams loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private( i, j, k, k2, itt, kc, do_merge, &
+    !$omp target teams distribute parallel do collapse(2) private( i, j, k, k2, itt, kc, do_merge, &
     !$omp &                                      I_Htot, I_Hnew, det, ddet, lam, dlam, lam0, cg1_est, &
     !$omp &                                      speed2_tot, drxh_sum, dSpVxh_sum, hw, sum_hc, gp, &
     !$omp &                                      N2min, ms_min, ms_max, ms_sq, below_mono_N2_frac, &
@@ -1765,20 +1764,20 @@ end subroutine wave_speeds
 !! signs are typically used, so internal rescaling by consistent factors are used to avoid
 !! over- or underflow.
 pure subroutine tridiag_det(a, c, ks, ke, lam, det, ddet, row_scale)
-  real, dimension(:), intent(in) :: a     !< Lower diagonal of matrix (first entry unused) [T2 L-2 ~> s2 m-2]
-  real, dimension(:), intent(in) :: c     !< Upper diagonal of matrix (last entry unused) [T2 L-2 ~> s2 m-2]
-  integer,            intent(in) :: ks    !< Starting index to use in determinant
-  integer,            intent(in) :: ke    !< Ending index to use in determinant
-  real,               intent(in) :: lam   !< Value subtracted from b [T2 L-2 ~> s2 m-2]
-  real,               intent(out):: det   !< Determinant of the matrix in dynamically rescaled units that
-                                          !! depend on the number of rows and the cumulative magnitude of
-                                          !! det and are therefore difficult to interpret, but the units
-                                          !! of det/ddet are always in [T2 L-2 ~> s2 m-2]
-  real,               intent(out):: ddet  !< Derivative of determinant with lam in units that are dynamically
-                                          !! rescaled along with those of det, such that the units of
-                                          !! det/ddet are always in [T2 L-2 ~> s2 m-2]
-  real,               intent(in) :: row_scale !< A scaling factor of the rows of the matrix to
-                                          !! limit the growth of the determinant [L2 s2 T-2 m-2 ~> 1]
+  integer,             intent(in) :: ks    !< Starting index to use in determinant
+  integer,             intent(in) :: ke    !< Ending index to use in determinant
+  real, dimension(ke), intent(in) :: a     !< Lower diagonal of matrix (first entry unused) [T2 L-2 ~> s2 m-2]
+  real, dimension(ke), intent(in) :: c     !< Upper diagonal of matrix (last entry unused) [T2 L-2 ~> s2 m-2]
+  real,                intent(in) :: lam   !< Value subtracted from b [T2 L-2 ~> s2 m-2]
+  real,                intent(out):: det   !< Determinant of the matrix in dynamically rescaled units that
+                                           !! depend on the number of rows and the cumulative magnitude of
+                                           !! det and are therefore difficult to interpret, but the units
+                                           !! of det/ddet are always in [T2 L-2 ~> s2 m-2]
+  real,                intent(out):: ddet  !< Derivative of determinant with lam in units that are dynamically
+                                           !! rescaled along with those of det, such that the units of
+                                           !! det/ddet are always in [T2 L-2 ~> s2 m-2]
+  real,                intent(in) :: row_scale !< A scaling factor of the rows of the matrix to
+                                           !! limit the growth of the determinant [L2 s2 T-2 m-2 ~> 1]
 
   ! Local variables
   real :: detKm1, detKm2   ! Cumulative value of the determinant for the previous two layers in units

@@ -2023,7 +2023,7 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
   cdrag_sqrt = sqrt(CS%cdrag)
 
   ! TODO: tile/port single-row LOTW BBL routine and column temporaries.
-  !$omp target teams loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private( &
+  !$omp target teams distribute parallel do collapse(2) private( &
   !$omp   dz_above, TKE_column, BBL_meanKE_dis, TKE_remaining, TKE_consumed, &
   !$omp   TKE_Kd_wall, ustar, ustar2, absf, dz_int, z_bot, h_bot, D_minus_z, &
   !$omp   total_depth, Idecay, Kd_wall, Kd_lower, ustar_D, i, j, k &
