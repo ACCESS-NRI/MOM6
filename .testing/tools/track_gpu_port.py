@@ -74,6 +74,17 @@ routine — this is the authoritative "which lines" answer.
     same line ranges — these render natively on a PR's "Files changed" tab
     with zero dependency on hosting an HTML artifact, and are the
     recommended CI integration.
+
+Two opt-in options change what is reported; without them the output is as described above:
+
+  - `--weight-by-hits` also sums the gcov hit counts of each file's and routine's executed,
+    portable, not-yet-ported lines ("portable remaining x hits") and ranks files and routines
+    by that sum instead of by the number of lines, so the code that runs most often comes first.
+    The counts are those of the coverage run, so start-up code weighs more in a short run.
+  - `--mark-device-routines` finds routines that contain a bare `!$omp declare target`
+    directive. They run on the device when called from a kernel, but their lines are not
+    counted as ported. It reports how much of each file's portable remaining work lies in
+    them, flags them in the routine table, and marks their lines in the HTML pages.
 """
 
 import argparse
@@ -100,6 +111,10 @@ SUBPROG_START_RE = re.compile(
     r'^\s*(?:recursive\s+)?(?:pure\s+)?(?:elemental\s+)?(?:module\s+)?'
     r'(subroutine|function)\s+(\w+)', re.IGNORECASE)
 SUBPROG_END_RE = re.compile(r'^\s*end\s*(subroutine|function)\s*(\w+)?', re.IGNORECASE)
+
+# A bare "!$omp declare target" inside a routine makes that routine a device routine. The list
+# form, "!$omp declare target(var, ...)", declares module variables and is not matched.
+DECLARE_TARGET_RE = re.compile(r'^\s*!\$omp\s+declare\s+target\s*(?:!.*)?$', re.IGNORECASE)
 
 # "Not portable" overrides: memory management and I/O never belong on the
 # device, even when they happen to sit inside a loop nest.
@@ -423,6 +438,23 @@ def parse_routines(path):
     return routines
 
 
+def find_device_routines(path, routines):
+    """The (name, start, end) entries of `routines` that contain a bare `!$omp declare target`.
+
+    Each directive belongs to the innermost routine around it, so an internal procedure that is
+    a device routine does not make its host routine one too.
+    """
+    lines = path.read_text(errors='replace').split('\n')
+    device = set()
+    for lineno, raw in enumerate(lines, start=1):
+        if not DECLARE_TARGET_RE.match(raw):
+            continue
+        around = [r for r in routines if r[1] <= lineno <= r[2]]
+        if around:
+            device.add(min(around, key=lambda r: r[2] - r[1]))
+    return sorted(device, key=lambda r: r[1])
+
+
 def parse_gcov(gcov_path):
     """Return (source_path_str, {line_no: exec_count_or_None})."""
     source = None
@@ -561,8 +593,21 @@ def classify_line(lineno, count, fr):
     return 'executed', str(count)
 
 
-def render_file_html(rel_path, resolved, counts, fr):
-    """Render one source file as an lcov-style line-by-line coverage/port-status page."""
+DEVICE_STYLE = """
+tr.dev td.ln { box-shadow: inset 3px 0 0 #7a5cc2; }
+span.dev { box-shadow: inset 3px 0 0 #7a5cc2; }
+"""
+
+DEVICE_LEGEND_HTML = ('<p class="legend"><span class="dev">in a <code>!$omp declare target</code> '
+                      'routine: runs on the device when called from a kernel</span></p>')
+
+
+def render_file_html(rel_path, resolved, counts, fr, device_lines=None):
+    """Render one source file as an lcov-style line-by-line coverage/port-status page.
+
+    With `device_lines` (a set of line numbers), the line numbers of those lines get a margin
+    mark and the legend explains it (--mark-device-routines).
+    """
     try:
         lines = resolved.read_text(errors='replace').splitlines()
     except OSError:
@@ -570,28 +615,44 @@ def render_file_html(rel_path, resolved, counts, fr):
     rows = []
     for lineno, text in enumerate(lines, start=1):
         cls, marker = classify_line(lineno, counts.get(lineno), fr)
+        if device_lines is not None and lineno in device_lines:
+            cls += ' dev'
         rows.append(f'<tr class="{cls}"><td class="ln">{lineno}</td><td class="cnt">{marker}</td>'
                      f'<td class="src">{html.escape(text)}</td></tr>')
     title = html.escape(str(rel_path))
+    extra_style = f'<style>{DEVICE_STYLE}</style>' if device_lines is not None else ''
+    extra_legend = DEVICE_LEGEND_HTML if device_lines is not None else ''
     return (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>'
-            f'<style>{HTML_STYLE}</style></head><body>'
+            f'<style>{HTML_STYLE}</style>{extra_style}</head><body>'
             f'<p class="back"><a href="index.html">&larr; back to index</a></p>'
-            f'<h1>{title}</h1>{LEGEND_HTML}'
+            f'<h1>{title}</h1>{LEGEND_HTML}{extra_legend}'
             f'<table class="src">{"".join(rows)}</table></body></html>')
 
 
 def render_index_html(per_file, total_ported, total_portable, total_executed,
-                       total_not_portable, overall_pct_portable, overall_pct_executed):
+                       total_not_portable, overall_pct_portable, overall_pct_executed,
+                       weight_by_hits=False, mark_device=False):
     rows = []
     for r in per_file:
         pct = f"{r['pct_of_portable']:.1f}%" if r['pct_of_portable'] is not None else '—'
         link = r.get('html_file')
         file_cell = f'<a href="{link}">{html.escape(r["file"])}</a>' if link else html.escape(r['file'])
+        extra = ''
+        if weight_by_hits:
+            extra += f'<td class="num">{r["portable_remaining_hits"]}</td>'
+        if mark_device:
+            key = 'device_portable_remaining_hits' if weight_by_hits else 'device_portable_remaining_lines'
+            extra += f'<td class="num">{r[key]}</td>'
         rows.append(f'<tr><td>{file_cell}</td><td class="num">{r["executed_lines"]}</td>'
                      f'<td class="num">{r["ported_lines"]}</td>'
-                     f'<td class="num">{r["portable_remaining_lines"]}</td>'
+                     f'<td class="num">{r["portable_remaining_lines"]}</td>{extra}'
                      f'<td class="num">{r["not_portable_lines"]}</td>'
                      f'<td class="num">{pct}</td></tr>')
+    extra_head = ''
+    if weight_by_hits:
+        extra_head += '<th class="num">Portable remaining &times; hits</th>'
+    if mark_device:
+        extra_head += '<th class="num">&hellip; of which in device routines</th>'
     return (f'<!doctype html><html><head><meta charset="utf-8"><title>GPU Port Coverage Report</title>'
             f'<style>{HTML_STYLE}</style></head><body>'
             f'<h1>GPU Port Coverage Report</h1>'
@@ -602,7 +663,7 @@ def render_index_html(per_file, total_ported, total_portable, total_executed,
             f'porting target and are excluded from the portable metric above)</p>'
             f'{LEGEND_HTML}'
             f'<table class="summary"><tr><th>File</th><th class="num">Executed</th>'
-            f'<th class="num">Ported</th><th class="num">Portable remaining</th>'
+            f'<th class="num">Ported</th><th class="num">Portable remaining</th>{extra_head}'
             f'<th class="num">Not portable</th><th class="num">% of portable</th></tr>'
             f'{"".join(rows)}</table></body></html>')
 
@@ -646,6 +707,16 @@ def main():
                      'report (index.html plus one page per executed file, colored by ported / '
                      'portable-remaining / executed-not-portable / not-hit) into this directory '
                      '— e.g. for publishing to GitHub Pages')
+    ap.add_argument('--weight-by-hits', action='store_true',
+                     help='Also sum the gcov hit counts of each file\'s and routine\'s executed, '
+                          'portable, not-yet-ported lines (portable_remaining_hits) and rank files '
+                          'and routines by that sum instead of by line count, so the code that '
+                          'runs most often comes first')
+    ap.add_argument('--mark-device-routines', action='store_true',
+                     help='Find routines with a bare "!$omp declare target" (they run on the device '
+                          'when called from a kernel, but their lines are not counted as ported), '
+                          'report how much portable remaining work lies in them, and mark their '
+                          'lines in --out-html')
     args = ap.parse_args()
 
     src_root = Path(args.src_root).resolve()
@@ -735,6 +806,7 @@ def main():
     total_ported = 0
     total_portable_remaining = 0
     total_not_portable = 0
+    total_portable_remaining_hits = 0
     routine_rows = []
     empty_fr = FileRegions()
 
@@ -760,16 +832,29 @@ def main():
             'portable_remaining_ranges': ranges_from_lines(executed_portable),
             'ported_ranges': ranges_from_lines(executed_ported),
         })
+        routines = parse_routines(resolved)
+        device_lines = None
+        if args.mark_device_routines:
+            device_routines = find_device_routines(resolved, routines)
+            device_lines = {ln for _, s, e in device_routines for ln in range(s, e + 1)}
+            per_file[-1]['device_routines'] = [name for name, _, _ in device_routines]
+            per_file[-1]['device_portable_remaining_lines'] = len(executed_portable & device_lines)
+        if args.weight_by_hits:
+            per_file[-1]['portable_remaining_hits'] = sum(counts[ln] for ln in executed_portable)
+            total_portable_remaining_hits += per_file[-1]['portable_remaining_hits']
+            if args.mark_device_routines:
+                per_file[-1]['device_portable_remaining_hits'] = sum(
+                    counts[ln] for ln in executed_portable & device_lines)
         if html_dir is not None:
             html_name = html_slug(rel)
-            (html_dir / html_name).write_text(render_file_html(rel, resolved, counts, fr))
+            (html_dir / html_name).write_text(render_file_html(rel, resolved, counts, fr, device_lines))
             per_file[-1]['html_file'] = html_name
         total_executed += len(executed)
         total_ported += len(executed_ported)
         total_portable_remaining += len(executed_portable)
         total_not_portable += len(executed_notportable)
 
-        for name, rstart, rend in parse_routines(resolved):
+        for name, rstart, rend in routines:
             rexec = {ln for ln in executed if rstart <= ln <= rend}
             if not rexec:
                 continue
@@ -786,11 +871,17 @@ def main():
                 'portable_remaining_ranges': ranges_from_lines(rportable),
                 'ported_ranges': ranges_from_lines(rported),
             })
+            if args.weight_by_hits:
+                routine_rows[-1]['portable_remaining_hits'] = sum(counts[ln] for ln in rportable)
+            if args.mark_device_routines:
+                routine_rows[-1]['device_routine'] = (name, rstart, rend) in device_routines
 
     # Rank by the biggest *portable* gap, not raw unported lines — allocate/IO/scalar
     # setup code that will never be ported shouldn't crowd out real porting targets.
-    per_file.sort(key=lambda r: r['portable_remaining_lines'], reverse=True)
-    routine_rows.sort(key=lambda r: r['portable_remaining_lines'], reverse=True)
+    # With --weight-by-hits the gap is weighted by how often each line ran.
+    rank_key = 'portable_remaining_hits' if args.weight_by_hits else 'portable_remaining_lines'
+    per_file.sort(key=lambda r: r[rank_key], reverse=True)
+    routine_rows.sort(key=lambda r: r[rank_key], reverse=True)
     total_portable = total_ported + total_portable_remaining
     overall_pct_portable = 100.0 * total_ported / total_portable if total_portable else 0.0
     overall_pct_executed = 100.0 * total_ported / total_executed if total_executed else 0.0
@@ -834,24 +925,39 @@ def main():
     if errors:
         lines_out.append(f'\n:warning: **{len(errors)} structural error(s) in ported-region '
                           f'annotations** — see job log. Report below excludes affected files.\n')
-    lines_out.append('\n## By file (biggest portable gap first)\n')
-    lines_out.append('| File | Executed | Ported | Portable remaining | Not portable | % of portable |')
-    lines_out.append('|---|---:|---:|---:|---:|---:|')
+    hits_head = ' Portable remaining x hits |' if args.weight_by_hits else ''
+    hits_rule = '---:|' if args.weight_by_hits else ''
+    dev_head = ' ... of which in device routines |' if args.mark_device_routines else ''
+    dev_rule = '---:|' if args.mark_device_routines else ''
+    dev_key = 'device_portable_remaining_hits' if args.weight_by_hits else 'device_portable_remaining_lines'
+    gap = 'most-run portable gap' if args.weight_by_hits else 'biggest portable gap'
+    lines_out.append(f'\n## By file ({gap} first)\n')
+    lines_out.append(f'| File | Executed | Ported | Portable remaining |{hits_head}{dev_head} Not portable | '
+                     f'% of portable |')
+    lines_out.append(f'|---|---:|---:|---:|{hits_rule}{dev_rule}---:|---:|')
     for r in per_file:
         pct = f"{r['pct_of_portable']:.1f}%" if r['pct_of_portable'] is not None else '—'
+        hits = f" {r['portable_remaining_hits']} |" if args.weight_by_hits else ''
+        dev = f" {r[dev_key]} |" if args.mark_device_routines else ''
         lines_out.append(f"| {r['file']} | {r['executed_lines']} | {r['ported_lines']} | "
-                          f"{r['portable_remaining_lines']} | {r['not_portable_lines']} | {pct} |")
+                          f"{r['portable_remaining_lines']} |{hits}{dev} {r['not_portable_lines']} | {pct} |")
 
     shown_routines = routine_rows if args.verbose else routine_rows[:25]
+    by_what = 'hit-weighted executed portable-remaining lines' if args.weight_by_hits \
+        else 'executed portable-remaining lines'
     heading = 'All routines with portable-remaining lines' if args.verbose \
-        else 'Top porting opportunities (by executed portable-remaining lines)'
+        else f'Top porting opportunities (by {by_what})'
     lines_out.append(f'\n## {heading}\n')
-    lines_out.append('| Routine | File | Executed | Ported | Portable remaining | % of portable |')
-    lines_out.append('|---|---|---:|---:|---:|---:|')
+    dev_col = ' Device routine |' if args.mark_device_routines else ''
+    lines_out.append(f'| Routine | File | Executed | Ported | Portable remaining |{hits_head}{dev_col} '
+                     f'% of portable |')
+    lines_out.append(f'|---|---|---:|---:|---:|{hits_rule}{"---|" if dev_col else ""}---:|')
     for r in shown_routines:
         pct = f"{r['pct_of_portable']:.1f}%" if r['pct_of_portable'] is not None else '—'
+        hits = f" {r['portable_remaining_hits']} |" if args.weight_by_hits else ''
+        dev = f" {'yes' if r['device_routine'] else ''} |" if args.mark_device_routines else ''
         lines_out.append(f"| {r['routine']} | {r['file']} | {r['executed_lines']} | "
-                          f"{r['ported_lines']} | {r['portable_remaining_lines']} | {pct} |")
+                          f"{r['ported_lines']} | {r['portable_remaining_lines']} |{hits}{dev} {pct} |")
 
     range_heading = 'Line ranges for all porting opportunities' if args.verbose \
         else 'Line ranges for top porting opportunities'
@@ -878,15 +984,18 @@ def main():
         print(report)
 
     if args.out_json:
+        overall = {
+            'executed_lines': total_executed,
+            'ported_lines': total_ported,
+            'portable_remaining_lines': total_portable_remaining,
+            'not_portable_lines': total_not_portable,
+            'pct_of_portable': round(overall_pct_portable, 1),
+            'pct_of_executed': round(overall_pct_executed, 1),
+        }
+        if args.weight_by_hits:
+            overall['portable_remaining_hits'] = total_portable_remaining_hits
         Path(args.out_json).write_text(json.dumps({
-            'overall': {
-                'executed_lines': total_executed,
-                'ported_lines': total_ported,
-                'portable_remaining_lines': total_portable_remaining,
-                'not_portable_lines': total_not_portable,
-                'pct_of_portable': round(overall_pct_portable, 1),
-                'pct_of_executed': round(overall_pct_executed, 1),
-            },
+            'overall': overall,
             'by_file': per_file,
             'by_routine': routine_rows,
             'warnings': all_warnings,
@@ -897,7 +1006,8 @@ def main():
     if html_dir is not None:
         (html_dir / 'index.html').write_text(render_index_html(
             per_file, total_ported, total_portable, total_executed,
-            total_not_portable, overall_pct_portable, overall_pct_executed))
+            total_not_portable, overall_pct_portable, overall_pct_executed,
+            weight_by_hits=args.weight_by_hits, mark_device=args.mark_device_routines))
 
     if args.out_comment:
         c = []
