@@ -682,13 +682,15 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
       ! Set the "back ground" friction velocity scale to either the tidal amplitude or place-holder constant
       if (CS%BBL_use_tidal_bg) then
-        do concurrent (i=is:ie, do_i(i,j)) ; if (m==1) then
-          u2_bg(I,j) = tideampfac2_x_0p5 * ( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
-                           G%mask2dT(i+1,j)*(CS%tideamp(i+1,j)*CS%tideamp(i+1,j)) )
-        else
-          u2_bg(i,j) = tideampfac2_x_0p5 * ( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
-                           G%mask2dT(i,j+1)*(CS%tideamp(i,j+1)*CS%tideamp(i,j+1)) )
-        endif ; enddo
+        do concurrent (i=is:ie, do_i(i,j))
+          if (m==1) then
+            u2_bg(I,j) = tideampfac2_x_0p5 * ( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
+                             G%mask2dT(i+1,j)*(CS%tideamp(i+1,j)*CS%tideamp(i+1,j)) )
+          else
+            u2_bg(i,j) = tideampfac2_x_0p5 * ( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
+                             G%mask2dT(i,j+1)*(CS%tideamp(i,j+1)*CS%tideamp(i,j+1)) )
+          endif
+        enddo
       else
         do concurrent (i=is:ie, do_i(i,j))
           u2_bg(i,j) = CS%drag_bg_vel * CS%drag_bg_vel
@@ -792,13 +794,24 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
       if (use_BBL_EOS) then
         if (associated(tv%p_surf)) then
-          if (m==1) then ; do concurrent (i=is:ie) ; press(I,j) = 0.5*(tv%p_surf(i,j) + tv%p_surf(i+1,j)) ; enddo
-          else ; do concurrent (i=is:ie) ; press(i,j) = 0.5*(tv%p_surf(i,j) + tv%p_surf(i,j+1)) ; enddo ; endif
+          if (m==1) then
+            do concurrent (i=is:ie)
+              press(I,j) = 0.5*(tv%p_surf(i,j) + tv%p_surf(i+1,j))
+            enddo
+          else
+            do concurrent (i=is:ie)
+              press(i,j) = 0.5*(tv%p_surf(i,j) + tv%p_surf(i,j+1))
+            enddo
+          endif
         else
-          do concurrent (i=is:ie) ; press(i,j) = 0.0 ; enddo
+          do concurrent (i=is:ie)
+            press(i,j) = 0.0
+          enddo
         endif
 
-        do concurrent (i=is:ie, .not.do_i(i,j)) ; T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0 ; enddo
+        do concurrent (i=is:ie, .not.do_i(i,j))
+          T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0
+        enddo
 
         do concurrent (i=is:ie)
           do k=1,nz

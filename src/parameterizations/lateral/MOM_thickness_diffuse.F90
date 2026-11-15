@@ -232,7 +232,9 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   !$omp target enter data map(to: MEKE%Kh) if(allocated(MEKE%Kh))
 
   if (allocated(MEKE%GM_src)) then
-    do concurrent (j=js:je, i=is:ie) ; MEKE%GM_src(i,j) = 0. ; enddo
+    do concurrent (j=js:je, i=is:ie)
+      MEKE%GM_src(i,j) = 0.
+    enddo
   endif
 
   use_VarMix = .false. ; Resoln_scaled = .false. ; use_stored_slopes = .false.
@@ -475,8 +477,12 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     endif
   endif
 
-  do concurrent (K=1:nz+1, j=js:je, I=is-1:ie) ; int_slope_u(I,j,K) = 0.0 ; enddo
-  do concurrent (K=1:nz+1, J=js-1:je, i=is:ie) ; int_slope_v(i,J,K) = 0.0 ; enddo
+  do concurrent (K=1:nz+1, j=js:je, I=is-1:ie)
+    int_slope_u(I,j,K) = 0.0
+  enddo
+  do concurrent (K=1:nz+1, J=js-1:je, i=is:ie)
+    int_slope_v(i,J,K) = 0.0
+  enddo
 
   !$omp target update from(e, Kh_u, Kh_v, Kh_u_CFL, Kh_v_CFL, int_slope_u, int_slope_v) &
   !$omp                if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0) .or. CS%debug)
@@ -1711,8 +1717,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   ! In layer 1, enforce the boundary conditions that Sfn(z=0) = 0.0
   if (.not.find_work .or. .not.(use_EOS)) then
-    do concurrent (j=js:je, I=is-1:ie) ; uhD(I,j,1) = -uhtot(I,j) ; enddo
-    do concurrent (J=js-1:je, i=is:ie) ; vhD(i,J,1) = -vhtot(i,J) ; enddo
+    do concurrent (j=js:je, I=is-1:ie)
+      uhD(I,j,1) = -uhtot(I,j)
+    enddo
+    do concurrent (J=js-1:je, i=is:ie)
+      vhD(i,J,1) = -vhtot(i,J)
+    enddo
   else
     do jsb=js,je,njj ; do IsbB=is-1,ie,nIIB-1
       IebB = min(IsbB+nIIB-2, ie)
@@ -1822,23 +1832,27 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   if (find_work .and. CS%GM_src_alt) then ; if (allocated(MEKE%GM_src)) then
     if (CS%MEKE_src_answer_date >= 20240601) then
-      do concurrent (j=js:je, i=is:ie) ; do k=nz,1,-1
-        PE_release_h = -0.25 * GV%H_to_RZ * &
-                         ( ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
-                            (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k))) + &
-                           ((Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
-                            (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))) )
-        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
-      enddo ; enddo
+      do concurrent (j=js:je, i=is:ie)
+        do k=nz,1,-1
+          PE_release_h = -0.25 * GV%H_to_RZ * &
+                           ( ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
+                              (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k))) + &
+                             ((Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
+                              (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))) )
+          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
+        enddo
+      enddo
     else
-      do concurrent(j=js:je, i=is:ie) ; do k=nz,1,-1
-        PE_release_h = -0.25 * GV%H_to_RZ * &
-                           ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
-                            (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k)) + &
-                            (Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
-                            (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k)))
-        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
-      enddo ; enddo
+      do concurrent(j=js:je, i=is:ie)
+        do k=nz,1,-1
+          PE_release_h = -0.25 * GV%H_to_RZ * &
+                             ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
+                              (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k)) + &
+                              (Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
+                              (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k)))
+          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
+        enddo
+      enddo
     endif
 
     if (CS%debug) then

@@ -1360,57 +1360,61 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
 ! between the accelerations due to the average of the layer equations and the
 ! barotropic calculation.
 
-  do concurrent (j=js:je, I=is-1:ie) ; if (G%OBCmaskCu(I,j) > 0.0) then
-    if (CS%nonlin_stress) then
-      if (GV%Boussinesq) then
-        Htot_avg = 0.5*(max(CS%bathyT(i,j)*GV%Z_to_H + eta(i,j), 0.0) + &
-                        max(CS%bathyT(i+1,j)*GV%Z_to_H + eta(i+1,j), 0.0))
-      else
-        Htot_avg = 0.5*(eta(i,j) + eta(i+1,j))
+  do concurrent (j=js:je, I=is-1:ie)
+    if (G%OBCmaskCu(I,j) > 0.0) then
+      if (CS%nonlin_stress) then
+        if (GV%Boussinesq) then
+          Htot_avg = 0.5*(max(CS%bathyT(i,j)*GV%Z_to_H + eta(i,j), 0.0) + &
+                          max(CS%bathyT(i+1,j)*GV%Z_to_H + eta(i+1,j), 0.0))
+        else
+          Htot_avg = 0.5*(eta(i,j) + eta(i+1,j))
+        endif
+        if (Htot_avg*CS%dy_Cu(I,j) <= 0.0) then
+          CS%IDatu(I,j) = 0.0
+        elseif (integral_BT_cont) then
+          CS%IDatu(I,j) = CS%dy_Cu(I,j) / (max(find_duhbt_du(ubt(I,j)*dt, BTCL_u(I,j)), &
+                                               CS%dy_Cu(I,j)*Htot_avg) )
+        elseif (use_BT_cont) then ! Reconsider the max and whether there should be some scaling.
+          CS%IDatu(I,j) = CS%dy_Cu(I,j) / (max(find_duhbt_du(ubt(I,j), BTCL_u(I,j)), &
+                                               CS%dy_Cu(I,j)*Htot_avg) )
+        else
+          CS%IDatu(I,j) = 1.0 / Htot_avg
+        endif
       endif
-      if (Htot_avg*CS%dy_Cu(I,j) <= 0.0) then
-        CS%IDatu(I,j) = 0.0
-      elseif (integral_BT_cont) then
-        CS%IDatu(I,j) = CS%dy_Cu(I,j) / (max(find_duhbt_du(ubt(I,j)*dt, BTCL_u(I,j)), &
-                                             CS%dy_Cu(I,j)*Htot_avg) )
-      elseif (use_BT_cont) then ! Reconsider the max and whether there should be some scaling.
-        CS%IDatu(I,j) = CS%dy_Cu(I,j) / (max(find_duhbt_du(ubt(I,j), BTCL_u(I,j)), &
-                                             CS%dy_Cu(I,j)*Htot_avg) )
-      else
-        CS%IDatu(I,j) = 1.0 / Htot_avg
-      endif
+
+      BT_force_u(I,j) = forces%taux(I,j) * GV%RZ_to_H * CS%IDatu(I,j)*visc_rem_u(I,j,1)
+    else
+      BT_force_u(I,j) = 0.0
     endif
+  enddo
 
-    BT_force_u(I,j) = forces%taux(I,j) * GV%RZ_to_H * CS%IDatu(I,j)*visc_rem_u(I,j,1)
-  else
-    BT_force_u(I,j) = 0.0
-  endif ; enddo
+  do concurrent (J=js-1:je, i=is:ie)
+    if (G%OBCmaskCv(i,J) > 0.0) then
+      if (CS%nonlin_stress) then
+        if (GV%Boussinesq) then
+          Htot_avg = 0.5*(max(CS%bathyT(i,j)*GV%Z_to_H + eta(i,j), 0.0) + &
+                          max(CS%bathyT(i,j+1)*GV%Z_to_H + eta(i,j+1), 0.0))
+        else
+          Htot_avg = 0.5*(eta(i,j) + eta(i,j+1))
+        endif
+        if (Htot_avg*CS%dx_Cv(i,J) <= 0.0) then
+          CS%IDatv(i,J) = 0.0
+        elseif (integral_BT_cont) then
+          CS%IDatv(i,J) = CS%dx_Cv(i,J) / (max(find_dvhbt_dv(vbt(i,J)*dt, BTCL_v(i,J)), &
+                                               CS%dx_Cv(i,J)*Htot_avg) )
+        elseif (use_BT_cont) then ! Reconsider the max and whether there should be some scaling.
+          CS%IDatv(i,J) = CS%dx_Cv(i,J) / (max(find_dvhbt_dv(vbt(i,J), BTCL_v(i,J)), &
+                                               CS%dx_Cv(i,J)*Htot_avg) )
+        else
+          CS%IDatv(i,J) = 1.0 / Htot_avg
+        endif
+      endif
 
-  do concurrent (J=js-1:je, i=is:ie) ; if (G%OBCmaskCv(i,J) > 0.0) then
-    if (CS%nonlin_stress) then
-      if (GV%Boussinesq) then
-        Htot_avg = 0.5*(max(CS%bathyT(i,j)*GV%Z_to_H + eta(i,j), 0.0) + &
-                        max(CS%bathyT(i,j+1)*GV%Z_to_H + eta(i,j+1), 0.0))
-      else
-        Htot_avg = 0.5*(eta(i,j) + eta(i,j+1))
-      endif
-      if (Htot_avg*CS%dx_Cv(i,J) <= 0.0) then
-        CS%IDatv(i,J) = 0.0
-      elseif (integral_BT_cont) then
-        CS%IDatv(i,J) = CS%dx_Cv(i,J) / (max(find_dvhbt_dv(vbt(i,J)*dt, BTCL_v(i,J)), &
-                                             CS%dx_Cv(i,J)*Htot_avg) )
-      elseif (use_BT_cont) then ! Reconsider the max and whether there should be some scaling.
-        CS%IDatv(i,J) = CS%dx_Cv(i,J) / (max(find_dvhbt_dv(vbt(i,J), BTCL_v(i,J)), &
-                                             CS%dx_Cv(i,J)*Htot_avg) )
-      else
-        CS%IDatv(i,J) = 1.0 / Htot_avg
-      endif
+      BT_force_v(i,J) = forces%tauy(i,J) * GV%RZ_to_H * CS%IDatv(i,J)*visc_rem_v(i,J,1)
+    else
+      BT_force_v(i,J) = 0.0
     endif
-
-    BT_force_v(i,J) = forces%tauy(i,J) * GV%RZ_to_H * CS%IDatv(i,J)*visc_rem_v(i,J,1)
-  else
-    BT_force_v(i,J) = 0.0
-  endif ; enddo
+  enddo
 
   if (associated(taux_bot) .and. associated(tauy_bot)) then
     do concurrent (j=js:je, I=is-1:ie, G%mask2dCu(I,j) > 0.0)

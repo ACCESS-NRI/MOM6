@@ -1834,7 +1834,10 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
 
   ! TODO: tile/port remaining host-side BBL redistribution loops.
   ! Left unported because of exp changing answers on GPU.
-  do concurrent (jj=1:jje, ii=1:iie) ; j = jsb+jj-1 ; i = isb+ii-1 ; do_i(ii,jj) = (G%mask2dT(i,j) > 0.0) ; enddo
+  do concurrent (jj=1:jje, ii=1:iie)
+    j = jsb+jj-1 ; i = isb+ii-1
+    do_i(ii,jj) = (G%mask2dT(i,j) > 0.0)
+  enddo
   !$omp target teams
   do k=nz-1,kb_min,-1
 #ifndef __NVCOMPILER_OPENMP_GPU
