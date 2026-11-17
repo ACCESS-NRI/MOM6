@@ -52,11 +52,11 @@ type, public :: file_dye_tracer_CS ; private
   !> Array of non-zero source points
   real, pointer :: tr_mask(:,:,:,:) => NULL()
 
-  !> Restoring timescale for each tracer [T ~> s]
+  !> Restoring timescale for each tracer, or zero for hard reset [T ~> s]
   real, allocatable :: tau(:)
 
   !> Whether the tracer is accumulated in the source region
-  !! or simply held at the source value
+  !! or restored toward the source value
   logical :: accumulate = .true.
 
   !> If true, tracers may be initialized if not in a restart file
@@ -111,7 +111,8 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
 
   call get_param(param_file, mdl, "FILE_DYE_TRACERS_ACCUMULATE", CS%accumulate, &
                  "If true, tracer is accumulated in the source region, emulating continuous "// &
-                 "forcing. Otherwise, the source region is held at the specified concentration.", &
+                 "forcing. Otherwise, the source region is restore toward the specified "// &
+                 "concentration using FILE_DYE_TRACERS_TAU.", &
                  default=.true.)
 
   call get_param(param_file, mdl, "NUM_FILE_DYE_TRACERS", CS%ntr, &
@@ -131,8 +132,16 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
 
   call get_param(param_file, mdl, "FILE_DYE_TRACERS_TAU", CS%tau, &
                 "Restoring timescale for each file dye tracer's sponge region. "// &
-                "One value per tracer, comma-separated.", &
-                units="s", default=86400.0, scale=US%s_to_T)
+                "Provide one non-negative value per tracer, comma-separated: if tau "// &
+                "is zero, the source concentration is fixed, otherwise it specifies "// &
+                "the implicit relaxation timescale.", &
+                units="s", default=86400.0, scale=US%s_to_T, do_not_log=CS%accumulate)
+
+  if (.not. CS%accumulate) then
+    if (any(CS%tau(:) < 0.0)) then
+      call MOM_error(FATAL, "all values in FILE_DYE_TRACERS_TAU must be non-negative")
+    end if
+  end if
 
   do m = 1, CS%ntr
     write(var_name(:), '(A,I3.3)') "dye", m
@@ -183,7 +192,7 @@ subroutine initialize_file_dye_tracer(restart, day, G, GV, h, diag, OBC, CS, spo
     call MOM_read_data(trim(CS%inputdir)//trim(CS%tracer_file), trim(name), CS%tr_source(:,:,:,m), G%Domain)
 
     ! mask out tracer source points when we're not accumulating
-    ! update expression is tr = mask * tr + source
+    ! a zero mask value selects either hard reset or relaxation
     if (.not. CS%accumulate) then
       do k = 1, GV%ke ; do j = G%jsc, G%jec ; do i = G%isc, G%iec
         if (CS%tr_source(i,j,k,m) /= 0.0) CS%tr_mask(i,j,k,m) = 0.0
@@ -226,7 +235,7 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
   integer :: m
   integer :: is, ie, js, je, nz
 
-  real :: damp   ! nondimensional restoring rate (dt/tau) for the current tracer
+  real :: damp   ! implicit restoring fraction dt/(tau + dt) for the current tracer [nondim]
 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_work
 
@@ -252,10 +261,17 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
 
   ! relax tracer towards tr_source within the sponge region, elsewhere leave unchanged
   do m = 1, CS%ntr
-    damp = dt / CS%tau(m)
-    CS%tr(is:ie,js:je,1:nz,m) = CS%tr(is:ie,js:je,1:nz,m) &
-         + (1.0 - CS%tr_mask(is:ie,js:je,1:nz,m)) * damp * &
-           (CS%tr_source(is:ie,js:je,1:nz,m) - CS%tr(is:ie,js:je,1:nz,m))
+    if (CS%accumulate .or. (CS%tau(m) == 0.0)) then
+      ! accumulation or hard reset forcing
+      CS%tr(is:ie,js:je,1:nz,m) = CS%tr_mask(is:ie,js:je,1:nz,m) * CS%tr(is:ie,js:je,1:nz,m) &
+           + CS%tr_source(is:ie,js:je,1:nz,m)
+    else
+      ! implicit backward Euler relaxation
+      damp = dt / (CS%tau(m) + dt)
+      CS%tr(is:ie,js:je,1:nz,m) = CS%tr(is:ie,js:je,1:nz,m) &
+           + (1.0 - CS%tr_mask(is:ie,js:je,1:nz,m)) * damp * &
+             (CS%tr_source(is:ie,js:je,1:nz,m) - CS%tr(is:ie,js:je,1:nz,m))
+    end if
   end do
 end subroutine file_dye_tracer_column_physics
 
