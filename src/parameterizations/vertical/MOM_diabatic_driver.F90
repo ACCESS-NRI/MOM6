@@ -3391,16 +3391,15 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
   ! in case fluxes%frac_shelf_h is associated, causing shelf-specific forcing
   ! without ice shelves (maybe this could happen with icebergs)
   CS%shelf_forcing_depth = CS%minimum_forcing_depth
-  if (use_ice_shelf) then
-    call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
-                   "The smallest depth over which forcing can be applied under an "//&
-                   "ice shelf. This only takes effect under ice shelves, and when "//&
-                   "near-surface layers become thin relative to this scale, in "//&
-                   "which case the forcing tendencies are scaled down by "//&
-                   "distributing the forcing over this depth scale. Defaults "//&
-                   "to the open-ocean minimum forcing depth.", &
-                   units="m", default=CS%minimum_forcing_depth*GV%H_to_m, scale=GV%m_to_H)
-  endif
+  call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
+                 "The smallest depth over which forcing can be applied under an "//&
+                 "ice shelf. This only takes effect under ice shelves, and when "//&
+                 "near-surface layers become thin relative to this scale, in "//&
+                 "which case the forcing tendencies are scaled down by "//&
+                 "distributing the forcing over this depth scale. Defaults "//&
+                 "to the open-ocean minimum forcing depth.", &
+                 units="m", default=CS%minimum_forcing_depth*GV%H_to_m, scale=GV%m_to_H, &
+                 do_not_log=.not.use_ice_shelf)
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
                  "The largest fraction of a layer than can be lost to forcing "//&
                  "(e.g. evaporation, sea-ice formation) in one time-step. The unused "//&

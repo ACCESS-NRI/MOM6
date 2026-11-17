@@ -2608,17 +2608,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "over which to average to find surface flow properties, "//&
                  "SSU, SSV. A non-positive value indicates no averaging.", &
                  units="m", default=0.0, scale=US%m_to_Z)
-
-    call get_param(param_file, "MOM", "HMIX_SHELF_PROP", Hmix_shelf_z, &
-                 "HMIX_SHELF_PROP is the depth over which to average "//&
-                 "to find surface properties like "//&
-                 "SST and SSS or density (but not surface velocities).", &
-                 units="m", default=1.0, scale=US%m_to_Z)
-    call get_param(param_file, "MOM", "HMIX_UV_SHELF_PROP", Hmix_UV_shelf_z, &
-                 "HMIX_UV_SHELF_PROP is the depth over which to average "//&
-                 "to find surface flow properties, "//&
-                 "SSU, SSV. A non-positive value indicates no averaging.", &
-                 units="m", default=0.0, scale=US%m_to_Z)
   endif
   call get_param(param_file, "MOM", "HFREEZE", HFrz_z, &
                  "If HFREEZE > 0, melt potential will be computed. The actual depth "//&
@@ -2801,6 +2790,19 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (present(ice_shelf_CSp)) then
     call get_param(param_file, "MOM", "ICE_SHELF", use_ice_shelf, &
        "If true, enables the ice shelf model.", default=.false.)
+
+    call get_param(param_file, "MOM", "HMIX_SHELF_PROP", Hmix_shelf_z, &
+                 "HMIX_SHELF_PROP is the depth over which to average "//&
+                 "to find surface properties under ice shelves, like "//&
+                 "SST and SSS or density (but not surface velocities).", &
+                 units="m", default=1.0, scale=US%m_to_Z, &
+                 do_not_log=.not.use_ice_shelf)
+    call get_param(param_file, "MOM", "HMIX_UV_SHELF_PROP", Hmix_UV_shelf_z, &
+                 "HMIX_UV_SHELF_PROP is the depth over which to average "//&
+                 "to find surface flow properties under ice shelves: "//&
+                 "SSU, SSV. A non-positive value indicates no averaging.", &
+                 units="m", default=0.0, scale=US%m_to_Z, &
+                 do_not_log=.not.use_ice_shelf)
   endif
 
   call get_param(param_file, "MOM", "USE_PARTICLES", CS%use_particles, &
