@@ -4004,6 +4004,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
   real :: depth(SZI_(CS%G))  !< Distance from the surface in depth units [Z ~> m] or [H ~> m or kg m-2]
   real :: depth_ml           !< Depth over which to average to determine mixed
                              !! layer properties [Z ~> m] or [H ~> m or kg m-2]
+  real :: depth_ml_face(SZI_(CS%G)) !< Depth over which to average to determine mixed layer
+                                    !! properties, including ice shelf fraction [Z ~> m] or [H ~> m or kg m-2]
   real :: dh                 !< Thickness of a layer within the mixed layer [Z ~> m] or [H ~> m or kg m-2]
   real :: mass               !< Mass per unit area of a layer [R Z ~> kg m-2]
   real :: I_depth            !< The inverse of depth [Z-1 ~> m-1] or [H-1 ~> m-1 or m2 kg-1]
@@ -4160,33 +4162,35 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo
     enddo ! end of j loop
 
-!   Determine the mean velocities in the uppermost depth_ml fluid.
+    !   Determine the mean velocities in the uppermost depth_ml fluid.
     ! NOTE: Velocity loops start on `[ij]s-1` in order to update halo values
     !       required by the speed diagnostic on the non-symmetric grid.
     !       This assumes that u and v halos have already been updated.
-    if (CS%Hmix_UV>0.) then
+    if (CS%Hmix_UV>0. .or. use_iceshelves) then
       depth_ml = CS%Hmix_UV
       if (CS%answer_date < 20190101) depth_ml = GV%H_to_Z*CS%Hmix_UV
-      !$OMP parallel do default(shared) private(depth,dh,hv)
+      !$OMP parallel do default(shared) private(depth,dh,hv,depth_ml_face,frac_shelf_v)
       do J=js-1,je
         do i=is,ie
           depth(i) = 0.0
           sfc_state%v(i,J) = 0.0
-        enddo
-        do k=1,nz ; do i=is,ie
+
+          depth_ml_face(i) = depth_ml
           if (use_iceshelves) then
             frac_shelf_v = 0.0
             if (G%areaT(i,j) + G%areaT(i,j+1) > 0.0) &
               frac_shelf_v = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
                                + CS%frac_shelf_h(i,j+1) * G%areaT(i,j+1))&
                              / (G%areaT(i,j) + G%areaT(i,j+1))
-            depth_ml = CS%Hmix_UV + frac_shelf_v * (CS%Hmix_UV_shelf - CS%Hmix_UV)
+            depth_ml_face(i) = (CS%Hmix_UV + frac_shelf_v * (CS%Hmix_UV_shelf - CS%Hmix_UV)) * H_rescale
           endif
+        enddo
+        do k=1,nz ; do i=is,ie
           hv = 0.5 * (h(i,j,k) + h(i,j+1,k)) * H_rescale
-          if (depth(i) + hv < depth_ml) then
+          if (depth(i) + hv < depth_ml_face(i)) then
             dh = hv
-          elseif (depth(i) < depth_ml) then
-            dh = depth_ml - depth(i)
+          elseif (depth(i) < depth_ml_face(i)) then
+            dh = depth_ml_face(i) - depth(i)
           else
             dh = 0.0
           endif
@@ -4195,30 +4199,36 @@ subroutine extract_surface_state(CS, sfc_state_in)
         enddo ; enddo
         ! Calculate the average properties of the mixed layer depth.
         do i=is,ie
-          sfc_state%v(i,J) = sfc_state%v(i,J) / max(depth(i), GV%H_subroundoff*H_rescale)
+          if (depth_ml_face(i) <= 0.0) then
+            sfc_state%v(i,J) = CS%v(i,J,1)
+          else
+            sfc_state%v(i,J) = sfc_state%v(i,J) / max(depth(i), GV%H_subroundoff*H_rescale)
+          endif
         enddo
       enddo ! end of j loop
 
-      !$OMP parallel do default(shared) private(depth,dh,hu)
+      !$OMP parallel do default(shared) private(depth,dh,hu,depth_ml_face,frac_shelf_u)
       do j=js,je
         do I=is-1,ie
           depth(I) = 0.0
           sfc_state%u(I,j) = 0.0
-        enddo
-        do k=1,nz ; do I=is-1,ie
+
+          depth_ml_face(I) = depth_ml
           if (use_iceshelves) then
             frac_shelf_u = 0.0
             if (G%areaT(i,j) + G%areaT(i+1,j) > 0.0) &
               frac_shelf_u = (   CS%frac_shelf_h(i,j) * G%areaT(i,j) &
                                + CS%frac_shelf_h(i+1,j) * G%areaT(i+1,j))&
                              / (G%areaT(i,j) + G%areaT(i+1,j))
-            depth_ml = CS%Hmix_UV + frac_shelf_u * (CS%Hmix_UV_shelf - CS%Hmix_UV)
+            depth_ml_face(I) = (CS%Hmix_UV + frac_shelf_u * (CS%Hmix_UV_shelf - CS%Hmix_UV)) * H_rescale
           endif
+        enddo
+        do k=1,nz ; do I=is-1,ie
           hu = 0.5 * (h(i,j,k) + h(i+1,j,k)) * H_rescale
-          if (depth(i) + hu < depth_ml) then
+          if (depth(I) + hu < depth_ml_face(I)) then
             dh = hu
-          elseif (depth(I) < depth_ml) then
-            dh = depth_ml - depth(I)
+          elseif (depth(I) < depth_ml_face(I)) then
+            dh = depth_ml_face(I) - depth(I)
           else
             dh = 0.0
           endif
@@ -4227,10 +4237,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
         enddo ; enddo
         ! Calculate the average properties of the mixed layer depth.
         do I=is-1,ie
-          sfc_state%u(I,j) = sfc_state%u(I,j) / max(depth(I), GV%H_subroundoff*H_rescale)
+          if (depth_ml_face(I) <= 0.0) then
+            sfc_state%u(I,j) = CS%u(I,j,1)
+          else
+            sfc_state%u(I,j) = sfc_state%u(I,j) / max(depth(I), GV%H_subroundoff*H_rescale)
+          endif
         enddo
       enddo ! end of j loop
-    else ! Hmix_UV<=0.
+    else ! Hmix_UV<=0. .and. .not. use_iceshelves
       do j=js,je ; do I=is-1,ie
         sfc_state%u(I,j) = CS%u(I,j,1)
       enddo ; enddo
