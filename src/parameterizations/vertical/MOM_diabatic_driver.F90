@@ -161,6 +161,8 @@ type, public :: diabatic_CS ; private
                                      !! near the bottom [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real    :: minimum_forcing_depth   !< The smallest depth over which heat and freshwater
                                      !! fluxes are applied [H ~> m or kg m-2].
+  real    :: shelf_forcing_depth     !< The smallest depth over which heat and freshwater
+                                     !! fluxes are applied under shelves [H ~> m or kg m-2].
   real    :: evap_CFL_limit = 0.8    !< The largest fraction of a layer that can be
                                      !! evaporated in one time-step [nondim].
   integer :: halo_TS_diff = 0        !< The temperature, salinity and thickness halo size that
@@ -929,7 +931,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     skinbuoyflux(:,:) = 0.0
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
             optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
-            CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML_param)
+            CS%minimum_forcing_depth, CS%shelf_forcing_depth, cTKE, dSV_dT, dSV_dS, &
+            SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML_param)
 
     if (CS%debug) then
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_mks)
@@ -990,7 +993,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   else
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
                                   optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, &
-                                  CS%evap_CFL_limit, CS%minimum_forcing_depth, MLD_h=visc%h_ML_param)
+                                  CS%evap_CFL_limit, CS%minimum_forcing_depth, CS%shelf_forcing_depth, &
+                                  MLD_h=visc%h_ML_param)
 
     ! Find the vertical distances across layers, which may have been modified by the net surface flux
     call thickness_to_dz(h, tv, dz, G, GV, US)
@@ -1609,7 +1613,8 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
     skinbuoyflux(:,:) = 0.0
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
             optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
-            CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML_param)
+            CS%minimum_forcing_depth, CS%shelf_forcing_depth, cTKE, dSV_dT, dSV_dS, &
+            SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML_param)
 
     if (CS%debug) then
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_MKS)
@@ -1656,7 +1661,8 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   else
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
                                   optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, &
-                                  CS%evap_CFL_limit, CS%minimum_forcing_depth, MLD_h=visc%h_ML_param)
+                                  CS%evap_CFL_limit, CS%minimum_forcing_depth, CS%shelf_forcing_depth, &
+                                  MLD_h=visc%h_ML_param)
 
   endif   ! endif for CS%use_energetic_PBL
 
@@ -3280,7 +3286,8 @@ end subroutine adiabatic_driver_init
 !> This routine initializes the diabatic driver module.
 subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, diag, &
                                 ADp, CDp, CS, tracer_flow_CSp, sponge_CSp, &
-                                ALE_sponge_CSp, oda_incupd_CSp, int_tide_CSp)
+                                ALE_sponge_CSp, oda_incupd_CSp, int_tide_CSp, &
+                                use_ice_shelf)
   type(time_type), target                :: Time             !< model time
   type(ocean_grid_type),   intent(inout) :: G                !< model grid structure
   type(verticalGrid_type), intent(in)    :: GV               !< model vertical grid structure
@@ -3299,6 +3306,7 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
   type(oda_incupd_CS),     pointer       :: oda_incupd_CSp   !< pointer to the ocean data assimilation incremental
                                                              !! update module control structure
   type(int_tide_CS),       pointer       :: int_tide_CSp     !< pointer to the internal tide structure
+  logical,                 intent(in)    :: use_ice_shelf    !< whether ice shelves are enabled
 
   ! Local variables
   real    :: Kd  ! A diffusivity used in the default for other tracer diffusivities [Z2 T-1 ~> m2 s-1]
@@ -3450,6 +3458,17 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "relative to this scale, in which case the forcing tendencies "//&
                  "scaled down by distributing the forcing over this depth scale.", &
                  units="m", default=0.001, scale=GV%m_to_H)
+  call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
+                 "The smallest depth over which forcing can be applied under an "//&
+                 "ice shelf. This only takes effect under ice shelves, and when "//&
+                 "near-surface layers become thin relative to this scale, in "//&
+                 "which case the forcing tendencies are scaled down by "//&
+                 "distributing the forcing over this depth scale. Defaults "//&
+                 "to the open-ocean minimum forcing depth. Note that freshwater "//&
+                 "effects on tracers other than T and S use MINIMUM_FORCING_DEPTH, "//&
+                 "even under ice shelves.", &
+                 units="m", default=CS%minimum_forcing_depth*GV%H_to_m, scale=GV%m_to_H, &
+                 do_not_log=.not.use_ice_shelf)
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
                  "The largest fraction of a layer than can be lost to forcing "//&
                  "(e.g. evaporation, sea-ice formation) in one time-step. The unused "//&
