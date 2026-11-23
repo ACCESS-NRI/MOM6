@@ -3394,7 +3394,9 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "near-surface layers become thin relative to this scale, in "//&
                  "which case the forcing tendencies are scaled down by "//&
                  "distributing the forcing over this depth scale. Defaults "//&
-                 "to the open-ocean minimum forcing depth.", &
+                 "to the open-ocean minimum forcing depth. Note that freshwater "//&
+                 "effects on tracers other than T and S use MINIMUM_FORCING_DEPTH, "//&
+                 "even under ice shelves.", &
                  units="m", default=CS%minimum_forcing_depth*GV%H_to_m, scale=GV%m_to_H, &
                  do_not_log=.not.use_ice_shelf)
   call get_param(param_file, mdl, "EVAP_CFL_LIMIT", CS%evap_CFL_limit, &
