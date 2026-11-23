@@ -2790,7 +2790,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (present(ice_shelf_CSp)) then
     call get_param(param_file, "MOM", "ICE_SHELF", use_ice_shelf, &
        "If true, enables the ice shelf model.", default=.false.)
-
+  endif
+  if (.not.bulkmixedlayer) then
     call get_param(param_file, "MOM", "HMIX_SHELF_PROP", Hmix_shelf_z, &
                  "HMIX_SHELF_PROP is the depth over which to average "//&
                  "to find surface properties under ice shelves, like "//&
