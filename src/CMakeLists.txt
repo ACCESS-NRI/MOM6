@@ -24,6 +24,7 @@ target_sources(mom6shared PRIVATE
   ALE/coord_rho.F90
   ALE/coord_sigma.F90
   ALE/coord_zlike.F90
+  ALE/filter_utils.F90
   ALE/MOM_ALE.F90
   ALE/MOM_hybgen_regrid.F90
   ALE/MOM_hybgen_remap.F90
