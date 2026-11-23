@@ -4007,8 +4007,12 @@ subroutine extract_surface_state(CS, sfc_state_in)
   real :: depth(SZI_(CS%G))  !< Distance from the surface in depth units [Z ~> m] or [H ~> m or kg m-2]
   real :: depth_ml           !< Depth over which to average to determine mixed
                              !! layer properties [Z ~> m] or [H ~> m or kg m-2]
+  real :: depth_ml_col(SZI_(CS%G)) !< Depth over which to average to determine mixed layer
+                                   !! properties, including ice shelf fraction, within
+                                   !! cells [Z ~> m] or [H ~> m or kg m-2]
   real :: depth_ml_face(SZI_(CS%G)) !< Depth over which to average to determine mixed layer
-                                    !! properties, including ice shelf fraction [Z ~> m] or [H ~> m or kg m-2]
+                                    !! properties, including ice shelf fraction, at velocity
+                                    !! faces [Z ~> m] or [H ~> m or kg m-2]
   real :: dh                 !< Thickness of a layer within the mixed layer [Z ~> m] or [H ~> m or kg m-2]
   real :: mass               !< Mass per unit area of a layer [R Z ~> kg m-2]
   real :: I_depth            !< The inverse of depth [Z-1 ~> m-1] or [H-1 ~> m-1 or m2 kg-1]
@@ -4100,7 +4104,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
     endif
     ! Determine the mean tracer properties of the uppermost depth_ml fluid.
 
-    !$OMP parallel do default(shared) private(depth,dh)
+    !$OMP parallel do default(shared) private(depth,dh,I_depth,missing_depth,depth_ml_col)
     do j=js,je
       do i=is,ie
         depth(i) = 0.0
@@ -4109,16 +4113,18 @@ subroutine extract_surface_state(CS, sfc_state_in)
         else
           sfc_state%sfc_density(i,j) = 0.0
         endif
+
+        depth_ml_col(i) = depth_ml
+        if (use_iceshelves) then
+          depth_ml_col(i) = (CS%Hmix + CS%frac_shelf_h(i,j) * (CS%Hmix_shelf - CS%Hmix)) * H_rescale
+        endif
       enddo
 
       do k=1,nz ; do i=is,ie
-        if (use_iceshelves) then
-          depth_ml = CS%Hmix + CS%frac_shelf_h(i,j) * (CS%Hmix_shelf - CS%Hmix)
-        endif
-        if (depth(i) + h(i,j,k)*H_rescale < depth_ml) then
+        if (depth(i) + h(i,j,k)*H_rescale < depth_ml_col(i)) then
           dh = h(i,j,k)*H_rescale
-        elseif (depth(i) < depth_ml) then
-          dh = depth_ml - depth(i)
+        elseif (depth(i) < depth_ml_col(i)) then
+          dh = depth_ml_col(i) - depth(i)
         else
           dh = 0.0
         endif
