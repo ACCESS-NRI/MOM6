@@ -3388,9 +3388,6 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "relative to this scale, in which case the forcing tendencies "//&
                  "scaled down by distributing the forcing over this depth scale.", &
                  units="m", default=0.001, scale=GV%m_to_H)
-  ! in case fluxes%frac_shelf_h is associated, causing shelf-specific forcing
-  ! without ice shelves (maybe this could happen with icebergs)
-  CS%shelf_forcing_depth = CS%minimum_forcing_depth
   call get_param(param_file, mdl, "SHELF_FORCING_DEPTH", CS%shelf_forcing_depth, &
                  "The smallest depth over which forcing can be applied under an "//&
                  "ice shelf. This only takes effect under ice shelves, and when "//&
