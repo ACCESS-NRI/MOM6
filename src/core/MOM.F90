@@ -2796,13 +2796,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "HMIX_SHELF_PROP is the depth over which to average "//&
                  "to find surface properties under ice shelves, like "//&
                  "SST and SSS or density (but not surface velocities).", &
-                 units="m", default=1.0, scale=US%m_to_Z, &
+                 units="m", default=Hmix_z, scale=US%m_to_Z, &
                  do_not_log=.not.use_ice_shelf)
     call get_param(param_file, "MOM", "HMIX_UV_SHELF_PROP", Hmix_UV_shelf_z, &
                  "HMIX_UV_SHELF_PROP is the depth over which to average "//&
                  "to find surface flow properties under ice shelves: "//&
                  "SSU, SSV. A non-positive value indicates no averaging.", &
-                 units="m", default=0.0, scale=US%m_to_Z, &
+                 units="m", default=Hmix_UV_z, scale=US%m_to_Z, &
                  do_not_log=.not.use_ice_shelf)
   endif
 
