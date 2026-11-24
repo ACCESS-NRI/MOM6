@@ -137,7 +137,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
                 "timestep; otherwise it is relaxed toward the source concentration "// &
                 "on this timescale. Only used if FILE_DYE_TRACERS_ACCUMULATE is false.", &
 
-                units="s", default=86400.0, scale=US%s_to_T, do_not_log=CS%accumulate)
+                units="s", default=0.0, scale=US%s_to_T, do_not_log=CS%accumulate)
 
   if (.not. CS%accumulate) then
     if (any(CS%tau(:) < 0.0)) then
