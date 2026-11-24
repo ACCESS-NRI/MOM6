@@ -538,31 +538,6 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
 
-!> Calculate the partial derivatives of specific volume with temperature and salinity
-!! for 1D array inputs and outputs.
-subroutine calculate_specvol_derivs_array_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS, start, npts)
-  class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
-  real, dimension(:), intent(in)    :: T        !< Conservative temperature [degC]
-  real, dimension(:), intent(in)    :: S        !< Absolute salinity [g kg-1]
-  real, dimension(:), intent(in)    :: pressure !< Pressure [Pa]
-  real, dimension(:), intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                                !! potential temperature [m3 kg-1 degC-1]
-  real, dimension(:), intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                                !! salinity [m3 kg-1 PSU-1]
-  integer,            intent(in)    :: start    !< The starting index for calculations
-  integer,            intent(in)    :: npts     !< The number of values to calculate
-
-  ! Local variables
-  integer :: js, je
-
-  js = start
-  je = start+npts-1
-
-  call calculate_specvol_derivs_elem_Roquet_rho(this, T(js:je), S(js:je), pressure(js:je), &
-                                                dSV_dT(js:je), dSV_dS(js:je))
-
-end subroutine calculate_specvol_derivs_array_Roquet_rho
-
 !> Compute the in situ density of sea water (rho in [kg m-3]) and the compressibility
 !! (drho/dp = C_sound^-2, stored as drho_dp [s2 m-2]) from absolute salinity (sal [g kg-1]),
 !! conservative temperature (T [degC]), and pressure [Pa], using the density polynomial
@@ -729,6 +704,32 @@ subroutine calculate_density_derivs_array_Roquet_rho(this, T, S, pressure, drho_
                                                 drho_dt(js:je), drho_ds(js:je))
 
 end subroutine calculate_density_derivs_array_Roquet_rho
+
+!> Calculate the partial derivatives of specific volume with temperature and salinity
+!! for 1D array inputs and outputs.
+subroutine calculate_specvol_derivs_array_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS, start, npts)
+  class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
+  real, dimension(:), intent(in)    :: T        !< Conservative temperature [degC]
+  real, dimension(:), intent(in)    :: S        !< Absolute salinity [g kg-1]
+  real, dimension(:), intent(in)    :: pressure !< Pressure [Pa]
+  real, dimension(:), intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
+                                                !! potential temperature [m3 kg-1 degC-1]
+  real, dimension(:), intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
+                                                !! salinity [m3 kg-1 PSU-1]
+  integer,            intent(in)    :: start    !< The starting index for calculations
+  integer,            intent(in)    :: npts     !< The number of values to calculate
+
+  ! Local variables
+  integer :: js, je
+
+  js = start
+  je = start+npts-1
+
+  call calculate_specvol_derivs_elem_Roquet_rho(this, T(js:je), S(js:je), pressure(js:je), &
+                                                dSV_dT(js:je), dSV_dS(js:je))
+
+end subroutine calculate_specvol_derivs_array_Roquet_rho
+
 !> \namespace mom_eos_Roquet_rho
 !!
 !! \section section_EOS_Roquet_rho Roquet_rho equation of state
