@@ -339,7 +339,7 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell, col_v
 
   if (present(col_var_production)) then
     call remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
-                                       isrc_start, isrc_end, h_sub, u_sub, col_var_production)
+                                       isrc_start, isrc_end, h_sub, CS%h_neglect, uh_sub, col_var_production)
   endif
 
 end subroutine remapping_core_h
@@ -1571,7 +1571,7 @@ end subroutine check_remapped_values
 
 !> Subroutine to calculate the numerical mixing due to the remapping scheme in MOM6.
 subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itgt_end, &
-                                         isrc_start, isrc_end, h_sub, u_sub, col_var_production)
+                                         isrc_start, isrc_end, h_sub, h_neglect, uh_sub, col_var_production)
 
   integer,                intent(in) :: n0                 !< Number of cells on source grid
   real, dimension(n0),    intent(in) :: h0                 !< Cell widths on source grid [H]
@@ -1584,7 +1584,9 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
   integer, dimension(n0), intent(in) :: isrc_start         !< Index of first sub-cell within each source cell
   integer, dimension(n0), intent(in) :: isrc_end           !< Index of last sub-cell within each source cell
   real,                   intent(in) :: h_sub(n0+n1+1)     !< Overlapping sub-cell thicknesses, h_sub [H]
-  real,                   intent(in) :: u_sub(n0+n1+1)     !< Sub-cell cell averages [A]
+  real,                   intent(in) :: h_neglect          !< A negligibly small width for the purpose of cell
+                                                           !! reconstructions in the same units as h0 [H]
+  real,                   intent(in) :: uh_sub(n0+n1+1)    !< Width weighted sub-cell cell averages [H A]
   real, dimension(n1),   intent(out) :: col_var_production !< Remap variance production for a column [A2 H]
 
   ! Local variables
@@ -1595,11 +1597,11 @@ subroutine remapping_variance_production(n0, h0, u0, n1, h1, u1, itgt_start, itg
     do i1 = 1, n1
       col_var_production(i1) = 0.0
       do j2 = isrc_start(i1), isrc_end(i1)
-        du = u_sub(j2) - u0(i1)
+        du = (uh_sub(j2) / (h_sub(j2) + h_neglect)) - u0(i1)
         col_var_production(i1) = col_var_production(i1) + h_sub(j2) * (du * du)
       enddo
       do j2 = itgt_start(i1), itgt_end(i1)
-        du = u_sub(j2) - u1(i1)
+        du = (uh_sub(j2) / (h_sub(j2) + h_neglect)) - u1(i1)
         col_var_production(i1) = col_var_production(i1) - h_sub(j2) * (du * du)
       enddo
     enddo
