@@ -111,7 +111,7 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
 
   call get_param(param_file, mdl, "FILE_DYE_TRACERS_ACCUMULATE", CS%accumulate, &
                  "If true, tracer is accumulated in the source region, emulating continuous "// &
-                 "forcing. Otherwise, the source region is restore toward the specified "// &
+                 "forcing. Otherwise, the source region is restored toward the specified "// &
                  "concentration using FILE_DYE_TRACERS_TAU.", &
                  default=.true.)
 
@@ -133,13 +133,15 @@ function register_file_dye_tracer(HI, GV, US, param_file, CS, tr_Reg, restart_CS
   call get_param(param_file, mdl, "FILE_DYE_TRACERS_TAU", CS%tau, &
                 "Restoring timescale for each file dye tracer's sponge region. "// &
                 "Provide one non-negative value per tracer, comma-separated: if tau "// &
-                "is zero, the source concentration is fixed, otherwise it specifies "// &
-                "the implicit relaxation timescale.", &
+                "is zero, the tracer is reset to the source concentration every "// &
+                "timestep; otherwise it is relaxed toward the source concentration "// &
+                "on this timescale. Only used if FILE_DYE_TRACERS_ACCUMULATE is false.", &
+
                 units="s", default=86400.0, scale=US%s_to_T, do_not_log=CS%accumulate)
 
   if (.not. CS%accumulate) then
     if (any(CS%tau(:) < 0.0)) then
-      call MOM_error(FATAL, "all values in FILE_DYE_TRACERS_TAU must be non-negative")
+      call MOM_error(FATAL, "register_file_dye_tracer: all values in FILE_DYE_TRACERS_TAU must be non-negative.")
     end if
   end if
 
@@ -257,7 +259,6 @@ subroutine file_dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, G
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
     end do
   end if
-
 
   ! relax tracer towards tr_source within the sponge region, elsewhere leave unchanged
   do m = 1, CS%ntr
