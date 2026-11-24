@@ -538,11 +538,12 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
 
-
+!> Calculate the partial derivatives of specific volume with temperature and salinity
+!! for 1D array inputs and outputs.
 subroutine calculate_specvol_derivs_array_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS, start, npts)
   class(Roquet_rho_EOS), intent(in) :: this     !< This EOS
-  real, dimension(:), intent(in)    :: T        !< Potential temperature [degC]
-  real, dimension(:), intent(in)    :: S        !< Salinity [PSU]
+  real, dimension(:), intent(in)    :: T        !< Conservative temperature [degC]
+  real, dimension(:), intent(in)    :: S        !< Absolute salinity [g kg-1]
   real, dimension(:), intent(in)    :: pressure !< Pressure [Pa]
   real, dimension(:), intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
                                                 !! potential temperature [m3 kg-1 degC-1]
@@ -707,16 +708,16 @@ end subroutine calculate_spec_vol_array_Roquet_rho
 
 !> Calculate the density derivatives for 1D array inputs and outputs.
 subroutine calculate_density_derivs_array_Roquet_rho(this, T, S, pressure, drho_dT, drho_dS, start, npts)
-  class(Roquet_rho_EOS),    intent(in)  :: this     !< This EOS
-  real, dimension(:), intent(in)  :: T        !< Potential temperature relative to the surface [degC]
-  real, dimension(:), intent(in)  :: S        !< Salinity [PSU]
+  class(Roquet_rho_EOS),  intent(in) :: this  !< This EOS
+  real, dimension(:), intent(in)  :: T        !< Conservative temperature [degC]
+  real, dimension(:), intent(in)  :: S        !< Absolute salinity [g kg-1]
   real, dimension(:), intent(in)  :: pressure !< Pressure [Pa]
   real, dimension(:), intent(out) :: drho_dT  !< The partial derivative of density with potential
                                               !! temperature [kg m-3 degC-1]
   real, dimension(:), intent(out) :: drho_dS  !< The partial derivative of density with salinity,
                                               !! in [kg m-3 PSU-1]
   integer,            intent(in)  :: start    !< The starting index for calculations
-  integer,            intent(in)  :: npts     !< The number of values to calculate  ! Local variables
+  integer,            intent(in)  :: npts     !< The number of values to calculate
 
   ! Local variables
   integer :: js, je
@@ -728,8 +729,6 @@ subroutine calculate_density_derivs_array_Roquet_rho(this, T, S, pressure, drho_
                                                 drho_dt(js:je), drho_ds(js:je))
 
 end subroutine calculate_density_derivs_array_Roquet_rho
-
-
 !> \namespace mom_eos_Roquet_rho
 !!
 !! \section section_EOS_Roquet_rho Roquet_rho equation of state
