@@ -1139,19 +1139,27 @@ subroutine accumulate_net_input(fluxes, sfc_state, tv, dt, G, US, CS)
       do j=js,je ; do i=is,ie
         heat_in(i,j) = heat_in(i,j) + (tv%C_p * G%areaT(i,j)) * tv%TempxPmE(i,j)
       enddo ; enddo
+      ! tv%TempxPmE only includes the sensible heat content of submarine melt at the ambient
+      ! temperatures (i.e. heat_content_srunoff). Add the rest of the heat it applies (e.g. the
+      ! latent heat of melting).
+      if (associated(fluxes%heat_content_eff_srunoff)) then
+        do j=js,je ; do i=is,ie
+          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
+                         (fluxes%heat_content_eff_srunoff(i,j) - fluxes%heat_content_srunoff(i,j))
+        enddo ; enddo
+      endif
     elseif (associated(fluxes%evap)) then
       do j=js,je ; do i=is,ie
         heat_in(i,j) = heat_in(i,j) + (tv%C_p * sfc_state%SST(i,j)) * FW_in(i,j)
       enddo ; enddo
-    endif
-
-    ! Without coupler enthalpies, only the sensible heat content of submarine melt is included above,
-    ! so add the rest of the heat it applies (e.g. the latent heat of melting).
-    if (.not. associated(fluxes%heat_content_evap)) then
-      if (associated(fluxes%heat_content_eff_srunoff)) then ; do j=js,je ; do i=is,ie
-        heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
-                       (fluxes%heat_content_eff_srunoff(i,j) - fluxes%heat_content_srunoff(i,j))
-      enddo ; enddo ; endif
+      ! FW_in includes submarine melt and its heat content is counted at the SST above. Replace
+      ! this with the heat it actually applies.
+      if (associated(fluxes%heat_content_eff_srunoff)) then
+        do j=js,je ; do i=is,ie
+          heat_in(i,j) = heat_in(i,j) + dt * G%areaT(i,j) * &
+                         (fluxes%heat_content_eff_srunoff(i,j) - (tv%C_p * sfc_state%SST(i,j)) * fluxes%srunoff(i,j))
+        enddo ; enddo
+      endif
     endif
 
     ! The following heat sources may or may not be used.

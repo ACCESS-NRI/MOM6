@@ -87,7 +87,7 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
                       ! full amount of srunoff is always distributed even in a column shallower
                       ! than depth [H ~> m or kg m-2]
   real :: h_above     ! Cumulative thickness above the current layer, before adding srunoff [H ~> m or kg m-2]
-  real :: h_in_range  ! The portion of a layer's thickness within eff_depth [H ~> m or kg m-2]
+  real :: frac        ! The fraction of dM_tot applied to a layer [nondim]
   real :: T_eff       ! The effective temperature carried by srunoff mass added to a layer [C ~> degC]
   real :: hOld        ! The layer thickness before adding srunoff mass [H ~> m or kg m-2]
   real :: I_eff_depth ! The inverse of eff_depth [H-1 ~> m-1 or m2 kg-1]
@@ -118,8 +118,6 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
 
       ! Cap the depth actually used at the full column thickness, so that a column shallower
       ! than the requested depth still receives all of dM_tot.
-      ! Note, with the current implementation, if the column is zero thickness any srunoff
-      ! is just dropped.
       total_h = 0.0
       do k=1,nz ; total_h = total_h + h2d(i,k) ; enddo
       eff_depth = min(depth, total_h)
@@ -130,12 +128,17 @@ subroutine distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth
       dTempxPmE = 0.0
 
       ! Spread dM_tot over the upper eff_depth of the column, in proportion to how much of each
-      ! layer's thickness falls within that range.
+      ! layer's thickness falls within that range. A column with no thickness gets all of dM_tot
+      ! in its top layer, as is done for netMassIn in applyBoundaryFluxesInOut.
       do k=1,nz
-        h_in_range = max(0.0, min(h_above + h2d(i,k), eff_depth) - h_above)
+        if (eff_depth > 0.0) then
+          frac = max(0.0, min(h_above + h2d(i,k), eff_depth) - h_above) * I_eff_depth
+        else
+          frac = 0.0 ; if (k == 1) frac = 1.0
+        endif
         h_above = h_above + h2d(i,k)
-        if (h_in_range > 0.0) then
-          dM_k = dM_tot * (h_in_range * I_eff_depth)
+        if (frac > 0.0) then
+          dM_k = dM_tot * frac
           hOld = h2d(i,k)
 
           if (do_heat) then

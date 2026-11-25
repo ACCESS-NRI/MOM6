@@ -533,8 +533,9 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
 
     ! Distribute submarine melt (srunoff) mass over a range of depths, if requested, diluting
     ! this tracer accordingly. This is done before loops A and B below so loop B sees the
-    ! srunoff-fattened column, making grounding less likely.
-    if (associated(fluxes%srunoff)) &
+    ! srunoff-fattened column, making grounding less likely. As for the other mass fluxes, srunoff
+    ! is only applied if fluxes%sw is associated, matching applyBoundaryFluxesInOut.
+    if (associated(fluxes%srunoff) .and. associated(fluxes%sw)) &
       call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, Tr2d)
 
     ! Apply the surface boundary fluxes in three steps:

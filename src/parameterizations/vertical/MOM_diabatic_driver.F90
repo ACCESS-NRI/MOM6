@@ -322,6 +322,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   real :: H_to_RL2_T2  ! A conversion factor from thicknesses in H to pressure [R L2 T-2 H-1 ~> Pa m-1 or Pa m2 kg-1]
   integer :: i, j, k, is, ie, js, je, nz
   logical :: showCallTree ! If true, show the call tree
+  character(len=240) :: mesg  ! A message for errors
 
   real, allocatable, dimension(:,:,:)    :: h_in  ! thickness before thermodynamics [H ~> m or kg m-2]
   real, allocatable, dimension(:,:,:)    :: t_in  ! temperature before thermodynamics [C ~> degC]
@@ -348,8 +349,16 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
         "MOM_diabatic_driver: submarine melt (srunoff) coupling is not supported with USE_KPP=True.")
 
     ! Distribution of submarine melt does not handle negative values, which is not physical anyway.
-    if (any(fluxes%srunoff(G%isc:G%iec,G%jsc:G%jec) < 0.0)) call MOM_error(FATAL, &
-        "MOM_diabatic_driver: coupled submarine melt (srunoff) contains negative values.")
+    do j=G%jsc,G%jec ; do i=G%isc,G%iec
+      if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) < 0.0)) then
+        write(mesg,'("negative srunoff of ",(1pe12.4)," kg m-2 s-1 at global i,j = ",I0,", ",I0, &
+                   & " lon/lat = ",(1pe12.4)," E ",(1pe12.4)," N.")') &
+              US%RZ_T_to_kg_m2s*fluxes%srunoff(i,j), i+G%HI%idg_offset, j+G%HI%jdg_offset, &
+              G%geoLonT(i,j), G%geoLatT(i,j)
+        call MOM_error(FATAL, "MOM_diabatic_driver: "//trim(mesg)// &
+              " srunoff must be non-negative; check the runoff-to-ocean remapping weights.")
+      endif
+    enddo ; enddo
   endif
 
   showCallTree = callTree_showQuery()

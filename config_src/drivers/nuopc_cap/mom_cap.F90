@@ -681,16 +681,14 @@ subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
   !-----------------
 
   use_srunoff = .false.
-  if (cesm_coupled) then
-    ! Note that flds_rofs is shared with the mediator and runoff component
-    call NUOPC_CompAttributeGet(gcomp, name='flds_rofs', value=cvalue, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc,__LINE__,u_FILE_u)) return
-    if (isPresent .and. isSet) read(cvalue,*) use_srunoff
-    if (is_root_pe()) then
-        write(stdout,*) 'flds_rofs = ', use_srunoff
-    endif
-  end if
+  ! Note that flds_rofs is shared with the mediator and runoff component
+  call NUOPC_CompAttributeGet(gcomp, name='flds_rofs', value=cvalue, &
+        isPresent=isPresent, isSet=isSet, rc=rc)
+  if (ChkErr(rc,__LINE__,u_FILE_u)) return
+  if (isPresent .and. isSet) read(cvalue,*) use_srunoff
+  if (is_root_pe()) then
+    write(stdout,*) 'flds_rofs = ', use_srunoff
+  endif
 
   if (is_root_pe()) then
     write(stdout,*) subname//'start time: y,m,d-',year,month,day,'h,m,s=',hour,minute,second
