@@ -88,7 +88,7 @@ use MOM_open_boundary, only : ocean_OBC_type
 use MOM_open_boundary, only : radiation_open_bdry_conds
 use MOM_open_boundary, only : open_boundary_zero_normal_flow
 use MOM_PressureForce, only : PressureForce, PressureForce_init, PressureForce_CS
-use MOM_set_visc, only : set_viscous_ML, set_visc_CS
+use MOM_set_visc, only : set_viscous_ML, viscous_ML_block_sizes, set_visc_CS
 use MOM_stochastics,   only : stochastic_CS
 use MOM_tidal_forcing, only : tidal_forcing_init, tidal_forcing_end, tidal_forcing_CS
 use MOM_self_attr_load, only : SAL_init, SAL_end, SAL_CS
@@ -242,6 +242,7 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   real :: dt_visc   ! The time step for a part of the update due to viscosity [T ~> s].
   logical :: dyn_p_surf
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: nIIB, nJJB  ! Block sizes for the viscous mixed layer solver [nondim].
   integer :: cor_stencil  ! Stencil size for Coriolis schemes [nondim]
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -269,8 +270,8 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
 ! diffu = horizontal viscosity terms (u,h)
   call enable_averages(dt, Time_local, CS%diag)
   call cpu_clock_begin(id_clock_horvisc)
-  call horizontal_viscosity(u, v, h, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
-    STOCH=STOCH)
+  call horizontal_viscosity(u, v, h, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, &
+    tv, dt, STOCH=STOCH)
   call cpu_clock_end(id_clock_horvisc)
   call disable_averaging(CS%diag)
 
@@ -354,7 +355,9 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   call cpu_clock_begin(id_clock_vertvisc)
   call enable_averages(dt, Time_local, CS%diag)
   dt_visc = dt ; if (CS%dt_visc_bug) dt_visc = 0.5*dt
-  call set_viscous_ML(u, v, h_av, tv, forces, visc, dt_visc, G, GV, US, CS%set_visc_CSp)
+  call viscous_ML_block_sizes(CS%set_visc_CSp, G, nIIB, nJJB)
+  call set_viscous_ML(u, v, h_av, tv, forces, visc, dt_visc, G, GV, US, CS%set_visc_CSp, &
+      nIIB, nJJB)
   call disable_averaging(CS%diag)
 
   dt_visc = dt_pred ; if (CS%dt_visc_bug) dt_visc = 0.5*dt
@@ -694,6 +697,8 @@ subroutine initialize_dyn_unsplit(u, v, h, tv, Time, G, GV, US, param_file, diag
   call PressureForce_init(Time, G, GV, US, param_file, diag, CS%PressureForce_CSp, CS%ADp, &
                           CS%SAL_CSp, CS%tides_CSp)
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc)
+
+  allocate(CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp)
   CS%set_visc_CSp => set_visc

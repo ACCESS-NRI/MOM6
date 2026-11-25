@@ -5,8 +5,6 @@
 !> Invokes unit tests in all modules that have them
 module MOM_unit_tests
 
-! This file is part of MOM6. See LICENSE.md for the license.
-
 use MOM_array_transform,            only : symmetric_sum_unit_tests
 use MOM_diag_buffers,               only : diag_buffer_unit_tests_2d, diag_buffer_unit_tests_3d
 use MOM_error_handler,              only : MOM_error, FATAL, is_root_pe

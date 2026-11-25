@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Interfaces to non-domain-oriented communication subroutines, including the
 !! MOM6 reproducing sums facility
 module MOM_coms
@@ -63,6 +65,8 @@ real, parameter :: max_efp_float = pr(1) * real(huge(1_int64))
   !< The largest float with an EFP representation in arbitrary units [a].
   !! NOTE: Only the first bin can exceed precision, but is bounded by the
   !! largest signed integer.
+
+!$omp declare target(pr, I_pr)
 
 logical :: overflow_error = .false.
   !< This becomes true if an overflow is encountered.
@@ -713,7 +717,10 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     block_max_neg = 0.
 
     ! Compute the sum of each block
-    do j=jbs,jbe ; do i=ibs,ibe
+    do concurrent (j=jbs:jbe, i=ibs:ibe) &
+        DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
+        DO_LOCALITY(reduce(+: block_sum)) &
+        DO_LOCALITY(reduce(max: block_max_pos, block_max_neg, inan, iovf))
 
       ! Convert array(i,j) to EFP form
       r = descale * array(i,j)
@@ -731,7 +738,7 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
 
       ! Add the EFP result (including potential carry bits)
       block_sum(:) = block_sum(:) + e(:)
-    enddo ; enddo
+    enddo
 
     array_sum(:) = array_sum(:) + block_sum(:)
 
@@ -768,6 +775,7 @@ end subroutine increment_block_ints
 !! overflows are reported by flags, rather than the module-level error
 !! logicals, so that the routine is free of side effects.
 pure subroutine efp_decompose(r, e, rmag, is_nan, is_ovf)
+  !$omp declare target
   real, intent(in)  :: r
     !< The real number being decomposed [a]
   integer(kind=int64), intent(out) :: e(efp_digits)
