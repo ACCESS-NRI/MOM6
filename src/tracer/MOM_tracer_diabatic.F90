@@ -12,6 +12,7 @@ use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_forcing_type,     only : forcing
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
 use MOM_file_parser,      only : get_param, log_version, param_file_type
+use MOM_submarine_melt,   only : distribute_submarine_melt
 
 implicit none ; private
 
@@ -530,6 +531,56 @@ subroutine tracer_vertdiff_Eulerian(h_old, ent, dt, tr, G, GV, &
 end subroutine tracer_vertdiff_Eulerian
 
 
+!> Distribute submarine melt (srunoff) mass over depth into a tracer's layer thicknesses and
+!! concentrations, by calling distribute_submarine_melt on the host.
+!!
+!! This is a host fallback for the GPU build: distribute_submarine_melt (MOM_submarine_melt) works on
+!! one j-row of host arrays and has not been ported to the device.  h and Tr are copied from the
+!! device, changed row by row, and copied back, so it is slow but gives the same answers as the CPU
+!! code.  It is only called when srunoff is coupled (NUOPC attribute flds_rofs), so the default path
+!! is unaffected.  The thicknesses before srunoff was added are returned in h_orig, for the caller to
+!! restore if the thicknesses are not to be updated by applyTracerBoundaryFluxesInOut.
+subroutine srunoff_host_fallback(G, GV, dt, fluxes, minimum_forcing_depth, h, Tr, h_orig)
+  type(ocean_grid_type),                      intent(in   ) :: G  !< Grid structure
+  type(verticalGrid_type),                    intent(in   ) :: GV !< ocean vertical grid structure
+  real,                                       intent(in   ) :: dt !< Time-step over which forcing is applied [T ~> s]
+  type(forcing),                              intent(in   ) :: fluxes !< Surface fluxes container
+  real,                                       intent(in   ) :: minimum_forcing_depth !< The smallest depth over
+                                                                  !! which fluxes can be applied [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: h  !< Layer thickness [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: Tr !< Tracer concentration on T-cell [conc]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(out  ) :: h_orig !< The layer thickness before srunoff
+                                                                  !! was added [H ~> m or kg m-2]
+
+  ! Local variables
+  real, dimension(SZI_(G),SZK_(GV)) :: &
+    h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
+    Tr2d             ! A 2-d copy of the tracer concentrations [conc]
+  integer :: i, j, k, is, ie, js, je, nz
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+
+  ! The state is on the device: bring it to the host.
+  !$omp target update from(h, Tr)
+  h_orig(:,:,:) = h(:,:,:)
+
+  do j=js,je
+    do k=1,nz ; do i=is,ie
+      h2d(i,k) = h(i,j,k) ; Tr2d(i,k) = Tr(i,j,k)
+    enddo ; enddo
+
+    call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, Tr2d)
+
+    do k=1,nz ; do i=is,ie
+      h(i,j,k) = h2d(i,k) ; Tr(i,j,k) = Tr2d(i,k)
+    enddo ; enddo
+  enddo ! j
+
+  ! Return the state to the device.
+  !$omp target update to(h, Tr)
+
+end subroutine srunoff_host_fallback
+
 !> This routine is modeled after applyBoundaryFluxesInOut in MOM_diabatic_aux.F90
 !! NOTE: Please note that in this routine sfc_flux gets set to zero to ensure that the surface
 !! flux of the tracer does not get applied again during a subsequent call to tracer_vertdif
@@ -581,7 +632,10 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
                           ! column [conc H ~> conc m or conc kg m-2]
   real :: hGrounding(maxGroundings) ! The remaining fresh water flux that was not able to be
                                ! supplied from a column that grounded out [H ~> m or kg m-2]
+  real, allocatable :: h_orig(:,:,:) ! The layer thickness before srunoff was added, kept when h is
+                                      ! not to be updated [H ~> m or kg m-2]
   logical :: update_h
+  logical :: restore_h  ! If true, h is returned to its values before srunoff was added
   integer :: i, j, is, ie, js, je, k, nz
   character(len=45) :: mesg
 
@@ -618,6 +672,20 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
   endif
 
   numberOfGroundings = 0
+
+  !   Distribute submarine melt (srunoff) mass over a range of depths, if requested, diluting this
+  ! tracer accordingly.  This is done before loops A and B below so loop B sees the srunoff-fattened
+  ! column, making grounding less likely.  As for the other mass fluxes, srunoff is only applied if
+  ! fluxes%sw is associated, matching applyBoundaryFluxesInOut.  Like upstream, srunoff's mass is
+  ! only left in h if h is to be updated.
+  restore_h = .false.
+  if (associated(fluxes%srunoff)) then
+    if (associated(fluxes%sw)) then
+      allocate(h_orig(G%isd:G%ied,G%jsd:G%jed,nz))
+      call srunoff_host_fallback(G, GV, dt, fluxes, minimum_forcing_depth, h, Tr, h_orig)
+      restore_h = .not.update_h
+    endif
+  endif
 
   !   Each column is handled by one thread, working down the column with copies of the layer
   ! thickness and tracer concentration.  The surface forcing is contained in the fluxes type.
@@ -712,6 +780,14 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
     hGround(i,j) = abs(in_flux_col) + abs(out_flux_col)
     if (hGround(i,j) /= 0.0) numberOfGroundings = numberOfGroundings + 1
   enddo
+
+  if (allocated(h_orig)) then
+    if (restore_h) then
+      h(:,:,:) = h_orig(:,:,:)
+      !$omp target update to(h)
+    endif
+    deallocate(h_orig)
+  endif
 
   if (numberOfGroundings>0) then
     !   Record the locations of the first few groundings in the order in which a serial i-j loop

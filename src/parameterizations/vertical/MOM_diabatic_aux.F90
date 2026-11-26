@@ -26,6 +26,7 @@ use MOM_interpolate,   only : external_field
 use MOM_io,            only : slasher
 use MOM_opacity,       only : set_opacity, opacity_CS, extract_optics_fields
 use MOM_opacity,       only : optics_type, optics_nbands, absorbRemainingSW_3d, sumSWoverBands
+use MOM_submarine_melt, only : distribute_submarine_melt
 use MOM_tracer_flow_control, only : get_chl_from_model, tracer_flow_control_CS
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs
@@ -890,6 +891,141 @@ subroutine set_pen_shortwave(optics, fluxes, G, GV, US, CS, opacity, tracer_flow
 
 end subroutine set_pen_shortwave
 
+!> Distribute submarine melt (srunoff) over depth, by calling distribute_submarine_melt on the host.
+!!
+!! This is a host fallback for the GPU build: distribute_submarine_melt (MOM_submarine_melt) works on
+!! one j-row of host arrays and has not been ported to the device.  The state that it changes is
+!! copied from the device, distributed row by row, and copied back, so it is slow but gives the same
+!! answers as the CPU code.  It is only called when srunoff is coupled (NUOPC attribute flds_rofs),
+!! so the default path is unaffected.  It does what the j-loop of upstream's applyBoundaryFluxesInOut
+!! does before its loops A and B, for the whole domain (nii and njj are the domain sizes):
+!! - sets fluxes%latent_srunoff,
+!! - adds srunoff's mass and latent heat to the rates used for the surface buoyancy flux,
+!! - distributes srunoff's mass, heat and TKE requirement into h, tv%T, tv%S and cTKE, and
+!! - sets srunoff's heat content diagnostics and adds its contribution to tv%TempxPmE.
+subroutine srunoff_host_fallback(G, GV, dt, fluxes, tv, h, minimum_forcing_depth, g_Hconv2, &
+                                 nii, njj, calculate_buoyancy, netMassInOut_rate, netheat_rate, &
+                                 cTKE, dSV_dT, dSV_dS)
+  type(ocean_grid_type),   intent(in)    :: G  !< Grid structure
+  type(verticalGrid_type), intent(in)    :: GV !< ocean vertical grid structure
+  real,                    intent(in)    :: dt !< Time-step over which forcing is applied [T ~> s]
+  type(forcing),           intent(inout) :: fluxes !< Surface fluxes container
+  type(thermo_var_ptrs),   intent(inout) :: tv !< Structure containing pointers to any
+                                               !! available thermodynamic fields.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(inout) :: h  !< Layer thickness [H ~> m or kg m-2]
+  real,                    intent(in)    :: minimum_forcing_depth !< The smallest depth over which
+                                               !! heat and freshwater fluxes is applied [H ~> m or kg m-2].
+  real,                    intent(in)    :: g_Hconv2 !< A conversion factor for use in the TKE
+                                               !! calculation [Z3 R2 T-2 H-2 ~> kg2 m-5 s-2 or m s-2]
+  integer,                 intent(in)    :: nii !< The i-extent of the computational domain [nondim].
+  integer,                 intent(in)    :: njj !< The j-extent of the computational domain [nondim].
+  logical,                 intent(in)    :: calculate_buoyancy !< If true, the surface buoyancy flux is
+                                               !! being calculated, so the rates below are used.
+  real, dimension(nii,njj), intent(inout) :: netMassInOut_rate !< netMassInOut for dt=1, for the surface
+                                               !! buoyancy flux [H T-1 ~> m s-1 or kg m-2 s-1]
+  real, dimension(nii,njj), intent(inout) :: netheat_rate !< netHeat for dt=1, for the surface buoyancy
+                                               !! flux [C H T-1 ~> degC m s-1 or degC kg m-2 s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                 optional, intent(inout) :: cTKE !< Turbulent kinetic energy requirement to mix
+                                               !! forcing through each layer [R Z3 T-2 ~> J m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                 optional, intent(in)    :: dSV_dT !< Partial derivative of specific volume with
+                                               !! potential temperature [R-1 C-1 ~> m3 kg-1 degC-1].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                 optional, intent(in)    :: dSV_dS !< Partial derivative of specific volume with
+                                               !! salinity [R-1 S-1 ~> m3 kg-1 ppt-1].
+
+  ! Local variables
+  real, dimension(SZI_(G),SZK_(GV)) :: &
+    h2d, &           ! A 2-d copy of the thicknesses [H ~> m or kg m-2]
+    T2d, &           ! A 2-d copy of the layer temperatures [C ~> degC]
+    S2d              ! A 2-d copy of the layer salinities [S ~> ppt]
+  real, dimension(SZI_(G)) :: &
+    dHeat_srunoff, & ! The heat added to each column by srunoff, for fluxes%heat_content_eff_srunoff
+                     ! [Q H ~> J m-2]
+    dTempxPmE_srunoff ! The ambient-temperature-weighted mass added to each column by srunoff, for
+                     ! tv%TempxPmE and fluxes%heat_content_srunoff [C H ~> degC m or degC kg m-2]
+  logical :: do_energetics ! If true, cTKE, dSV_dT and dSV_dS are present
+  logical :: use_TempxPmE  ! If true, tv%TempxPmE is associated
+  integer :: i, j, k, is, ie, js, je, nz
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  do_energetics = present(cTKE) .and. present(dSV_dT) .and. present(dSV_dS)
+  use_TempxPmE = associated(tv%TempxPmE)
+
+  ! The state is on the device: bring what is read or changed here to the host.
+  !$omp target update from(h, tv%T, tv%S)
+  !$omp target update from(tv%TempxPmE) if(use_TempxPmE)
+  !$omp target update from(cTKE, dSV_dT, dSV_dS) if(do_energetics)
+  !$omp target update from(netMassInOut_rate, netheat_rate) if(calculate_buoyancy)
+
+  do j=js,je
+    do k=1,nz ; do i=is,ie
+      h2d(i,k) = h(i,j,k) ; T2d(i,k) = tv%T(i,j,k) ; S2d(i,k) = tv%S(i,j,k)
+    enddo ; enddo
+
+    ! The latent heat of melting srunoff, used below for the surface buoyancy flux and in the
+    ! latent heat diagnostics.
+    if (associated(fluxes%latent_srunoff)) then ; do i=is,ie
+      fluxes%latent_srunoff(i,j) = 0.0
+      if (fluxes%srunoff_latent_heat) &
+        fluxes%latent_srunoff(i,j) = -fluxes%latent_heat_fusion * fluxes%srunoff(i,j)
+    enddo ; endif
+
+    ! Add srunoff's contribution to netMassInOut_rate/netheat_rate, used for the surface buoyancy
+    ! flux. This means that for the purposes of the surface buoyancy flux, the mass and heat
+    ! associated with srunoff are treated as if they were applied at the surface, analogous to how
+    ! penetrating SW is handled. srunoff enters at the ambient temperature, so only its latent heat
+    ! of melting changes the temperature and is included in netheat_rate.
+    if (calculate_buoyancy) then
+      do i=is,ie
+        if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) > 0.0)) then
+          netMassInOut_rate(i-is+1,j-js+1) = netMassInOut_rate(i-is+1,j-js+1) + &
+                                             GV%RZ_to_H * fluxes%srunoff(i,j)
+          if (associated(fluxes%latent_srunoff)) &
+            netheat_rate(i-is+1,j-js+1) = netheat_rate(i-is+1,j-js+1) + &
+                                          fluxes%latent_srunoff(i,j) * (GV%RZ_to_H / tv%C_p)
+        endif
+      enddo ! i
+    endif
+
+    ! Distribute srunoff's mass and heat over a range of depths, if requested, updating
+    ! temperature and salinity together.
+    call distribute_submarine_melt(G, GV, dt, fluxes, j, minimum_forcing_depth, h2d, S2d, &
+                                   T2d=T2d, C_p=tv%C_p, &
+                                   g_Hconv2=g_Hconv2, cTKE=cTKE, dSV_dT=dSV_dT, dSV_dS=dSV_dS, &
+                                   dHeat_total=dHeat_srunoff, dTempxPmE_total=dTempxPmE_srunoff)
+
+    do k=1,nz ; do i=is,ie
+      h(i,j,k) = h2d(i,k) ; tv%T(i,j,k) = T2d(i,k) ; tv%S(i,j,k) = S2d(i,k)
+    enddo ; enddo
+
+    ! Add srunoff's contributions to relevant diagnostics. heat_content_eff_srunoff is all of
+    ! the heat applied (i.e. heat content plus e.g. latent heat), while heat_content_srunoff is
+    ! only the heat content of the melt water at the ambient temperatures.
+    do i=is,ie
+      if (associated(fluxes%heat_content_eff_srunoff)) &
+        fluxes%heat_content_eff_srunoff(i,j) = dHeat_srunoff(i) * GV%H_to_RZ / dt
+      if (associated(fluxes%heat_content_srunoff)) &
+        fluxes%heat_content_srunoff(i,j) = tv%C_p * dTempxPmE_srunoff(i) * GV%H_to_RZ / dt
+      ! As for the other mass fluxes, tv%TempxPmE is only accumulated here when the heat content
+      ! of mass fluxes is not provided by the coupler.
+      if (.not. associated(fluxes%heat_content_evap)) then
+        if (use_TempxPmE) &
+          tv%TempxPmE(i,j) = tv%TempxPmE(i,j) + dTempxPmE_srunoff(i) * GV%H_to_RZ
+      endif
+    enddo
+  enddo ! j
+
+  ! Return the state to the device.
+  !$omp target update to(h, tv%T, tv%S)
+  !$omp target update to(tv%TempxPmE) if(use_TempxPmE)
+  !$omp target update to(cTKE) if(do_energetics)
+  !$omp target update to(netMassInOut_rate, netheat_rate) if(calculate_buoyancy)
+
+end subroutine srunoff_host_fallback
+
 !> Update the thickness, temperature, and salinity due to thermodynamic
 !! boundary forcing (contained in fluxes type) applied to h, tv%T and tv%S,
 !! and calculate the TKE implications of this heating.
@@ -935,6 +1071,13 @@ subroutine applyBoundaryFluxesInOut(CS, G, GV, US, dt, fluxes, optics, nsw, h, t
 
   nii = CS%niblock ; if (nii == 0) nii = G%iec - G%isc + 1
   njj = CS%njblock ; if (njj == 0) njj = G%jec - G%jsc + 1
+
+  !   Submarine melt (srunoff) is distributed over depth by srunoff_host_fallback, which works on
+  ! whole rows of the computational domain, so the domain has to be a single block.  The answers
+  ! do not depend on the block size.
+  if (associated(fluxes%srunoff)) then
+    nii = G%iec - G%isc + 1 ; njj = G%jec - G%jsc + 1
+  endif
 
   call applyBoundaryFluxesInOut_block(CS, G, GV, US, dt, fluxes, optics, nsw, h, tv, &
                                       aggregate_FW_forcing, evap_CFL_limit, minimum_forcing_depth, &
@@ -1343,6 +1486,13 @@ subroutine applyBoundaryFluxesInOut_block(CS, G, GV, US, dt, fluxes, optics, nsw
           endif
         endif
       enddo
+
+      ! Distribute submarine melt (srunoff), if it is coupled, over a range of depths, before loops A
+      ! and B below, as in the CPU code, so that loop B sees the srunoff-fattened column.
+      if (associated(fluxes%srunoff)) &
+        call srunoff_host_fallback(G, GV, dt, fluxes, tv, h, minimum_forcing_depth, g_Hconv2, &
+                                   nii, njj, calculate_buoyancy, netMassInOut_rate, netheat_rate, &
+                                   cTKE, dSV_dT, dSV_dS)
 
       ! Apply the surface boundary fluxes in three steps:
       ! A/ update mass, temp, and salinity due to all terms except mass leaving
