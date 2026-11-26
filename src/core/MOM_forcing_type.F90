@@ -114,7 +114,9 @@ type, public :: forcing
     latent           => NULL(), & !< latent [Q R Z T-1 ~> W m-2] (typically < 0)
     sens             => NULL(), & !< sensible [Q R Z T-1 ~> W m-2] (typically negative)
     seaice_melt_heat => NULL(), & !< sea ice and snow melt or formation [Q R Z T-1 ~> W m-2] (typically negative)
-    heat_added       => NULL()    !< additional heat flux from SST restoring or flux adjustments [Q R Z T-1 ~> W m-2]
+    heat_added       => NULL(), & !< additional heat flux from SST restoring or flux adjustments [Q R Z T-1 ~> W m-2]
+    latent_srunoff   => NULL()    !< latent from submarine melt (srunoff), which can be distributed over depth
+                                  !! and so is not included in latent (typically < 0) [Q R Z T-1 ~> W m-2]
 
   ! components of latent heat fluxes used for diagnostic purposes
   real, pointer, dimension(:,:) :: &
@@ -131,6 +133,7 @@ type, public :: forcing
     vprec         => NULL(), & !< virtual liquid precip associated w/ SSS restoring [R Z T-1 ~> kg m-2 s-1]
     lrunoff       => NULL(), & !< liquid river runoff entering ocean [R Z T-1 ~> kg m-2 s-1]
     frunoff       => NULL(), & !< frozen river runoff (calving) entering ocean [R Z T-1 ~> kg m-2 s-1]
+    srunoff       => NULL(), & !< submarine melt entering ocean [R Z T-1 ~> kg m-2 s-1]
     lrunoff_glc   => NULL(), & !< liquid river glacier runoff entering ocean [R Z T-1 ~> kg m-2 s-1]
     frunoff_glc   => NULL(), & !< frozen river glacier runoff entering ocean [R Z T-1 ~> kg m-2 s-1]
     seaice_melt   => NULL()    !< snow/seaice melt (positive) or formation (negative) [R Z T-1 ~> kg m-2 s-1]
@@ -155,6 +158,9 @@ type, public :: forcing
     heat_content_vprec       => NULL(), & !< heat content associated with virtual >0 precip  [Q R Z T-1 ~> W m-2]
     heat_content_lrunoff     => NULL(), & !< heat content associated with liquid runoff      [Q R Z T-1 ~> W m-2]
     heat_content_frunoff     => NULL(), & !< heat content associated with frozen runoff      [Q R Z T-1 ~> W m-2]
+    heat_content_srunoff     => NULL(), & !< heat content associated with submarine melt     [Q R Z T-1 ~> W m-2]
+    heat_content_eff_srunoff => NULL(), & !< effective heat content associated with submarine melt,
+                                          !! i.e. heat content plus e.g. latent heat         [Q R Z T-1 ~> W m-2]
     heat_content_lrunoff_glc => NULL(), & !< heat content associated with liquid runoff      [Q R Z T-1 ~> W m-2]
     heat_content_frunoff_glc => NULL(), & !< heat content associated with frozen runoff      [Q R Z T-1 ~> W m-2]
     heat_content_massout     => NULL(), & !< heat content associated with mass leaving ocean [Q R Z T-1 ~> W m-2]
@@ -229,6 +235,17 @@ type, public :: forcing
                                   !! average of salt_left_behind
   real :: C_p                   !< heat capacity of seawater [Q C-1 ~> J kg-1 degC-1].
                                 !! C_p is is the same value as in thermovar_ptrs_type.
+  real :: latent_heat_fusion    !< The latent heat of fusion, used for submarine melt (srunoff)
+                                !! [Q ~> J kg-1].
+  logical :: srunoff_latent_heat = .false. !< If true, submarine melt (srunoff) enters each layer at
+                                !! the layer temperature minus latent_heat_fusion/C_p, a simplified
+                                !! form of the Gade (1979) meltwater mixing line that includes only
+                                !! the latent heat of melting. If false, srunoff enters the ocean at
+                                !! the ambient temperature.
+  real :: srunoff_depth_max = 0.0 !< The maximum depth over which the mass and heat from coupled
+                                !! submarine melt are spread, distributed uniformly by thickness. If 0,
+                                !! srunoff is applied within the top layer, or over the minimum forcing
+                                !! depth if the top layer is thinner than that [H ~> m or kg m-2].
 
   ! arrays needed in the some tracer modules, e.g., MOM_CFC_cap
   real, pointer, dimension(:,:) :: &
@@ -345,6 +362,7 @@ type, public :: forcing_diags ; private
   integer :: id_precip       = -1, id_vprec       = -1
   integer :: id_lprec        = -1, id_fprec       = -1
   integer :: id_lrunoff      = -1, id_frunoff     = -1
+  integer :: id_srunoff      = -1
   integer :: id_lrunoff_glc  = -1, id_frunoff_glc = -1
   integer :: id_net_massout  = -1, id_net_massin  = -1
   integer :: id_massout_flux = -1, id_massin_flux = -1
@@ -355,6 +373,7 @@ type, public :: forcing_diags ; private
   integer :: id_total_precip       = -1, id_total_vprec       = -1
   integer :: id_total_lprec        = -1, id_total_fprec       = -1
   integer :: id_total_lrunoff      = -1, id_total_frunoff     = -1
+  integer :: id_total_srunoff      = -1
   integer :: id_total_lrunoff_glc  = -1, id_total_frunoff_glc = -1
   integer :: id_total_net_massout  = -1, id_total_net_massin  = -1
   integer :: id_total_seaice_melt  = -1
@@ -370,9 +389,10 @@ type, public :: forcing_diags ; private
   integer :: id_sw                      = -1, id_lw                      = -1
   integer :: id_sw_vis                  = -1, id_sw_nir                  = -1
   integer :: id_lat_evap                = -1, id_lat_frunoff             = -1
-  integer :: id_lat_frunoff_glc         = -1
+  integer :: id_lat_frunoff_glc         = -1, id_lat_srunoff             = -1
   integer :: id_lat                     = -1, id_lat_fprec               = -1
   integer :: id_heat_content_lrunoff    = -1, id_heat_content_frunoff    = -1
+  integer :: id_heat_content_srunoff    = -1, id_heat_content_eff_srunoff = -1
   integer :: id_heat_content_lrunoff_glc= -1, id_heat_content_frunoff_glc= -1
   integer :: id_heat_content_lprec      = -1, id_heat_content_fprec      = -1
   integer :: id_heat_content_cond       = -1, id_heat_content_surfwater  = -1
@@ -388,9 +408,11 @@ type, public :: forcing_diags ; private
   integer :: id_total_sens                    = -1, id_total_LwLatSens               = -1
   integer :: id_total_sw                      = -1, id_total_lw                      = -1
   integer :: id_total_lat_evap                = -1, id_total_lat_frunoff             = -1
+  integer :: id_total_lat_srunoff             = -1
   integer :: id_total_lat_frunoff_glc         = -1
   integer :: id_total_lat                     = -1, id_total_lat_fprec               = -1
   integer :: id_total_heat_content_lrunoff    = -1, id_total_heat_content_frunoff    = -1
+  integer :: id_total_heat_content_srunoff    = -1, id_total_heat_content_eff_srunoff = -1
   integer :: id_total_heat_content_lrunoff_glc= -1, id_total_heat_content_frunoff_glc=-1
   integer :: id_total_heat_content_lprec      = -1, id_total_heat_content_fprec      = -1
   integer :: id_total_heat_content_cond       = -1, id_total_heat_content_surfwater  = -1
@@ -1379,6 +1401,9 @@ subroutine MOM_forcing_chksum(mesg, fluxes, G, US, haloshift)
   if (associated(fluxes%latent_frunoff_diag)) &
     call hchksum(fluxes%latent_frunoff_diag, mesg//" fluxes%latent_frunoff_diag", G%HI, &
                  haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
+  if (associated(fluxes%latent_srunoff)) &
+    call hchksum(fluxes%latent_srunoff, mesg//" fluxes%latent_srunoff", G%HI, &
+                 haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
   if (associated(fluxes%latent_frunoff_glc_diag)) &
     call hchksum(fluxes%latent_frunoff_glc_diag, mesg//" fluxes%latent_frunoff_glc_diag", G%HI, &
                  haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
@@ -1418,6 +1443,8 @@ subroutine MOM_forcing_chksum(mesg, fluxes, G, US, haloshift)
     call hchksum(fluxes%frunoff, mesg//" fluxes%frunoff", G%HI, haloshift=hshift, unscale=US%RZ_T_to_kg_m2s)
   if (associated(fluxes%frunoff_glc)) &
     call hchksum(fluxes%frunoff_glc, mesg//" fluxes%frunoff_glc", G%HI, haloshift=hshift, unscale=US%RZ_T_to_kg_m2s)
+  if (associated(fluxes%srunoff)) &
+    call hchksum(fluxes%srunoff, mesg//" fluxes%srunoff", G%HI, haloshift=hshift, unscale=US%RZ_T_to_kg_m2s)
   if (associated(fluxes%heat_content_lrunoff)) &
     call hchksum(fluxes%heat_content_lrunoff, mesg//" fluxes%heat_content_lrunoff", G%HI, &
                  haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
@@ -1429,6 +1456,12 @@ subroutine MOM_forcing_chksum(mesg, fluxes, G, US, haloshift)
                  haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
   if (associated(fluxes%heat_content_frunoff_glc)) &
     call hchksum(fluxes%heat_content_frunoff_glc, mesg//" fluxes%heat_content_frunoff_glc", G%HI, &
+                 haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
+  if (associated(fluxes%heat_content_srunoff)) &
+    call hchksum(fluxes%heat_content_srunoff, mesg//" fluxes%heat_content_srunoff", G%HI, &
+                 haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
+  if (associated(fluxes%heat_content_eff_srunoff)) &
+    call hchksum(fluxes%heat_content_eff_srunoff, mesg//" fluxes%heat_content_eff_srunoff", G%HI, &
                  haloshift=hshift, unscale=US%QRZ_T_to_W_m2)
   if (associated(fluxes%heat_content_lprec)) &
     call hchksum(fluxes%heat_content_lprec, mesg//" fluxes%heat_content_lprec", G%HI, &
@@ -1533,6 +1566,7 @@ subroutine forcing_SinglePointPrint(fluxes, G, i, j, mesg)
   call locMsg(fluxes%latent_fprec_diag,'latent_fprec_diag')
   call locMsg(fluxes%latent_frunoff_diag,'latent_frunoff_diag')
   call locMsg(fluxes%latent_frunoff_glc_diag,'latent_frunoff_glc_diag')
+  call locMsg(fluxes%latent_srunoff,'latent_srunoff')
   call locMsg(fluxes%sens,'sens')
   call locMsg(fluxes%evap,'evap')
   call locMsg(fluxes%lprec,'lprec')
@@ -1548,10 +1582,13 @@ subroutine forcing_SinglePointPrint(fluxes, G, i, j, mesg)
   call locMsg(fluxes%lrunoff_glc,'lrunoff_glc')
   call locMsg(fluxes%frunoff,'frunoff')
   call locMsg(fluxes%frunoff_glc,'frunoff_glc')
+  call locMsg(fluxes%srunoff,'srunoff')
   call locMsg(fluxes%heat_content_lrunoff,'heat_content_lrunoff')
   call locMsg(fluxes%heat_content_lrunoff_glc,'heat_content_lrunoff_glc')
   call locMsg(fluxes%heat_content_frunoff,'heat_content_frunoff')
   call locMsg(fluxes%heat_content_frunoff_glc,'heat_content_frunoff_glc')
+  call locMsg(fluxes%heat_content_srunoff,'heat_content_srunoff')
+  call locMsg(fluxes%heat_content_eff_srunoff,'heat_content_eff_srunoff')
   call locMsg(fluxes%heat_content_lprec,'heat_content_lprec')
   call locMsg(fluxes%heat_content_fprec,'heat_content_fprec')
   call locMsg(fluxes%heat_content_vprec,'heat_content_vprec')
@@ -1698,7 +1735,7 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
   ! surface mass flux maps
 
   handles%id_prcme = register_diag_field('ocean_model', 'PRCmE', diag%axesT1, Time, &
-        'Net surface water flux (precip+melt+lrunoff+ice calving-evap)',  &
+        'Net surface water flux (precip+melt+lrunoff+srunoff+ice calving-evap)',  &
         'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s,                       &
         standard_name='water_flux_into_sea_water', cmor_field_name='wfo', &
         cmor_standard_name='water_flux_into_sea_water',cmor_long_name='Water Flux Into Sea Water')
@@ -1754,6 +1791,10 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
         cmor_standard_name='water_flux_into_sea_water_from_rivers',                           &
         cmor_long_name='Water Flux into Sea Water From Rivers')
 
+  handles%id_srunoff = register_diag_field('ocean_model', 'srunoff', diag%axesT1, Time, &
+        'Submarine melt into ocean', &
+        units='kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s)
+
   if (present(use_glc_runoff)) then ; if (use_glc_runoff) then
     handles%id_frunoff_glc = register_diag_field('ocean_model', 'frunoff_glc', diag%axesT1, Time,    &
           'Frozen glacier runoff (calving) and iceberg melt into ocean', &
@@ -1775,11 +1816,13 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
         'kg m-2 s-1', conversion=US%RZ_T_to_kg_m2s)
 
   handles%id_massout_flux = register_diag_field('ocean_model', 'massout_flux', diag%axesT1, Time, &
-        'Net mass flux of freshwater out of the ocean (used in the boundary flux calculation)', &
+        'Net mass flux of freshwater out of the ocean (used in the boundary flux calculation). '//&
+        'Excludes coupled submarine melt (srunoff).', &
          'kg m-2', conversion=diag%GV%H_to_kg_m2)
 
   handles%id_massin_flux  = register_diag_field('ocean_model', 'massin_flux', diag%axesT1, Time, &
-        'Net mass flux of freshwater into the ocean (used in boundary flux calculation)', &
+        'Net mass flux of freshwater into the ocean (used in boundary flux calculation). '//&
+        'Excludes coupled submarine melt (srunoff).', &
         'kg m-2', conversion=diag%GV%H_to_kg_m2)
 
   !=========================================================================
@@ -1847,6 +1890,10 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
       cmor_field_name='total_friver',                                                         &
       cmor_standard_name='water_flux_into_sea_water_from_rivers_area_integrated',             &
       cmor_long_name='Water Flux into Sea Water From Rivers Area Integrated')
+
+  handles%id_total_srunoff = register_scalar_field('ocean_model', 'total_srunoff', Time, diag, &
+      long_name='Area integrated submarine melt into ocean', &
+      units='kg s-1', conversion=US%RZL2_to_kg*US%s_to_T)
 
   if (present(use_glc_runoff)) then ; if (use_glc_runoff) then
     handles%id_total_frunoff_glc = register_scalar_field('ocean_model', 'total_frunoff_glc', Time, diag, &
@@ -1926,6 +1973,14 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
     endif
   endif
 
+  handles%id_heat_content_srunoff = register_diag_field('ocean_model', 'heat_content_srunoff', &
+        diag%axesT1, Time, 'Heat content (relative to 0C) of submarine melt into ocean', &
+        'W m-2', conversion=US%QRZ_T_to_W_m2)
+
+  handles%id_heat_content_eff_srunoff = register_diag_field('ocean_model', 'heat_content_eff_srunoff', &
+        diag%axesT1, Time, 'Effective heat content (relative to 0C) of submarine melt into ocean, '//&
+        'i.e. heat content plus e.g. latent heat', 'W m-2', conversion=US%QRZ_T_to_W_m2)
+
   if (present(use_glc_runoff)) then ; if (use_glc_runoff) then
     handles%id_heat_content_frunoff_glc = register_diag_field('ocean_model', 'heat_content_frunoff_glc', &
           diag%axesT1, Time, 'Heat content (relative to 0C) of solid glacier runoff into ocean',         &
@@ -1980,7 +2035,8 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
         cmor_long_name='Heat Content (relative to 0degC) of Water Leaving Ocean via Evaporation and Ice Formation')
 
   handles%id_heat_content_massin = register_diag_field('ocean_model', 'heat_content_massin',   &
-         diag%axesT1, Time,'Heat content (relative to 0degC) of net mass entering ocean ocean',&
+         diag%axesT1, Time,'Heat content (relative to 0degC) of net mass entering ocean ocean. '//&
+         'Excludes coupled submarine melt (srunoff).',&
         'W m-2', conversion=US%QRZ_T_to_W_m2)
 
   handles%id_net_heat_coupler = register_diag_field('ocean_model', 'net_heat_coupler',          &
@@ -2045,6 +2101,10 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
           'Latent heat flux into ocean due to melting of frozen glacier runoff', 'W m-2', conversion=US%QRZ_T_to_W_m2)
   endif ; endif
 
+  handles%id_lat_srunoff = register_diag_field('ocean_model', 'latent_srunoff', diag%axesT1, Time, &
+        'Latent heat flux into ocean due to melting of coupled submarine melt (srunoff)', &
+        'W m-2', conversion=US%QRZ_T_to_W_m2)
+
   handles%id_sens = register_diag_field('ocean_model', 'sensible', diag%axesT1, Time, &
         'Sensible heat flux into ocean', 'W m-2', conversion=US%QRZ_T_to_W_m2,        &
         standard_name='surface_downward_sensible_heat_flux',                         &
@@ -2083,6 +2143,16 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
       'temperature_flux_due_to_runoff_expressed_as_heat_flux_into_sea_water_area_integrated',&
       cmor_long_name=                                                                        &
       'Temperature Flux due to Runoff Expressed as Heat Flux into Sea Water Area Integrated')
+
+  handles%id_total_heat_content_srunoff = register_scalar_field('ocean_model',               &
+      'total_heat_content_srunoff', Time, diag,                                              &
+      long_name='Area integrated heat content (relative to 0C) of submarine melt',           &
+      units='W', conversion=US%QRZ_T_to_W_m2*US%L_to_m**2)
+
+  handles%id_total_heat_content_eff_srunoff = register_scalar_field('ocean_model',           &
+      'total_heat_content_eff_srunoff', Time, diag,                                          &
+      long_name='Area integrated effective heat content (relative to 0C) of submarine melt', &
+      units='W', conversion=US%QRZ_T_to_W_m2*US%L_to_m**2)
 
   if (present(use_glc_runoff)) then ; if (use_glc_runoff) then
     handles%id_total_heat_content_frunoff_glc = register_scalar_field('ocean_model',                 &
@@ -2219,6 +2289,11 @@ subroutine register_forcing_type_diags(Time, diag, US, use_temperature, &
         long_name='Area integrated latent heat flux due to melting frozen glacier runoff',              &
         units='W', conversion=US%QRZ_T_to_W_m2*US%L_to_m**2) ! todo: update cmor names
   endif ; endif
+
+  handles%id_total_lat_srunoff = register_scalar_field('ocean_model',                 &
+      'total_lat_srunoff', Time, diag,                                                &
+      long_name='Area integrated latent heat flux due to melting coupled submarine melt (srunoff)', &
+      units='W', conversion=US%QRZ_T_to_W_m2*US%L_to_m**2)
 
   handles%id_total_sens = register_scalar_field('ocean_model',                 &
       'total_sens', Time, diag,                                                &
@@ -2497,6 +2572,13 @@ subroutine fluxes_accumulate(flux_tmp, fluxes, G, wt2, forces)
 
     fluxes%salt_flux(i,j) = wt1*fluxes%salt_flux(i,j) + wt2*flux_tmp%salt_flux(i,j)
   enddo ; enddo
+  ! Unlike the other water-group fields above, fluxes%srunoff is only associated when
+  ! submarine-melt coupling is actually configured, so it needs its own guard here.
+  if (associated(fluxes%srunoff) .and. associated(flux_tmp%srunoff)) then
+    do j=js,je ; do i=is,ie
+      fluxes%srunoff(i,j) = wt1*fluxes%srunoff(i,j) + wt2*flux_tmp%srunoff(i,j)
+    enddo ; enddo
+  endif
   if (associated(fluxes%salt_flux_in) .and. associated(flux_tmp%salt_flux_in)) then
     do j=js,je ; do i=is,ie
       fluxes%salt_flux_in(i,j) = wt1*fluxes%salt_flux_in(i,j) + wt2*flux_tmp%salt_flux_in(i,j)
@@ -2822,6 +2904,9 @@ subroutine get_net_mass_forcing(fluxes, G, US, net_mass_src)
   if (associated(fluxes%frunoff)) then ; do j=js,je ; do i=is,ie
     net_mass_src(i,j) = net_mass_src(i,j) + fluxes%frunoff(i,j)
   enddo ; enddo ; endif
+  if (associated(fluxes%srunoff)) then ; do j=js,je ; do i=is,ie
+    net_mass_src(i,j) = net_mass_src(i,j) + fluxes%srunoff(i,j)
+  enddo ; enddo ; endif
   if (associated(fluxes%lrunoff_glc)) then ; do j=js,je ; do i=is,ie
     net_mass_src(i,j) = net_mass_src(i,j) + fluxes%lrunoff_glc(i,j)
   enddo ; enddo ; endif
@@ -2988,6 +3073,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
         if (associated(fluxes%evap))        res(i,j) = res(i,j) + fluxes%evap(i,j)
         if (associated(fluxes%lrunoff))     res(i,j) = res(i,j) + fluxes%lrunoff(i,j)
         if (associated(fluxes%frunoff))     res(i,j) = res(i,j) + fluxes%frunoff(i,j)
+        if (associated(fluxes%srunoff))     res(i,j) = res(i,j) + fluxes%srunoff(i,j)
         if (associated(fluxes%lrunoff_glc)) res(i,j) = res(i,j) + fluxes%lrunoff_glc(i,j)
         if (associated(fluxes%frunoff_glc)) res(i,j) = res(i,j) + fluxes%frunoff_glc(i,j)
         if (associated(fluxes%vprec))       res(i,j) = res(i,j) + fluxes%vprec(i,j)
@@ -3036,6 +3122,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
         if (associated(fluxes%fprec)) res(i,j) = res(i,j) + fluxes%fprec(i,j)
         if (associated(fluxes%lrunoff)) res(i,j) = res(i,j) + fluxes%lrunoff(i,j)
         if (associated(fluxes%frunoff)) res(i,j) = res(i,j) + fluxes%frunoff(i,j)
+        if (associated(fluxes%srunoff)) res(i,j) = res(i,j) + fluxes%srunoff(i,j)
         if (associated(fluxes%lrunoff_glc)) res(i,j) = res(i,j) + fluxes%lrunoff_glc(i,j)
         if (associated(fluxes%frunoff_glc)) res(i,j) = res(i,j) + fluxes%frunoff_glc(i,j)
 
@@ -3157,6 +3244,14 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       endif
     endif
 
+    if (associated(fluxes%srunoff)) then
+      if (handles%id_srunoff > 0) call post_data(handles%id_srunoff, fluxes%srunoff, diag)
+      if (handles%id_total_srunoff > 0) then
+        total_mass_flux = global_area_integral(fluxes%srunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
+        call post_data(handles%id_total_srunoff, total_mass_flux, diag)
+      endif
+    endif
+
     if (associated(fluxes%seaice_melt)) then
       if (handles%id_seaice_melt > 0) call post_data(handles%id_seaice_melt, fluxes%seaice_melt, diag)
       if (handles%id_total_seaice_melt > 0) then
@@ -3196,6 +3291,20 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
     if ((handles%id_total_heat_content_frunoff_glc > 0) .and. associated(fluxes%heat_content_frunoff_glc)) then
       total_heat_flux = global_area_integral(fluxes%heat_content_frunoff_glc, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_total_heat_content_frunoff_glc, total_heat_flux, diag)
+    endif
+
+    if ((handles%id_heat_content_srunoff > 0) .and. associated(fluxes%heat_content_srunoff))  &
+      call post_data(handles%id_heat_content_srunoff, fluxes%heat_content_srunoff, diag)
+    if ((handles%id_total_heat_content_srunoff > 0) .and. associated(fluxes%heat_content_srunoff)) then
+      total_heat_flux = global_area_integral(fluxes%heat_content_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+      call post_data(handles%id_total_heat_content_srunoff, total_heat_flux, diag)
+    endif
+
+    if ((handles%id_heat_content_eff_srunoff > 0) .and. associated(fluxes%heat_content_eff_srunoff)) &
+      call post_data(handles%id_heat_content_eff_srunoff, fluxes%heat_content_eff_srunoff, diag)
+    if ((handles%id_total_heat_content_eff_srunoff > 0) .and. associated(fluxes%heat_content_eff_srunoff)) then
+      total_heat_flux = global_area_integral(fluxes%heat_content_eff_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+      call post_data(handles%id_total_heat_content_eff_srunoff, total_heat_flux, diag)
     endif
 
     if ((handles%id_heat_content_lprec > 0) .and. associated(fluxes%heat_content_lprec))      &
@@ -3253,6 +3362,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       res(i,j) = 0.0
       if (associated(fluxes%LW))               res(i,j) = res(i,j) + fluxes%lw(i,j)
       if (associated(fluxes%latent))           res(i,j) = res(i,j) + fluxes%latent(i,j)
+      if (associated(fluxes%latent_srunoff))   res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
       if (associated(fluxes%sens))             res(i,j) = res(i,j) + fluxes%sens(i,j)
       if (associated(fluxes%SW))               res(i,j) = res(i,j) + fluxes%sw(i,j)
       if (associated(fluxes%seaice_melt_heat)) res(i,j) = res(i,j) + fluxes%seaice_melt_heat(i,j)
@@ -3282,6 +3392,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
           res(i,j) = res(i,j) + fluxes%heat_content_lrunoff(i,j)
         if (associated(fluxes%heat_content_frunoff)) &
           res(i,j) = res(i,j) + fluxes%heat_content_frunoff(i,j)
+        ! The effective heat content of submarine melt includes its latent contribution.
+        if (associated(fluxes%heat_content_eff_srunoff)) &
+          res(i,j) = res(i,j) + fluxes%heat_content_eff_srunoff(i,j)
         if (associated(fluxes%heat_content_lrunoff_glc)) &
           res(i,j) = res(i,j) + fluxes%heat_content_lrunoff_glc(i,j)
         if (associated(fluxes%heat_content_frunoff_glc)) &
@@ -3320,6 +3433,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
         res(i,j) = 0.0
         if (associated(fluxes%heat_content_lrunoff))     res(i,j) = res(i,j) + fluxes%heat_content_lrunoff(i,j)
         if (associated(fluxes%heat_content_frunoff))     res(i,j) = res(i,j) + fluxes%heat_content_frunoff(i,j)
+        if (associated(fluxes%heat_content_srunoff))     res(i,j) = res(i,j) + fluxes%heat_content_srunoff(i,j)
         if (associated(fluxes%heat_content_lrunoff_glc)) res(i,j) = res(i,j) + fluxes%heat_content_lrunoff_glc(i,j)
         if (associated(fluxes%heat_content_frunoff_glc)) res(i,j) = res(i,j) + fluxes%heat_content_frunoff_glc(i,j)
         if (associated(fluxes%heat_content_lprec))       res(i,j) = res(i,j) + fluxes%heat_content_lprec(i,j)
@@ -3345,6 +3459,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
         res(i,j) = 0.0
         if (associated(fluxes%heat_content_lrunoff)) res(i,j) = res(i,j) + fluxes%heat_content_lrunoff(i,j)
         if (associated(fluxes%heat_content_frunoff)) res(i,j) = res(i,j) + fluxes%heat_content_frunoff(i,j)
+        if (associated(fluxes%heat_content_srunoff)) res(i,j) = res(i,j) + fluxes%heat_content_srunoff(i,j)
         if (associated(fluxes%heat_content_lrunoff_glc)) res(i,j) = res(i,j) + fluxes%heat_content_lrunoff_glc(i,j)
         if (associated(fluxes%heat_content_frunoff_glc)) res(i,j) = res(i,j) + fluxes%heat_content_frunoff_glc(i,j)
       enddo ; enddo
@@ -3367,6 +3482,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = (fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j)
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       call post_data(handles%id_LwLatSens, res, diag)
     endif
 
@@ -3375,6 +3493,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = (fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j)
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       total_heat_flux = global_area_integral(res, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_total_LwLatSens, total_heat_flux, diag)
     endif
@@ -3384,6 +3505,9 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       do j=js,je ; do i=is,ie
         res(i,j) = ((fluxes%lw(i,j) + fluxes%latent(i,j)) + fluxes%sens(i,j))
       enddo ; enddo
+      if (associated(fluxes%latent_srunoff)) then ; do j=js,je ; do i=is,ie
+        res(i,j) = res(i,j) + fluxes%latent_srunoff(i,j)
+      enddo ; enddo ; endif
       ave_heat_flux = global_area_mean(res, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_LwLatSens_ga, ave_heat_flux, diag)
     endif
@@ -3420,16 +3544,33 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
       call post_data(handles%id_lw_ga, ave_heat_flux, diag)
     endif
 
-    if ((handles%id_lat > 0) .and. associated(fluxes%latent)) then
-      call post_data(handles%id_lat, fluxes%latent, diag)
-    endif
-    if ((handles%id_total_lat > 0) .and. associated(fluxes%latent)) then
-      total_heat_flux = global_area_integral(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
-      call post_data(handles%id_total_lat, total_heat_flux, diag)
-    endif
-    if ((handles%id_lat_ga > 0) .and. associated(fluxes%latent)) then
-      ave_heat_flux = global_area_mean(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
-      call post_data(handles%id_lat_ga, ave_heat_flux, diag)
+    if (associated(fluxes%latent_srunoff)) then
+      if ((handles%id_lat > 0) .or. (handles%id_total_lat > 0) .or. (handles%id_lat_ga > 0)) then
+        ! fluxes%latent is guaranteed to be associated here too, since latent_srunoff
+        ! is only allocated when heat is true, which is also required for fluxes%latent.
+        do j=js,je ; do i=is,ie
+          res(i,j) = fluxes%latent(i,j) + fluxes%latent_srunoff(i,j)
+        enddo ; enddo
+        if (handles%id_lat > 0) call post_data(handles%id_lat, res, diag)
+        if (handles%id_total_lat > 0) then
+          total_heat_flux = global_area_integral(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+          call post_data(handles%id_total_lat, total_heat_flux, diag)
+        endif
+        if (handles%id_lat_ga > 0) then
+          ave_heat_flux = global_area_mean(res, G, tmp_scale=US%QRZ_T_to_W_m2)
+          call post_data(handles%id_lat_ga, ave_heat_flux, diag)
+        endif
+      endif
+    elseif (associated(fluxes%latent)) then
+      if (handles%id_lat > 0) call post_data(handles%id_lat, fluxes%latent, diag)
+      if (handles%id_total_lat > 0) then
+        total_heat_flux = global_area_integral(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
+        call post_data(handles%id_total_lat, total_heat_flux, diag)
+      endif
+      if (handles%id_lat_ga > 0) then
+        ave_heat_flux = global_area_mean(fluxes%latent, G, tmp_scale=US%QRZ_T_to_W_m2)
+        call post_data(handles%id_lat_ga, ave_heat_flux, diag)
+      endif
     endif
 
     if ((handles%id_lat_evap > 0) .and. associated(fluxes%latent_evap_diag)) then
@@ -3462,6 +3603,14 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, h
     if (handles%id_total_lat_frunoff_glc > 0 .and. associated(fluxes%latent_frunoff_glc_diag)) then
       total_heat_flux = global_area_integral(fluxes%latent_frunoff_glc_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
       call post_data(handles%id_total_lat_frunoff_glc, total_heat_flux, diag)
+    endif
+
+    if ((handles%id_lat_srunoff > 0) .and. associated(fluxes%latent_srunoff)) then
+      call post_data(handles%id_lat_srunoff, fluxes%latent_srunoff, diag)
+    endif
+    if ((handles%id_total_lat_srunoff > 0) .and. associated(fluxes%latent_srunoff)) then
+      total_heat_flux = global_area_integral(fluxes%latent_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+      call post_data(handles%id_total_lat_srunoff, total_heat_flux, diag)
     endif
 
     if ((handles%id_sens > 0) .and. associated(fluxes%sens)) then
@@ -3607,7 +3756,7 @@ end subroutine forcing_diagnostics
 subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
                                   shelf, iceberg, salt, fix_accum_bug, fix_excess_salt_accum_bug, &
                                   cfc, marbl, waves, shelf_sfc_accumulation, lamult, hevap, &
-                                  ice_ncat, tau_mag, carbon)
+                                  ice_ncat, tau_mag, carbon, srunoff)
   type(ocean_grid_type), intent(in) :: G       !< Ocean grid structure
   type(forcing),      intent(inout) :: fluxes  !< A structure containing thermodynamic forcing fields
   logical, optional,     intent(in) :: water   !< If present and true, allocate water fluxes
@@ -3636,6 +3785,8 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
   integer, optional,     intent(in) :: ice_ncat !< number of ice categories
   logical, optional,     intent(in) :: tau_mag !< If present and true, allocate tau_mag and related fields
   logical, optional,     intent(in) :: carbon  !< If present and true, allocate carbon fluxes
+  logical, optional,     intent(in) :: srunoff !< If present and true, allocate fields for
+                                               !! submarine melt
 
   ! Local variables
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
@@ -3662,6 +3813,7 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
   call myAlloc(fluxes%vprec,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%lrunoff,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%frunoff,isd,ied,jsd,jed, water)
+  call myAlloc(fluxes%srunoff,isd,ied,jsd,jed, srunoff)
   call myAlloc(fluxes%lrunoff_glc,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%frunoff_glc,isd,ied,jsd,jed, water)
   call myAlloc(fluxes%seaice_melt,isd,ied,jsd,jed, water)
@@ -3692,6 +3844,12 @@ subroutine allocate_forcing_by_group(G, fluxes, water, heat, ustar, press, &
     call myAlloc(fluxes%heat_content_frunoff_glc,isd,ied,jsd,jed, .true.)
     call myAlloc(fluxes%heat_content_massout,isd,ied,jsd,jed, enthalpy_mom)
     call myAlloc(fluxes%heat_content_massin,isd,ied,jsd,jed,  enthalpy_mom)
+  endif ; endif
+
+  if (present(heat) .and. present(srunoff)) then ; if (heat .and. srunoff) then
+    call myAlloc(fluxes%latent_srunoff,isd,ied,jsd,jed, .true.)
+    call myAlloc(fluxes%heat_content_srunoff,isd,ied,jsd,jed, .true.)
+    call myAlloc(fluxes%heat_content_eff_srunoff,isd,ied,jsd,jed, .true.)
   endif ; endif
 
   call myAlloc(fluxes%p_surf,isd,ied,jsd,jed, press)
@@ -3785,6 +3943,15 @@ subroutine allocate_forcing_by_ref(fluxes_ref, G, fluxes, turns)
       associated(fluxes_ref%heat_added))
   call myAlloc(fluxes%buoy, G%isd, G%ied, G%jsd, G%jed, &
       associated(fluxes_ref%buoy))
+
+  call myAlloc(fluxes%srunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%srunoff))
+  call myAlloc(fluxes%heat_content_srunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%heat_content_srunoff))
+  call myAlloc(fluxes%heat_content_eff_srunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%heat_content_eff_srunoff))
+  call myAlloc(fluxes%latent_srunoff, G%isd, G%ied, G%jsd, G%jed, &
+      associated(fluxes_ref%latent_srunoff))
 
   call myAlloc(fluxes%BBL_tidal_dis, G%isd, G%ied, G%jsd, G%jed, &
       associated(fluxes_ref%BBL_tidal_dis))
@@ -4001,11 +4168,14 @@ subroutine deallocate_forcing_type(fluxes)
   if (associated(fluxes%latent_fprec_diag))    deallocate(fluxes%latent_fprec_diag)
   if (associated(fluxes%latent_frunoff_diag))  deallocate(fluxes%latent_frunoff_diag)
   if (associated(fluxes%latent_frunoff_glc_diag))  deallocate(fluxes%latent_frunoff_glc_diag)
+  if (associated(fluxes%latent_srunoff))  deallocate(fluxes%latent_srunoff)
   if (associated(fluxes%sens))                 deallocate(fluxes%sens)
   if (associated(fluxes%carbon_content_lrunoff)) deallocate(fluxes%carbon_content_lrunoff)
   if (associated(fluxes%heat_added))           deallocate(fluxes%heat_added)
   if (associated(fluxes%heat_content_lrunoff)) deallocate(fluxes%heat_content_lrunoff)
   if (associated(fluxes%heat_content_frunoff)) deallocate(fluxes%heat_content_frunoff)
+  if (associated(fluxes%heat_content_srunoff)) deallocate(fluxes%heat_content_srunoff)
+  if (associated(fluxes%heat_content_eff_srunoff)) deallocate(fluxes%heat_content_eff_srunoff)
   if (associated(fluxes%heat_content_lrunoff_glc)) deallocate(fluxes%heat_content_lrunoff_glc)
   if (associated(fluxes%heat_content_frunoff_glc)) deallocate(fluxes%heat_content_frunoff_glc)
   if (associated(fluxes%heat_content_lprec))   deallocate(fluxes%heat_content_lprec)
@@ -4020,6 +4190,7 @@ subroutine deallocate_forcing_type(fluxes)
   if (associated(fluxes%vprec))                deallocate(fluxes%vprec)
   if (associated(fluxes%lrunoff))              deallocate(fluxes%lrunoff)
   if (associated(fluxes%frunoff))              deallocate(fluxes%frunoff)
+  if (associated(fluxes%srunoff))              deallocate(fluxes%srunoff)
   if (associated(fluxes%lrunoff_glc))          deallocate(fluxes%lrunoff_glc)
   if (associated(fluxes%frunoff_glc))          deallocate(fluxes%frunoff_glc)
   if (associated(fluxes%seaice_melt))          deallocate(fluxes%seaice_melt)
@@ -4171,6 +4342,15 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
   endif
 
   ! The following fields are handled by drivers rather than control flags.
+  if (associated(fluxes_in%srunoff)) &
+    call rotate_array(fluxes_in%srunoff, turns, fluxes%srunoff)
+  if (associated(fluxes_in%heat_content_srunoff)) &
+    call rotate_array(fluxes_in%heat_content_srunoff, turns, fluxes%heat_content_srunoff)
+  if (associated(fluxes_in%heat_content_eff_srunoff)) &
+    call rotate_array(fluxes_in%heat_content_eff_srunoff, turns, fluxes%heat_content_eff_srunoff)
+  if (associated(fluxes_in%latent_srunoff)) &
+    call rotate_array(fluxes_in%latent_srunoff, turns, fluxes%latent_srunoff)
+
   if (associated(fluxes_in%sw_vis_dir)) &
     call rotate_array(fluxes_in%sw_vis_dir, turns, fluxes%sw_vis_dir)
   if (associated(fluxes_in%sw_vis_dif)) &
@@ -4215,6 +4395,9 @@ subroutine rotate_forcing(fluxes_in, fluxes, turns)
   fluxes%fluxes_used = fluxes_in%fluxes_used
   fluxes%dt_buoy_accum = fluxes_in%dt_buoy_accum
   fluxes%C_p = fluxes_in%C_p
+  fluxes%latent_heat_fusion = fluxes_in%latent_heat_fusion
+  fluxes%srunoff_latent_heat = fluxes_in%srunoff_latent_heat
+  fluxes%srunoff_depth_max = fluxes_in%srunoff_depth_max
   ! NOTE: gustless_accum_bug is set during allocation
 
   fluxes%num_msg = fluxes_in%num_msg
@@ -4385,6 +4568,10 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%vprec, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%lrunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%frunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
+    ! Unlike the other water-group fields above, fluxes%srunoff is only associated when
+    ! submarine-melt coupling is actually configured, so it needs its own guard here.
+    if (associated(fluxes%srunoff)) &
+      call homogenize_field_t(fluxes%srunoff, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%lrunoff_glc, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%frunoff_glc, G, tmp_scale=US%RZ_T_to_kg_m2s)
     call homogenize_field_t(fluxes%seaice_melt, G, tmp_scale=US%RZ_T_to_kg_m2s)
@@ -4408,6 +4595,11 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%latent_frunoff_glc_diag, G, tmp_scale=US%QRZ_T_to_W_m2)
   endif
 
+  ! Unlike the other heat fluxes above, fluxes%latent_srunoff is only associated when
+  ! submarine-melt coupling is actually configured, so it needs its own guard here.
+  if (associated(fluxes%latent_srunoff)) &
+    call homogenize_field_t(fluxes%latent_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+
   if (do_salt) call homogenize_field_t(fluxes%salt_flux, G, tmp_scale=US%RZ_T_to_kg_m2s)
 
   if (do_heat .and. do_water) then
@@ -4417,6 +4609,13 @@ subroutine homogenize_forcing(fluxes, G, GV, US)
     call homogenize_field_t(fluxes%heat_content_vprec, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_lrunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_frunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+    ! Unlike the other heat_content fields above, fluxes%heat_content_srunoff and
+    ! fluxes%heat_content_eff_srunoff are only associated when submarine-melt coupling is
+    ! actually configured, so they need their own guards here.
+    if (associated(fluxes%heat_content_srunoff)) &
+      call homogenize_field_t(fluxes%heat_content_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
+    if (associated(fluxes%heat_content_eff_srunoff)) &
+      call homogenize_field_t(fluxes%heat_content_eff_srunoff, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_lrunoff_glc, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_frunoff_glc, G, tmp_scale=US%QRZ_T_to_W_m2)
     call homogenize_field_t(fluxes%heat_content_massout, G, tmp_scale=US%QRZ_T_to_W_m2)

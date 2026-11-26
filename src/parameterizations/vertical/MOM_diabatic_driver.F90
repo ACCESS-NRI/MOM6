@@ -322,6 +322,7 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   real :: H_to_RL2_T2  ! A conversion factor from thicknesses in H to pressure [R L2 T-2 H-1 ~> Pa m-1 or Pa m2 kg-1]
   integer :: i, j, k, is, ie, js, je, nz
   logical :: showCallTree ! If true, show the call tree
+  character(len=240) :: mesg  ! A message for errors
 
   real, allocatable, dimension(:,:,:)    :: h_in  ! thickness before thermodynamics [H ~> m or kg m-2]
   real, allocatable, dimension(:,:,:)    :: t_in  ! temperature before thermodynamics [C ~> degC]
@@ -341,6 +342,24 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
         "diabatic was called with a zero length timestep.")
   if (dt < 0.0) call MOM_error(FATAL, "MOM_diabatic_driver: "// &
         "diabatic was called with a negative timestep.")
+
+  if (associated(fluxes%srunoff)) then
+    ! KPP code does not account for submarine-melt contributions to the surface buoyancy fluxes.
+    if (CS%useKPP) call MOM_error(FATAL, &
+        "MOM_diabatic_driver: submarine melt (srunoff) coupling is not supported with USE_KPP=True.")
+
+    ! Distribution of submarine melt does not handle negative values, which is not physical anyway.
+    do j=G%jsc,G%jec ; do i=G%isc,G%iec
+      if ((G%mask2dT(i,j) > 0.0) .and. (fluxes%srunoff(i,j) < 0.0)) then
+        write(mesg,'("negative srunoff of ",(1pe12.4)," kg m-2 s-1 at global i,j = ",I0,", ",I0, &
+                   & " lon/lat = ",(1pe12.4)," E ",(1pe12.4)," N.")') &
+              US%RZ_T_to_kg_m2s*fluxes%srunoff(i,j), i+G%HI%idg_offset, j+G%HI%jdg_offset, &
+              G%geoLonT(i,j), G%geoLatT(i,j)
+        call MOM_error(FATAL, "MOM_diabatic_driver: "//trim(mesg)// &
+              " srunoff must be non-negative; check the runoff-to-ocean remapping weights.")
+      endif
+    enddo ; enddo
+  endif
 
   showCallTree = callTree_showQuery()
 
@@ -2071,6 +2090,10 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("layered_diabatic(), MOM_diabatic_driver.F90")
 
+  if (associated(fluxes%srunoff)) call MOM_error(FATAL, &
+    "layered_diabatic: submarine melt (srunoff) coupling requires the ALE algorithm; "//&
+    "it is not supported with the layered (non-ALE) diabatic driver.")
+
   ! set equivalence between the same bits of memory for these arrays
   eaml => eatr ; ebml => ebtr
 
@@ -3412,7 +3435,8 @@ subroutine diabatic_driver_init(Time, G, GV, US, param_file, useALEalgorithm, di
                  "and applied as either incoming or outgoing depending on the sign of the net. "//&
                  "If false, the net incoming fresh water flux is added to the model and "//&
                  "thereafter the net outgoing is removed from the topmost non-vanished "//&
-                 "layers of the updated state.", default=.true.)
+                 "layers of the updated state. This does not apply to submarine melt (srunoff) "//&
+                 "which is handled separately.", default=.true.)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
