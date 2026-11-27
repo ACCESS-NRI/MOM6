@@ -237,6 +237,9 @@ type, public :: ice_ocean_boundary_type
   integer :: xtype                                            !< The type of the exchange - REGRID, REDIST or DIRECT
   type(coupler_2d_bc_type)      :: fluxes                     !< A structure that may contain an array of
                                                               !! named fields used for passive tracer fluxes.
+  type(coupler_2d_bc_type)      :: atm_fields                 !< A structure that may contain an array of
+                                                              !! named atmospheric surface fields that are
+                                                              !! used in the passive tracer flux calculation.
   integer :: wind_stagger = -999                              !< A flag indicating the spatial discretization of
                                                               !! wind stresses.  This flag may be set by the
                                                               !! flux-exchange code, based on what the sea-ice
@@ -1082,6 +1085,8 @@ subroutine apply_flux_adjustments(G, US, CS, Time, fluxes)
   call data_override('OCN', 'sflx_adj', temp_at_h(isc:iec,jsc:jec), Time, override=overrode_h)
 
   if (overrode_h) then ; do j=jsc,jec ; do i=isc,iec
+    fluxes%salt_flux(i,j) = fluxes%salt_flux(i,j) + &
+        US%kg_m2s_to_RZ_T * temp_at_h(i,j)* G%mask2dT(i,j)
     fluxes%salt_flux_added(i,j) = fluxes%salt_flux_added(i,j) + &
         US%kg_m2s_to_RZ_T * temp_at_h(i,j)* G%mask2dT(i,j)
   enddo ; enddo ; endif

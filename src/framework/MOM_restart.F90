@@ -79,6 +79,8 @@ type field_restart
                                 !! is written to a restart file, usually to convert it to MKS or
                                 !! other standard units [a A-1 ~> 1].  When read, the restart field
                                 !! is multiplied by the reciprocal of this factor.
+  logical :: comp_domain_only = .false. !< If .true., this field spans only the computational
+                                !! domain, rather than the data domain as is usual.
 end type field_restart
 
 !> A structure to store information about restart fields that are no longer used
@@ -108,6 +110,9 @@ type, public :: MOM_restart_CS ; private
   logical :: symmetric_checksums    !< If true, do the restart checksums on all the edge points for
                                     !! a non-reentrant grid.  Setting this to true requires that
                                     !! SYMMETRIC_MEMORY_ is defined at compile time.
+  logical :: staggered_checksums_bug !< If true, recover a bug in which the restart checksums of
+                                    !! fields at velocity or corner points are calculated over a
+                                    !! range shifted one point to the west or south with symmetric memory.
   logical :: unsigned_zeros         !< If true, convert any negative zeros that would be written to
                                     !! the restart file into ordinary unsigned zeros.  This does not
                                     !! change answers, but it can be helpful in comparing restart
@@ -207,7 +212,8 @@ subroutine register_restart_field_as_obsolete(field_name, replacement_name, CS)
 end subroutine register_restart_field_as_obsolete
 
 !> Register a 3-d field for restarts, providing the metadata in a structure
-subroutine register_restart_field_ptr3d(f_ptr, var_desc, mandatory, CS, conversion)
+subroutine register_restart_field_ptr3d(f_ptr, var_desc, mandatory, CS, conversion, &
+                                        comp_domain_only)
   real, dimension(:,:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -217,6 +223,9 @@ subroutine register_restart_field_ptr3d(f_ptr, var_desc, mandatory, CS, conversi
   type(MOM_restart_CS),       intent(inout) :: CS     !< MOM restart control struct
   real,             optional, intent(in) :: conversion !< A factor to multiply a restart field by
                                                       !! before it is written [a A-1 ~> 1], 1 by default.
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
 
   if (.not.CS%initialized) call MOM_error(FATAL, "MOM_restart " // &
       "register_restart_field: Module must be initialized before it is used.")
@@ -232,6 +241,8 @@ subroutine register_restart_field_ptr3d(f_ptr, var_desc, mandatory, CS, conversi
   CS%restart_field(CS%novars)%initialized = .false.
   CS%restart_field(CS%novars)%conv = 1.0
   if (present(conversion)) CS%restart_field(CS%novars)%conv = conversion
+  CS%restart_field(CS%novars)%comp_domain_only = .false.
+  if (present(comp_domain_only)) CS%restart_field(CS%novars)%comp_domain_only = comp_domain_only
   call query_vardesc(CS%restart_field(CS%novars)%vars, &
                      name=CS%restart_field(CS%novars)%var_name, &
                      caller="register_restart_field_ptr3d")
@@ -245,7 +256,8 @@ subroutine register_restart_field_ptr3d(f_ptr, var_desc, mandatory, CS, conversi
 end subroutine register_restart_field_ptr3d
 
 !> Register a 4-d field for restarts, providing the metadata in a structure
-subroutine register_restart_field_ptr4d(f_ptr, var_desc, mandatory, CS, conversion)
+subroutine register_restart_field_ptr4d(f_ptr, var_desc, mandatory, CS, conversion, &
+                                        comp_domain_only)
   real, dimension(:,:,:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -255,6 +267,9 @@ subroutine register_restart_field_ptr4d(f_ptr, var_desc, mandatory, CS, conversi
   type(MOM_restart_CS),       intent(inout) :: CS     !< MOM restart control struct
   real,             optional, intent(in) :: conversion !< A factor to multiply a restart field by
                                                       !! before it is written [a A-1 ~> 1], 1 by default.
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
 
   if (.not.CS%initialized) call MOM_error(FATAL, "MOM_restart " // &
       "register_restart_field: Module must be initialized before it is used.")
@@ -270,6 +285,8 @@ subroutine register_restart_field_ptr4d(f_ptr, var_desc, mandatory, CS, conversi
   CS%restart_field(CS%novars)%initialized = .false.
   CS%restart_field(CS%novars)%conv = 1.0
   if (present(conversion)) CS%restart_field(CS%novars)%conv = conversion
+  CS%restart_field(CS%novars)%comp_domain_only = .false.
+  if (present(comp_domain_only)) CS%restart_field(CS%novars)%comp_domain_only = comp_domain_only
   call query_vardesc(CS%restart_field(CS%novars)%vars, &
                      name=CS%restart_field(CS%novars)%var_name, &
                      caller="register_restart_field_ptr4d")
@@ -283,7 +300,8 @@ subroutine register_restart_field_ptr4d(f_ptr, var_desc, mandatory, CS, conversi
 end subroutine register_restart_field_ptr4d
 
 !> Register a 2-d field for restarts, providing the metadata in a structure
-subroutine register_restart_field_ptr2d(f_ptr, var_desc, mandatory, CS, conversion)
+subroutine register_restart_field_ptr2d(f_ptr, var_desc, mandatory, CS, conversion, &
+                                        comp_domain_only)
   real, dimension(:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -293,6 +311,9 @@ subroutine register_restart_field_ptr2d(f_ptr, var_desc, mandatory, CS, conversi
   type(MOM_restart_CS),       intent(inout) :: CS     !< MOM restart control struct
   real,             optional, intent(in) :: conversion !< A factor to multiply a restart field by
                                                       !! before it is written [a A-1 ~> 1], 1 by default.
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
 
   if (.not.CS%initialized) call MOM_error(FATAL, "MOM_restart " // &
       "register_restart_field: Module must be initialized before it is used.")
@@ -308,6 +329,8 @@ subroutine register_restart_field_ptr2d(f_ptr, var_desc, mandatory, CS, conversi
   CS%restart_field(CS%novars)%initialized = .false.
   CS%restart_field(CS%novars)%conv = 1.0
   if (present(conversion)) CS%restart_field(CS%novars)%conv = conversion
+  CS%restart_field(CS%novars)%comp_domain_only = .false.
+  if (present(comp_domain_only)) CS%restart_field(CS%novars)%comp_domain_only = comp_domain_only
   call query_vardesc(CS%restart_field(CS%novars)%vars, &
                      name=CS%restart_field(CS%novars)%var_name, &
                      caller="register_restart_field_ptr2d")
@@ -537,7 +560,7 @@ end subroutine set_conversion_pair
 
 !> Register a 4-d field for restarts, providing the metadata as individual arguments
 subroutine register_restart_field_4d(f_ptr, name, mandatory, CS, longname, units, conversion, &
-                                     hor_grid, z_grid, t_grid, extra_axes)
+                                     hor_grid, z_grid, t_grid, extra_axes, comp_domain_only)
   real, dimension(:,:,:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -552,6 +575,9 @@ subroutine register_restart_field_4d(f_ptr, name, mandatory, CS, longname, units
   character(len=*), optional, intent(in) :: hor_grid  !< variable horizontal staggering, 'h' if absent
   character(len=*), optional, intent(in) :: z_grid    !< variable vertical staggering, 'L' if absent
   character(len=*), optional, intent(in) :: t_grid    !< time description: s, p, or 1, 's' if absent
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
   type(axis_info),  dimension(:), &
                     optional, intent(in) :: extra_axes !< dimensions other than space-time
 
@@ -587,13 +613,13 @@ subroutine register_restart_field_4d(f_ptr, name, mandatory, CS, longname, units
                   z_grid=z_grid, t_grid=t_grid)
   endif
 
-  call register_restart_field_ptr4d(f_ptr, vd, mandatory, CS, conversion)
+  call register_restart_field_ptr4d(f_ptr, vd, mandatory, CS, conversion, comp_domain_only)
 
 end subroutine register_restart_field_4d
 
 !> Register a 3-d field for restarts, providing the metadata as individual arguments
 subroutine register_restart_field_3d(f_ptr, name, mandatory, CS, longname, units, conversion, &
-                                     hor_grid, z_grid, t_grid, extra_axes)
+                                     hor_grid, z_grid, t_grid, extra_axes, comp_domain_only)
   real, dimension(:,:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -608,6 +634,9 @@ subroutine register_restart_field_3d(f_ptr, name, mandatory, CS, longname, units
   character(len=*), optional, intent(in) :: hor_grid  !< variable horizontal staggering, 'h' if absent
   character(len=*), optional, intent(in) :: z_grid    !< variable vertical staggering, 'L' if absent
   character(len=*), optional, intent(in) :: t_grid    !< time description: s, p, or 1, 's' if absent
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
   type(axis_info),  dimension(:), &
                     optional, intent(in) :: extra_axes !< dimensions other than space-time
 
@@ -643,13 +672,13 @@ subroutine register_restart_field_3d(f_ptr, name, mandatory, CS, longname, units
                   z_grid=z_grid, t_grid=t_grid)
   endif
 
-  call register_restart_field_ptr3d(f_ptr, vd, mandatory, CS, conversion)
+  call register_restart_field_ptr3d(f_ptr, vd, mandatory, CS, conversion, comp_domain_only)
 
 end subroutine register_restart_field_3d
 
 !> Register a 2-d field for restarts, providing the metadata as individual arguments
 subroutine register_restart_field_2d(f_ptr, name, mandatory, CS, longname, units, conversion, &
-                                     hor_grid, z_grid, t_grid)
+                                     hor_grid, z_grid, t_grid, comp_domain_only)
   real, dimension(:,:), &
                       target, intent(in) :: f_ptr     !< A pointer to the field to be read or written
                                                       !! in arbitrary rescaled units [A ~> a]
@@ -664,6 +693,9 @@ subroutine register_restart_field_2d(f_ptr, name, mandatory, CS, longname, units
   character(len=*), optional, intent(in) :: hor_grid  !< variable horizontal staggering, 'h' if absent
   character(len=*), optional, intent(in) :: z_grid    !< variable vertical staggering, '1' if absent
   character(len=*), optional, intent(in) :: t_grid    !< time description: s, p, or 1, 's' if absent
+  logical,          optional, intent(in) :: comp_domain_only !< If true, this field spans only
+                                                      !! the computational domain, rather than the
+                                                      !! data domain as is usual.
 
   type(vardesc) :: vd
   character(len=8) :: Zgrid
@@ -679,7 +711,7 @@ subroutine register_restart_field_2d(f_ptr, name, mandatory, CS, longname, units
   vd = var_desc(name, units=units, longname=longname, hor_grid=hor_grid, &
                 z_grid=zgrid, t_grid=t_grid)
 
-  call register_restart_field_ptr2d(f_ptr, vd, mandatory, CS, conversion)
+  call register_restart_field_ptr2d(f_ptr, vd, mandatory, CS, conversion, comp_domain_only)
 
 end subroutine register_restart_field_2d
 
@@ -1710,9 +1742,9 @@ subroutine save_restart(directory, time, G, CS, time_stamped, filename, GV, num_
 
       call query_vardesc(vars(m), position=pos, name=var_name, caller="save_restart")
       if (modulo(turns, 2) == 0) then
-        call get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL)
+        call get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL, CS%restart_field(m)%comp_domain_only)
       else   ! Note that G is always the unrotated grid as it is seen by the driver level.
-        call get_checksum_loop_ranges(G, CS, pos, jsL, jeL, isL, ieL)
+        call get_checksum_loop_ranges(G, CS, pos, jsL, jeL, isL, ieL, CS%restart_field(m)%comp_domain_only)
       endif
       if (verbose) then
         if (pos == CENTER) then
@@ -1731,15 +1763,19 @@ subroutine save_restart(directory, time, G, CS, time_stamped, filename, GV, num_
 
       conv = CS%restart_field(m)%conv
       if (associated(CS%var_ptr3d(m)%p)) then
-        check_val(m-start_var+1,1) = chksum(CS%var_ptr3d(m)%p(isL:ieL,jsL:jeL,:), turns=-turns, unscale=conv)
+        check_val(m-start_var+1,1) = chksum(CS%var_ptr3d(m)%p(isL:ieL,jsL:jeL,:), turns=-turns, &
+                                            unscale=conv, zero_zeros=CS%unsigned_zeros)
       elseif (associated(CS%var_ptr2d(m)%p)) then
-        check_val(m-start_var+1,1) = chksum(CS%var_ptr2d(m)%p(isL:ieL,jsL:jeL), turns=-turns, unscale=conv)
+        check_val(m-start_var+1,1) = chksum(CS%var_ptr2d(m)%p(isL:ieL,jsL:jeL), turns=-turns, &
+                                            unscale=conv, zero_zeros=CS%unsigned_zeros)
       elseif (associated(CS%var_ptr4d(m)%p)) then
-        check_val(m-start_var+1,1) = chksum(CS%var_ptr4d(m)%p(isL:ieL,jsL:jeL,:,:), turns=-turns, unscale=conv)
+        check_val(m-start_var+1,1) = chksum(CS%var_ptr4d(m)%p(isL:ieL,jsL:jeL,:,:), turns=-turns, &
+                                            unscale=conv, zero_zeros=CS%unsigned_zeros)
       elseif (associated(CS%var_ptr1d(m)%p)) then
-        check_val(m-start_var+1,1) = chksum(CS%var_ptr1d(m)%p(:), unscale=conv)
+        check_val(m-start_var+1,1) = chksum(CS%var_ptr1d(m)%p(:), unscale=conv, zero_zeros=CS%unsigned_zeros)
       elseif (associated(CS%var_ptr0d(m)%p)) then
-        check_val(m-start_var+1,1) = chksum(CS%var_ptr0d(m)%p, pelist=(/PE_here()/), unscale=conv)
+        check_val(m-start_var+1,1) = chksum(CS%var_ptr0d(m)%p, pelist=(/PE_here()/), unscale=conv, &
+                                            zero_zeros=CS%unsigned_zeros)
       endif
     enddo
 
@@ -1897,9 +1933,9 @@ subroutine restore_state(filename, directory, day, G, CS)
       if (conv == 0.0) then ; scale = 1.0 ; else ; scale = 1.0 / conv ; endif
 
       if (modulo(CS%turns, 2) == 0) then
-        call get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL)
+        call get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL, CS%restart_field(m)%comp_domain_only)
       else   ! Note that G is always the unrotated grid as it is used during initialization.
-        call get_checksum_loop_ranges(G, CS, pos, jsL, jeL, isL, ieL)
+        call get_checksum_loop_ranges(G, CS, pos, jsL, jeL, isL, ieL, CS%restart_field(m)%comp_domain_only)
       endif
       do i=1, nvar
         call IO_handles(n)%get_field_atts(fields(i), name=varname)
@@ -2101,7 +2137,7 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
   integer :: nf              ! The number of files that have been found so far
   integer :: m, length
   logical :: still_looking   ! If true, the code is still looking for automatically named files
-  logical :: fexists         ! True if a file has been found
+  logical :: fexists, fexists_decomp ! True if a file has been found
   character(len=32) :: filename_appendix = '' ! Filename appendix for ensemble runs
   character(len=80) :: restartname
 
@@ -2167,10 +2203,19 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
       enddo ! while (still_looking) loop
     else
       filepath = trim(directory)//trim(fname)
+      fexists_decomp = .false.
       inquire(file=filepath, exist=fexists)
-      if (.not. fexists) filepath = trim(filepath)//".nc"
+      if (.not.fexists .and. CS%parallel_restartfiles) &
+        fexists_decomp = file_exists(filepath, G%Domain)
 
-      inquire(file=filepath, exist=fexists)
+      ! If not found, try with ".nc" extension
+      if (.not.(fexists .or. fexists_decomp)) then
+        filepath = trim(filepath)//".nc"
+        inquire(file=filepath, exist=fexists)
+        if (.not.fexists .and. CS%parallel_restartfiles) &
+              fexists_decomp = file_exists(filepath, G%Domain)
+      endif
+
       if (fexists) then
         nf = nf + 1
         if (present(IO_handles)) &
@@ -2180,6 +2225,14 @@ function open_restart_units(filename, directory, G, CS, IO_handles, file_paths, 
         if (present(file_paths)) file_paths(nf) = filepath
         if (is_root_pe() .and. (present(IO_handles))) &
           call MOM_error(NOTE, "MOM_restart: MOM run restarted using : "//trim(filepath))
+      elseif (fexists_decomp) then
+        nf = nf + 1
+        if (present(IO_handles)) &
+          call IO_handles(nf)%open(trim(filepath), READONLY_FILE, MOM_domain=G%Domain)
+        if (present(global_files)) global_files(nf) = .false.
+        if (present(file_paths)) file_paths(nf) = filepath
+        if (is_root_pe() .and. present(IO_handles)) &
+            call MOM_error(NOTE, "MOM_restart: MOM run restarted using decomposed fileset: "//trim(filepath))
       else
         if (present(IO_handles)) &
           call MOM_error(WARNING, "MOM_restart: Unable to find restart file : "//trim(filepath))
@@ -2217,13 +2270,18 @@ end function get_num_restart_files
 
 
 !> Initialize this module and set up a restart control structure.
-subroutine restart_init(param_file, CS, restart_root)
+subroutine restart_init(param_file, CS, restart_root, turns)
   type(param_file_type), intent(in) :: param_file !< A structure to parse for run-time parameters
   type(MOM_restart_CS),  pointer    :: CS !< A pointer to a MOM_restart_CS object that is allocated here
   character(len=*), optional, &
                          intent(in) :: restart_root !< A filename root that overrides the value
                                           !! set by RESTARTFILE to enable the use of this module by
                                           !! other components than MOM.
+  integer,          optional, &
+                         intent(in) :: turns !< The number of counterclockwise quarter-turn index
+                                          !! rotations from the grid in the restart file to the
+                                          !! grid of the fields that will be registered,
+                                          !! overriding the value set by INDEX_TURNS.
 
   logical :: rotate_index
 
@@ -2231,6 +2289,8 @@ subroutine restart_init(param_file, CS, restart_root)
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_restart"   ! This module's name.
   logical :: all_default   ! If true, all parameters are using their default values.
+  logical :: enable_bugs   ! If true, the defaults for recently added bug-fix flags are set to
+                           ! recreate the bugs, or if false bugs are only used if actively selected.
 
   if (associated(CS)) then
     call MOM_error(WARNING, "restart_init called with an associated control structure.")
@@ -2250,8 +2310,13 @@ subroutine restart_init(param_file, CS, restart_root)
                  default=.false., do_not_log=.true.)
   call get_param(param_file, mdl, "RESTART_UNSIGNED_ZEROS", CS%unsigned_zeros, &
                  default=.false., do_not_log=.true.)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
+  call get_param(param_file, mdl, "RESTART_STAGGERED_CHECKSUMS_BUG", CS%staggered_checksums_bug, &
+                 default=enable_bugs, do_not_log=.true.)
   all_default = ((.not.CS%parallel_restartfiles) .and. (CS%max_fields == 100) .and. &
-                 (CS%checksum_required) .and. (.not.CS%symmetric_checksums) .and. (.not.CS%unsigned_zeros))
+                 (CS%checksum_required) .and. (.not.CS%symmetric_checksums) .and. &
+                 (.not.CS%unsigned_zeros) .and. (CS%staggered_checksums_bug .eqv. enable_bugs))
   if (.not.present(restart_root)) then
     call get_param(param_file, mdl, "RESTARTFILE", CS%restartfile, &
                    default="MOM.res", do_not_log=.true.)
@@ -2292,6 +2357,13 @@ subroutine restart_init(param_file, CS, restart_root)
                  "If true, do the restart checksums on all the edge points for a non-reentrant "//&
                  "grid.  This requires that SYMMETRIC_MEMORY_ is defined at compile time.", &
                  default=.false.)
+  call get_param(param_file, mdl, "RESTART_STAGGERED_CHECKSUMS_BUG", CS%staggered_checksums_bug, &
+                 "If true, recover a bug in which the restart checksums of fields at velocity "//&
+                 "or corner points are calculated over a range that is shifted one point to the "//&
+                 "west or south with symmetric memory.  Setting this to false changes the "//&
+                 "checksums written into the restart files, so restarts written with it true "//&
+                 "will fail their checksum test unless RESTART_CHECKSUMS_REQUIRED is also false.", &
+                 default=enable_bugs)
   call get_param(param_file, mdl, "RESTART_UNSIGNED_ZEROS", CS%unsigned_zeros, &
                  "If true, convert any negative zeros that would be written to the restart file "//&
                  "into ordinary unsigned zeros.  This does not change answers, but it can be "//&
@@ -2311,6 +2383,7 @@ subroutine restart_init(param_file, CS, restart_root)
     call get_param(param_file, mdl, "INDEX_TURNS", CS%turns, &
         default=1, do_not_log=.true.)
   endif
+  if (present(turns)) CS%turns = turns
 
   allocate(CS%restart_field(CS%max_fields))
   allocate(CS%restart_obsolete(CS%max_fields))
@@ -2396,7 +2469,7 @@ subroutine restart_error(CS)
 end subroutine restart_error
 
 !> Return bounds for computing checksums to store in restart files
-subroutine get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL)
+subroutine get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL, comp_domain_only)
   type(ocean_grid_type), intent(in)  :: G   !< The ocean's grid structure
   type(MOM_restart_CS),  intent(in)  :: CS  !< MOM restart control structure
   integer,               intent(in)  :: pos !< A coded integer indicating the horizontal staggering
@@ -2405,14 +2478,30 @@ subroutine get_checksum_loop_ranges(G, CS, pos, isL, ieL, jsL, jeL)
   integer,               intent(out) :: ieL !< i-end for checksum
   integer,               intent(out) :: jsL !< j-start for checksum
   integer,               intent(out) :: jeL !< j-end for checksum
+  logical,               intent(in)  :: comp_domain_only !< If true, the registered field spans
+                                            !! only the computational domain, rather than the data
+                                            !! domain as is usual
 
-  ! Regular non-symmetric compute domain
-  isL = G%isc-G%isd+1
-  ieL = G%iec-G%isd+1
-  jsL = G%jsc-G%jsd+1
-  jeL = G%jec-G%jsd+1
+  ! Local variables
+  integer :: i_lower, j_lower ! The grid i- and j-indices of the field's first element
 
-  ! Expand range east or south for symmetric arrays
+  ! Fields at velocity or corner points start an extra column/row west/south if symmetric.
+  if (comp_domain_only) then
+    ! This field has no halos, so it starts at the first computational point.
+    i_lower = G%isc ; if ((pos == EAST_FACE) .or. (pos == CORNER)) i_lower = G%IscB
+    j_lower = G%jsc ; if ((pos == NORTH_FACE) .or. (pos == CORNER)) j_lower = G%JscB
+  elseif (CS%staggered_checksums_bug) then
+    i_lower = G%isd ; j_lower = G%jsd
+  else
+    i_lower = G%isd ; if ((pos == EAST_FACE) .or. (pos == CORNER)) i_lower = G%IsdB
+    j_lower = G%jsd ; if ((pos == NORTH_FACE) .or. (pos == CORNER)) j_lower = G%JsdB
+  endif
+
+  ! Computational domain bounds, omitting the faces shared with the neighboring PEs.
+  isL = G%isc - i_lower + 1 ; ieL = G%iec - i_lower + 1
+  jsL = G%jsc - j_lower + 1 ; jeL = G%jec - j_lower + 1
+
+  ! Expand range west or south for symmetric arrays
   if (CS%symmetric_checksums) then
     if (.not.G%symmetric) call MOM_error(FATAL, &
         "Setting SYMMETRIC_RESTART_CHECKSUMS to true only works with symmetric memory allocation, "//&
