@@ -6,8 +6,6 @@
 !! interfaces with additional diagnostic capabilities.
 module MOM_IS_diag_mediator
 
-! This file is part of MOM6. See LICENSE.md for the license.
-
 use MOM_checksums,          only : chksum0, hchksum, uchksum, vchksum, Bchksum
 use MOM_coms,               only : PE_here
 use MOM_cpu_clock,          only : cpu_clock_id, cpu_clock_begin, cpu_clock_end

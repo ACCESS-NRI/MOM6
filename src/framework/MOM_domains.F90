@@ -217,6 +217,10 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
   call get_param(param_file, mdl, "NONBLOCKING_UPDATES", nonblocking, &
                  "If true, non-blocking halo updates may be used.", &
                  default=.false., layoutParam=.true.)
+#ifdef MOM6_GPU_OFFLOAD
+  if (nonblocking) call MOM_error(FATAL, "MOM_domains_init: NONBLOCKING_UPDATES = True is not supported "//&
+                 "in a GPU offload build because the nonblocking halo updates are not ported to the GPU.")
+#endif
   call get_param(param_file, mdl, "THIN_HALO_UPDATES", thin_halos, &
                  "If true, optional arguments may be used to specify the width of the "//&
                  "halos that are updated with each call.", &

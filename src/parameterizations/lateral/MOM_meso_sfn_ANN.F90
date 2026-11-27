@@ -97,6 +97,8 @@ subroutine meso_sfn_ANN_compute(h, e, sfn_u, sfn_v, G, GV, US, tv, CS, dt, u, v)
   ! Local variables
   integer :: i, j, k, is, ie, js, je, nz, shift, stencil_points, ii, jj
   integer :: nij, m
+  integer :: niblock_slope, njblock_slope, halo_slope
+    ! Block and halo sizes for calc_isoneutral_slopes
 
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: drdx_u !< Zonal density gradient at u [R L-1 ~> kg m-4]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: drdz_u !< Vertical density gradient at u [R Z-1 ~> kg m-4]
@@ -193,8 +195,14 @@ subroutine meso_sfn_ANN_compute(h, e, sfn_u, sfn_v, G, GV, US, tv, CS, dt, u, v)
   drdy_c(:,:,:) = 0.0
   ! Compute rho gradients
   if (use_EOS) then
-    call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, use_stanley, slope_x, slope_y, &
-                              drdx_u=drdx_u, drdy_v=drdy_v, drdz_u=drdz_u, drdz_v=drdz_v, halo=3)
+    ! TODO: Confirm block sizes with Utheri
+    halo_slope = 3
+    niblock_slope = ie - is + 2 * halo_slope + 1
+    njblock_slope = je - js + 2 * halo_slope + 1
+    call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, &
+        use_stanley, slope_x, slope_y, niblock_slope, njblock_slope, 1, &
+        drdx_u=drdx_u, drdy_v=drdy_v, drdz_u=drdz_u, drdz_v=drdz_v, &
+        halo=halo_slope)
   else
     call calc_layered_density_gradients(G, GV, US, h, e, drdx_u, drdy_v, drdz_u, drdz_v, halo=3, &
                                         min_dist_from_boundary=CS%min_dist_from_boundary)

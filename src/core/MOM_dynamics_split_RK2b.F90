@@ -64,7 +64,7 @@ use MOM_open_boundary,         only : open_boundary_test_extern_h, update_OBC_ra
 use MOM_open_boundary,         only : update_segment_thickness_reservoirs
 use MOM_PressureForce,         only : PressureForce, PressureForce_CS
 use MOM_PressureForce,         only : PressureForce_init
-use MOM_set_visc,              only : set_viscous_ML, set_visc_CS
+use MOM_set_visc,              only : set_viscous_ML, viscous_ML_block_sizes, set_visc_CS
 use MOM_thickness_diffuse,     only : thickness_diffuse_CS
 use MOM_self_attr_load,        only : SAL_CS
 use MOM_self_attr_load,        only : SAL_init, SAL_end
@@ -405,6 +405,7 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
   logical :: showCallTree, sym
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: nIIB, nJJB  ! Block sizes for the viscous mixed layer solver [nondim].
   integer :: cont_stencil, obc_stencil
   integer :: cor_stencil
 
@@ -574,7 +575,8 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
 ! diffu = horizontal viscosity terms (u_av)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_av, v_av, h_av, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, &
-                            tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, ADp=CS%AD_pred)
+                            tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, &
+                            TD=thickness_diffuse_CSp, ADp=CS%AD_pred)
   call cpu_clock_end(id_clock_horvisc)
   if (showCallTree) call callTree_wayPoint("done with predictor horizontal_viscosity (step_MOM_dyn_split_RK2b)")
 
@@ -618,7 +620,9 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
   enddo
 
   call enable_averages(dt, Time_local, CS%diag)
-  call set_viscous_ML(u_av, v_av, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
+  call viscous_ML_block_sizes(CS%set_visc_CSp, G, nIIB, nJJB)
+  call set_viscous_ML(u_av, v_av, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp, &
+      nIIB, nJJB)
   call disable_averaging(CS%diag)
 
   if (CS%debug) then
@@ -883,7 +887,8 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
 ! diffu = horizontal viscosity terms (u_av)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_av, v_av, h_av, uh, vh, CS%diffu, CS%diffv, MEKE, Varmix, G, GV, US, CS%hor_visc, &
-                            tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, ADp=CS%ADp)
+                            tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, &
+                            TD=thickness_diffuse_CSp, ADp=CS%ADp)
   call cpu_clock_end(id_clock_horvisc)
   if (showCallTree) call callTree_wayPoint("done with horizontal_viscosity (step_MOM_dyn_split_RK2b)")
 
@@ -1493,6 +1498,8 @@ subroutine initialize_dyn_split_RK2b(u, v, h, tv, uh, vh, eta, Time, G, GV, US, 
   call PressureForce_init(Time, G, GV, US, param_file, diag, CS%PressureForce_CSp, CS%ADp, &
                           CS%SAL_CSp, CS%tides_CSp)
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc, ADp=CS%ADp)
+
+  allocate(CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp)
   CS%set_visc_CSp => set_visc

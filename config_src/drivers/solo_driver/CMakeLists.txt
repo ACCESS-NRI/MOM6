@@ -13,6 +13,10 @@ target_sources(MOM6 PRIVATE
   MOM_driver.F90
 )
 
+if(MOM6_OPENMP_OFFLOAD)
+  target_compile_definitions(MOM6 PRIVATE MOM6_GPU_OFFLOAD)
+endif()
+
 set_target_properties(MOM6 PROPERTIES
   LINKER_LANGUAGE Fortran
   OUTPUT_NAME mom6-solo

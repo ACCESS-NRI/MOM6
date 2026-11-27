@@ -6,9 +6,9 @@
 module coord_hycom
 
 use MOM_error_handler, only : MOM_error, is_root_pe, FATAL, NOTE
-use MOM_variables,     only : ocean_grid_type, thermo_var_ptrs
 use MOM_EOS,           only : EOS_type, calculate_density
 use MOM_remapping,     only : remapping_CS, remapping_core_h
+use MOM_variables,     only : ocean_grid_type
 use regrid_interp,     only : interp_CS_type, build_and_interpolate_grid, regridding_set_ppolys
 use regrid_interp,     only : DEGREE_MAX
 

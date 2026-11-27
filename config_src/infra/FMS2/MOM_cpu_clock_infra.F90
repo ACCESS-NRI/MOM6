@@ -18,6 +18,9 @@ use mpp_mod, only : MPP_CLOCK_MODULE => CLOCK_MODULE
 use mpp_mod, only : MPP_CLOCK_ROUTINE => CLOCK_ROUTINE
 use mpp_mod, only : MPP_CLOCK_LOOP => CLOCK_LOOP
 use mpp_mod, only : MPP_CLOCK_INFRA => CLOCK_INFRA
+#ifdef MOM6_GPU_OFFLOAD
+use nvtx, only : nvtxRangeId, nvtxRangeStart, nvtxRangeEnd
+#endif
 
 implicit none ; private
 
@@ -54,6 +57,18 @@ integer, parameter :: CLOCK_LOOP = MPP_CLOCK_LOOP
 !! infrastructure operation, e.g. a halo update
 integer, parameter :: CLOCK_INFRA = MPP_CLOCK_INFRA
 
+#ifdef MOM6_GPU_OFFLOAD
+! In the GPU offload build, each clock also marks an NVTX range, so that profilers such as
+! Nsight Systems show the clocks on the timeline of the device activity.
+
+!> The largest clock handle that gets an NVTX range (FMS allows 400 clocks)
+integer, parameter :: max_nvtx_clocks = 1000
+!> The names of the clocks, indexed by their handles
+character(len=64) :: nvtx_name(max_nvtx_clocks) = ''
+!> The NVTX ranges of the clocks that are on, indexed by their handles
+type(nvtxRangeId) :: nvtx_range(max_nvtx_clocks)
+#endif
+
 contains
 
 !> Turns on clock with handle "id"
@@ -61,6 +76,10 @@ subroutine cpu_clock_begin(id)
   integer, intent(in) :: id !< Handle for clock
 
   call mpp_clock_begin(id)
+#ifdef MOM6_GPU_OFFLOAD
+  ! Start/end ranges rather than push/pop, since the clocks need not be nested.
+  if ((id > 0) .and. (id <= max_nvtx_clocks)) nvtx_range(id) = nvtxRangeStart(trim(nvtx_name(id)))
+#endif
 
 end subroutine cpu_clock_begin
 
@@ -68,6 +87,9 @@ end subroutine cpu_clock_begin
 subroutine cpu_clock_end(id)
   integer, intent(in) :: id !< Handle for clock
 
+#ifdef MOM6_GPU_OFFLOAD
+  if ((id > 0) .and. (id <= max_nvtx_clocks)) call nvtxRangeEnd(nvtx_range(id))
+#endif
   call mpp_clock_end(id)
 
 end subroutine cpu_clock_end
@@ -96,6 +118,10 @@ integer function cpu_clock_id(name, sync, grain)
   endif
 
   cpu_clock_id = mpp_clock_id(name, flags=clock_flags, grain=grain)
+#ifdef MOM6_GPU_OFFLOAD
+  ! Clocks finer than the clock_grain setting of FMS get the handle 0 and are never on.
+  if ((cpu_clock_id > 0) .and. (cpu_clock_id <= max_nvtx_clocks)) nvtx_name(cpu_clock_id) = name
+#endif
 end function cpu_clock_id
 
 end module MOM_cpu_clock_infra
